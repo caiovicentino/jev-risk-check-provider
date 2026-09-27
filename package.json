@@ -16,6 +16,8 @@
     "eval:scale": "tsx eval/scale.ts --per-category 60 --concurrency 10 --stability 24 --stability-repeats 5",
     "eval:redteam": "tsx eval/redteam.ts --count 1500 --concurrency 12",
     "eval:benchmark": "tsx eval/benchmark-judge.ts",
+    "eval:suite": "tsx eval/suite.ts",
+    "eval:suite:quick": "tsx eval/suite.ts --quick",
     "demo": "tsx demo/run.ts",
     "board": "tsx eval/scoreboard.ts",
     "verify": "tsx eval/verify.ts"

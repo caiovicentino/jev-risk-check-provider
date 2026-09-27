@@ -23,7 +23,7 @@ if (!typesafeKey && !gatewayKey) {
   process.exit(1);
 }
 
-type ScaleEntry = {
+export type ScaleEntry = {
   run_id: string;
   phase: "main" | "stability";
   case_id: string;
@@ -152,12 +152,12 @@ async function main(): Promise<void> {
     return entry;
   });
 
-  const report = aggregate(entries, corpus, stabilityCases, runId, typesafeKey ? "typesafe-direct" : "vercel-ai-gateway", PER_CATEGORY, CONCURRENCY, STABILITY_COUNT, STABILITY_REPEATS, SEED);
+  const report = aggregateScale(entries, corpus, stabilityCases, runId, typesafeKey ? "typesafe-direct" : "vercel-ai-gateway", PER_CATEGORY, CONCURRENCY, STABILITY_COUNT, STABILITY_REPEATS, SEED);
   writeFileSync(`${EVAL_EVIDENCE_DIR}/scale-report.json`, JSON.stringify(report, null, 2));
   printReport(report);
 }
 
-function aggregate(entries: ScaleEntry[], corpus: ShadowCase[], _stabilityCases: ShadowCase[], runId: string, backend: string, perCategory: number, concurrency: number, stabilityCount: number, stabilityRepeats: number, seed: number): ScaleReport {
+export function aggregateScale(entries: ScaleEntry[], corpus: ShadowCase[], _stabilityCases: ShadowCase[], runId: string, backend: string, perCategory: number, concurrency: number, stabilityCount: number, stabilityRepeats: number, seed: number): ScaleReport {
   const mainEntries = entries.filter((e) => e.phase === "main");
   const errors = entries.filter((e) => !e.checked).length;
   const inputTokens = entries.reduce((acc, e) => acc + (e.input_tokens ?? 0), 0);

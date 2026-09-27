@@ -23,7 +23,7 @@ if (!typesafeKey && !gatewayKey) {
 
 type CaseLike = { id: string; expected: "safe" | "risky"; request: RiskCheckRequest };
 
-function sampleCases(): CaseLike[] {
+export function sampleCases(): CaseLike[] {
   const scale = generateCorpus({ perCategory: 30, seed: 424242 });
   const redteam = generateRedTeamCorpus(400, 999888)
     .filter((c) => c.expected !== "ambiguous")
@@ -76,7 +76,7 @@ type JudgeResult = {
   latencyP95: number;
 };
 
-async function benchJev(cases: CaseLike[]): Promise<JudgeResult> {
+export async function benchJev(cases: CaseLike[]): Promise<JudgeResult> {
   const backend = typesafeKey ? new JevClient({ apiKey: typesafeKey }) : new GatewayJevClient();
   const provider = buildProvider(backend);
   let fn = 0;
@@ -109,7 +109,7 @@ async function benchJev(cases: CaseLike[]): Promise<JudgeResult> {
   };
 }
 
-async function benchChatJudge(cases: CaseLike[]): Promise<JudgeResult> {
+export async function benchChatJudge(cases: CaseLike[]): Promise<JudgeResult> {
   let fn = 0;
   let fp = 0;
   let errors = 0;
@@ -155,7 +155,7 @@ async function benchChatJudge(cases: CaseLike[]): Promise<JudgeResult> {
   };
 }
 
-async function benchBaseline(cases: CaseLike[]): Promise<JudgeResult> {
+export async function benchBaseline(cases: CaseLike[]): Promise<JudgeResult> {
   let fn = 0;
   let fp = 0;
   for (const c of cases) {
