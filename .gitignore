@@ -5,3 +5,4 @@ dist/
 eval/evidence/
 *.log
 .DS_Store
+!eval/evidence/*-report.json
