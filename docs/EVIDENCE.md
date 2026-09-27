@@ -45,3 +45,16 @@ All numbers below come from a single `npm run eval:suite` execution (2026-09-27,
 - `eval/evidence/shadow-log.jsonl`, `scale-log.jsonl`, `redteam-log.jsonl` — raw per-call logs (append-only across runs)
 - `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md` — methodology and iteration stories
 - `docs/DISTRIBUTION.md` — ready-to-post drafts that reference these numbers
+
+## Meta-eval: JEV as independent judge (`npm run eval:audit`)
+
+The provider's own model evaluates its verdicts through two differently-framed arms — this measures inter-rater reliability across framings and anchoring resistance, not just accuracy:
+
+| Arm | Design | Result (167 cases, 3 calls each) |
+|---|---|---|
+| Provider | full question-set battery | 100% vs authored labels |
+| **Blind judge** | single independent classification framing, verdict NOT shown | **98.7%** accuracy, 10 honest `uncertain` answers, 0 errors |
+| Blind ↔ provider agreement | two independent framings of the same judgment | **98.8%** (2 disagreements, both at documented boundaries) |
+| **Anchored judge** | sees the verdict, judges whether it is correct | **100% agreement** after probability gating (P(wrong) ≥ 0.6); raw argmax showed 5.2% false-flag rate from sampling noise |
+
+Two transferable findings: (1) the AI SDK's `evaluate` validation requires `choice` = argmax of probabilities and JEV occasionally samples out-of-sync distributions — production adapters must tolerate this (our provider already fails closed); (2) judge "flags" must be probability-gated, not argmax-read — a 74/25 split would otherwise be reported as a disagreement. Both are exactly the failure modes the LLM-as-judge literature predicts (position/order bias, sampling instability), handled here with typed probabilities rather than prompt patching.
