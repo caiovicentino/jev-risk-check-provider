@@ -1,0 +1,16 @@
+name = "jev-risk-check-provider"
+main = "worker.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+PROVIDER_HOST = "risk-check.paysol.dev"
+
+# Secrets to set before deploy (do NOT commit):
+#   wrangler secret put AI_GATEWAY_API_KEY      (or TYPESAFE_API_KEY)
+#   wrangler secret put JEV_ATTEST_PRIVATE_KEY  (PEM, sec1 EC P-256 — keep the JWKS stable)
+#
+# did:web identity path:
+#   1. deploy with PROVIDER_HOST = <your-domain>
+#   2. route /.well-known/jwks.json on that domain (worker route or reverse proxy)
+#   3. the provider DID becomes did:web:<your-domain>, verifiable by any resource server
+#   4. publish the discovery doc URL in your x402 PaymentRequired extensions

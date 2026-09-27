@@ -1,0 +1,31 @@
+{
+  "name": "jev-risk-check-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "shadow": "tsx eval/shadow.ts",
+    "eval:synthetic": "tsx eval/run.ts",
+    "eval:scale": "tsx eval/scale.ts --per-category 60 --concurrency 10 --stability 24 --stability-repeats 5",
+    "eval:redteam": "tsx eval/redteam.ts --count 1500 --concurrency 12",
+    "eval:benchmark": "tsx eval/benchmark-judge.ts",
+    "demo": "tsx demo/run.ts",
+    "board": "tsx eval/scoreboard.ts",
+    "verify": "tsx eval/verify.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "ai": "^7.0.118"
+  }
+}

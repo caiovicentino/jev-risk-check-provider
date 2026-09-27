@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.*
+eval/evidence/
+*.log
+.DS_Store
