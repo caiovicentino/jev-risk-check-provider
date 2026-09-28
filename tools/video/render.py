@@ -10,6 +10,7 @@ FONTS = os.path.join(ROOT, "fonts")
 OUT = ROOT
 W, H = 1280, 720
 FPS = 30
+CUR_DUR = 8.0
 
 PAPER = (252, 252, 250)
 INK = (22, 24, 29)
@@ -57,30 +58,39 @@ def fade_in(d, t, dur):
 
 def anim_title(kicker, title_lines, sub):
     def draw(t):
+        dur = globals()['CUR_DUR']
         img, d = base_canvas()
-        kt = clamp01(t / 0.12)
-        d.text((60, 120 + (1 - kt) * 14), kicker.upper(), font=font_mono(13), fill=mix(PAPER, FAINT, kt))
+        progress_bar(d, t)
+        kt = clamp01(t * dur / 0.7)
+        d.text((60, 120 + (1 - ease_out(kt)) * 14), kicker.upper(), font=font_mono(13), fill=mix(PAPER, FAINT, kt))
         for i, line in enumerate(title_lines):
-            lt = clamp01((t - 0.14 - i * 0.10) / 0.22)
+            lt = clamp01((t * dur - 0.9 - i * 0.8) / 1.1)
             if lt <= 0: continue
             e = ease_out(lt)
             d.text((60, 168 + i * 58 + (1 - e) * 22), line, font=font_sans(46), fill=mix(PAPER, INK, e))
         if sub:
-            st = clamp01((t - 0.14 - len(title_lines) * 0.10) / 0.25)
-            if st > 0:
-                yy = 170 + len(title_lines) * 58 + 16
+            sub_parts = textwrap.wrap(sub, width=62)
+            sub_dur = max(1.5, dur * 0.45)
+            sub_t0 = 0.9 + len(title_lines) * 0.8
+            for j, part in enumerate(sub_parts):
+                st = clamp01((t * dur - sub_t0 - j * 0.35) / 0.8)
+                if st <= 0: continue
                 e = ease_out(st)
-                for j, part in enumerate(textwrap.wrap(sub, width=62)):
-                    if j / max(1, len(textwrap.wrap(sub, width=62))) > st: break
-                    d.text((60, yy), part, font=font_sans(20), fill=mix(PAPER, MUTED, e))
-                    yy += 30
+                d.text((60, 170 + len(title_lines) * 58 + 16 + j * 30), part, font=font_sans(20), fill=mix(PAPER, MUTED, e))
         return img
     return draw
 
+def progress_bar(d, t, dark=False):
+    col = LINE if not dark else (38, 42, 52)
+    d.line([(60, 78), (W - 60, 78)], fill=col, width=1)
+    d.line([(60, 78), (60 + (W - 120) * t, 78)], fill=GREEN if not dark else TERM_ACCENT, width=2)
+
 def anim_section(no, title, items, cols=2):
     def draw(t):
+        dur = globals()['CUR_DUR']
         img, d = base_canvas()
-        e0 = ease_out(clamp01(t / 0.15))
+        progress_bar(d, t)
+        e0 = ease_out(clamp01(t * dur / 0.8))
         d.text((60, 110), no, font=font_mono(16), fill=mix(PAPER, FAINT, e0))
         d.text((96, 104), title, font=font_sans(34), fill=mix(PAPER, INK, e0))
         d.line([(60, 170), (60 + (W - 120) * e0, 170)], fill=LINE, width=1)
@@ -89,7 +99,8 @@ def anim_section(no, title, items, cols=2):
         row_h = (H - 250) // max(1, rows)
         wrap_w = max(34, min(96, col_w // 8))
         for i, (h, body) in enumerate(items):
-            it = clamp01((t - 0.2 - i * 0.09) / 0.22)
+            span = max(0.5, dur * 0.55 / max(1, len(items)))
+            it = clamp01((t * dur - 0.8 - i * span) / min(1.0, span))
             if it <= 0: continue
             e = ease_out(it)
             cx = 60 + (i % cols) * col_w
@@ -106,15 +117,18 @@ def anim_section(no, title, items, cols=2):
 
 def anim_metrics(rows, note=None):
     def draw(t):
+        dur = globals()['CUR_DUR']
         img, d = base_canvas()
-        e0 = ease_out(clamp01(t / 0.15))
+        progress_bar(d, t)
+        e0 = ease_out(clamp01(t * dur / 0.8))
         d.text((60, 110), "03", font=font_mono(16), fill=mix(PAPER, FAINT, e0))
         d.text((96, 104), "Evidence, not claims", font=font_sans(34), fill=mix(PAPER, INK, e0))
         d.line([(60, 170), (60 + (W - 120) * e0, 170)], fill=LINE, width=1)
         x = 60
         colw = (W - 120) // len(rows)
         for i, (big, label) in enumerate(rows):
-            it = clamp01((t - 0.18 - i * 0.06) / 0.5)
+            span = max(0.6, (dur * 0.6) / max(1, len(rows)))
+            it = clamp01((t * dur - 0.7 - i * span) / min(1.4, span))
             if it <= 0: continue
             cx = x + i * colw
             num = re.match(r"^([^0-9]*)([0-9][0-9.,/]*)", big)
@@ -146,25 +160,26 @@ def anim_metrics(rows, note=None):
             if i < len(rows) - 1:
                 d.line([(cx + colw - 12, 200), (cx + colw - 12, 320)], fill=LINE, width=1)
         if note:
-            e = ease_out(clamp01((t - 0.6) / 0.3))
-            yy = 380
-            for j, part in enumerate(textwrap.wrap(note, width=80)):
-                if j / len(textwrap.wrap(note, width=80)) > e: break
-                d.text((60, yy), part, font=font_sans(15), fill=FAINT)
-                yy += 24
+            parts = textwrap.wrap(note, width=80)
+            for j, part in enumerate(parts):
+                e = ease_out(clamp01((t * dur - 1.0 - j * 0.45) / 0.8))
+                if e <= 0: continue
+                d.text((60, 380 + j * 24), part, font=font_sans(15), fill=mix(PAPER, FAINT, e))
         return img
     return draw
 
 def anim_code(lines, header="Integration"):
     def draw(t):
+        dur = globals()['CUR_DUR']
         img, d = base_canvas()
-        e0 = ease_out(clamp01(t / 0.15))
+        progress_bar(d, t)
+        e0 = ease_out(clamp01(t * dur / 0.8))
         d.text((60, 110), "04", font=font_mono(16), fill=mix(PAPER, FAINT, e0))
         d.text((96, 104), header, font=font_sans(34), fill=mix(PAPER, INK, e0))
         box_y = 176
         d.rounded_rectangle([(60, box_y), (W - 60, box_y + 430)], radius=4, fill=(247, 247, 243), outline=LINE, width=1)
         y = box_y + 22
-        reveal = clamp01(t / 0.75) * len(lines)
+        reveal = clamp01(t * dur / max(2.0, dur * 0.8)) * len(lines)
         for k, ln in enumerate(lines):
             if k >= reveal: break
             frac = clamp01(reveal - k)
@@ -179,28 +194,35 @@ def anim_code(lines, header="Integration"):
         return img
     return draw
 
-def anim_terminal(lines, note=None, reveal_span=0.75):
+def anim_terminal(lines, note=None):
     def draw(t):
+        dur = globals()['CUR_DUR']
         img = Image.new("RGB", (W, H), (18, 20, 26))
         d = ImageDraw.Draw(img)
         d.rounded_rectangle([(40, 30), (W - 40, H - 60)], radius=8, fill=TERM_BG)
+        progress_bar(d, t, dark=True)
         for i, cc in enumerate([(255, 95, 86), (255, 189, 46), (39, 201, 63)]):
             d.ellipse([(58 + i * 22, 46), (70 + i * 22, 58)], fill=cc)
         d.text((130, 44), "x402check — live demo", font=font_mono_m(14), fill=TERM_DIM)
         y = 92
-        reveal = clamp01(t / reveal_span) * len(lines)
+        t_sec = t * dur
+        span = max(2.0, dur * 0.86)
+        step = span / max(1, len(lines))
+        reveal = clamp01(t_sec / span) * len(lines)
         for k, (ln, col) in enumerate(lines):
             if k >= reveal: break
-            frac = clamp01(reveal - k)
-            shown = ln if frac >= 1 else ln[: int(len(ln) * max(0.2, frac))]
+            frac = clamp01((reveal - k))
+            shown = ln if frac >= 1 else ln[: max(2, int(len(ln) * frac))]
             d.text((70, y), shown, font=font_mono(16), fill=col)
             y += 27
             if frac < 1:
                 cx = 70 + d.textlength(shown, font=font_mono(16))
-                d.rectangle([(cx + 3, y - 22), (cx + 14, y - 6)], fill=TERM_ACCENT)
+                blink = (int(t_sec * 2.6) % 2 == 0)
+                if blink:
+                    d.rectangle([(cx + 3, y - 22), (cx + 14, y - 6)], fill=TERM_ACCENT)
                 break
-        if note and t > 0.92:
-            e = clamp01((t - 0.92) / 0.08)
+        if note and t > 0.9:
+            e = clamp01((t - 0.9) / 0.08)
             d.rounded_rectangle([(40, H - 52), (W - 40, H - 12)], radius=4, fill=mix(TERM_BG, (30, 33, 42), e))
             d.text((64, H - 44), note, font=font_mono_m(15), fill=mix(TERM_BG, TERM_ACCENT, e))
         return img
@@ -348,6 +370,7 @@ def build_video(name, segments):
             adur = float(probe.stdout.strip()) + 0.5
         else:
             adur = seg.get("dur", 4)
+        globals()["CUR_DUR"] = adur
         dark = seg.get("bg") is not None
         capped = with_captions(seg["draw"], narration, adur)
         segs.append(seg_from_draw(capped, adur, name, idx, bg=seg.get("bg") or PAPER))

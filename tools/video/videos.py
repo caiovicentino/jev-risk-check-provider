@@ -125,7 +125,7 @@ def f_demo():
         (15, 20, "Scenario C: the other direction — the one protecting the agent's own funds. The counterparty is jup1ter-audit-attest dot click. Note the digit-for-letter substitution. The agent-side gate scores the counterparty: eight, critical. And the agent refuses to pay before signing anything."),
     ]
     for start, end, vo in chunks:
-        segs.append(seg(anim_terminal(lines[start:end], reveal_span=0.8), vo))
+        segs.append(seg(anim_terminal(lines[start:end]), vo))
     segs.append(seg(anim_metrics([
         ("53/53", "production: 53 cases, all correct against the live endpoint"),
         ("20/20", "security probes: 100% pass"),
