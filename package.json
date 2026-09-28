@@ -26,10 +26,13 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@x402/core": "^2.27.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@x402/evm": "^2.27.0",
+    "@x402/svm": "^2.27.0",
     "ai": "^7.0.118"
   }
 }
