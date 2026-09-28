@@ -1,6 +1,6 @@
 import { discoveryDocument, Provider } from "./provider.js";
 import { jwksDocument } from "./jws.js";
-import { landingPage } from "./landing.js";
+import { landingPage, OG_PNG_B64 } from "./landing.js";
 import type { RiskCheckRequest } from "./types.js";
 
 const MAX_BATCH = 25;
@@ -125,6 +125,12 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
         return new Response(landingPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
       return json(200, discoveryDocument(deps.provider.host));
+    }
+    if (req.method === "GET" && path === "/og.png") {
+      return new Response(Uint8Array.from(atob(OG_PNG_B64), (ch) => ch.charCodeAt(0)), {
+        status: 200,
+        headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
+      });
     }
     if (req.method === "GET" && path === "/healthz") {
       return json(200, { ok: true });
