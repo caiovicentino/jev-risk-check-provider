@@ -3,156 +3,243 @@ const PAGE = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>x402check — payer-intent risk checks for x402 agent commerce</title>
-<meta name="description" content="Signed, typed payer-intent risk checks for x402 payments. Block malicious agents before settlement — $0.001/evaluation, first 100/day free.">
+<title>x402check — payer-intent risk checks for x402</title>
+<meta name="description" content="Signed, typed payer-intent risk checks for x402 agent payments. Fail-closed, verifiable, $0.001 per evaluation.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0b10; --panel: #12141c; --border: #232735; --text: #e8eaf2;
-    --muted: #9aa1b5; --accent: #14f195; --accent2: #9945ff; --warn: #f5a623;
+    --paper: #fcfcfa; --ink: #16181d; --muted: #5d6472; --faint: #8b90a0;
+    --line: #e4e4de; --panel: #f4f4ee; --code: #f7f7f3;
+    --green: #0b6e4f; --red: #a13224;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
   body {
-    background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.6; -webkit-font-smoothing: antialiased;
+    background: var(--paper); color: var(--ink);
+    font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
-  header { padding: 40px 0 24px; }
-  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 20px; letter-spacing: -0.02em; }
-  .brand .dot { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg, var(--accent2), var(--accent)); display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: #0a0b10; }
-  nav { display: flex; gap: 24px; margin-left: auto; font-size: 14px; }
-  nav a { color: var(--muted); text-decoration: none; }
-  nav a:hover { color: var(--text); }
-  h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.15; letter-spacing: -0.03em; margin: 32px 0 16px; }
-  h1 .grad { background: linear-gradient(90deg, var(--accent2), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .sub { color: var(--muted); font-size: 18px; max-width: 640px; margin-bottom: 28px; }
-  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-  .badge { font-size: 12.5px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
-  .badge.ok { color: var(--accent); border-color: rgba(20,241,149,.35); }
-  h2 { font-size: 22px; letter-spacing: -0.02em; margin: 48px 0 16px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
-  .card h3 { font-size: 15.5px; margin-bottom: 8px; }
-  .card p { color: var(--muted); font-size: 14px; }
-  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-  .metric { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-  .metric b { display: block; font-size: 24px; letter-spacing: -0.02em; }
-  .metric span { color: var(--muted); font-size: 12.5px; }
-  pre {
-    background: #0d0f16; border: 1px solid var(--border); border-radius: 12px; padding: 18px;
-    overflow-x: auto; font-size: 13px; line-height: 1.55; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  pre .c { color: #6b7280; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 600; font-size: 13px; }
-  .note { border-left: 3px solid var(--warn); background: rgba(245,166,35,.06); padding: 12px 16px; border-radius: 0 10px 10px 0; color: var(--muted); font-size: 14px; margin-top: 16px; }
-  .cta { display: inline-block; margin-top: 8px; padding: 10px 18px; border-radius: 10px; font-size: 14px; font-weight: 600; text-decoration: none; }
-  .cta.primary { background: linear-gradient(90deg, var(--accent2), var(--accent)); color: #0a0b10; }
-  .cta.ghost { border: 1px solid var(--border); color: var(--text); }
-  footer { margin: 64px 0 40px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 16px; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 28px; }
+
+  /* top bar */
+  .top { display: flex; align-items: baseline; gap: 28px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .mark { font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 15px; }
+  .mark span { color: var(--green); }
+  .top nav { margin-left: auto; display: flex; gap: 22px; font-size: 13.5px; }
+  .top a { color: var(--muted); text-decoration: none; }
+  .top a:hover { color: var(--ink); }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 56px; padding: 72px 0 64px; align-items: start; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.08em; color: var(--faint); text-transform: uppercase; margin-bottom: 20px; }
+  h1 { font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif; font-weight: 500; font-size: clamp(34px, 4.6vw, 52px); line-height: 1.08; letter-spacing: -0.025em; margin-bottom: 20px; }
+  .lede { color: var(--muted); font-size: 17.5px; max-width: 30em; margin-bottom: 30px; }
+  .lede b { color: var(--ink); font-weight: 600; }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .cta { font-family: "IBM Plex Mono", monospace; font-size: 13.5px; padding: 11px 18px; text-decoration: none; border: 1px solid var(--ink); border-radius: 3px; }
+  .cta.solid { background: var(--ink); color: var(--paper); }
+  .cta.solid:hover { background: #2a2d35; }
+  .cta.line { color: var(--ink); }
+  .cta.line:hover { border-color: var(--green); color: var(--green); }
+
+  /* attestation document */
+  .doc { border: 1px solid var(--ink); border-radius: 4px; background: #fff; box-shadow: 4px 4px 0 rgba(22,24,29,0.06); }
+  .doc-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .doc-head .t { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .doc-head .stamp { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--green); border: 1px solid var(--green); padding: 2px 8px; border-radius: 2px; letter-spacing: 0.05em; }
+  .doc-body { padding: 14px 16px; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.7; }
+  .doc-body .row { display: flex; gap: 14px; }
+  .doc-body .k { width: 110px; color: var(--faint); flex-shrink: 0; }
+  .doc-body .v { color: var(--ink); word-break: break-all; }
+  .doc-body .v.ok { color: var(--green); }
+  .doc-foot { padding: 10px 16px; border-top: 1px dashed var(--line); font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+
+  /* sections */
+  section { border-top: 1px solid var(--line); padding: 52px 0; }
+  .sec-head { display: flex; align-items: baseline; gap: 18px; margin-bottom: 30px; }
+  .sec-no { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--faint); }
+  h2 { font-family: "Space Grotesk", sans-serif; font-weight: 500; font-size: 26px; letter-spacing: -0.02em; }
+  .cols { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 48px; }
+  .item { padding: 18px 0; border-top: 1px solid var(--line); }
+  .item h3 { font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 14px; margin-bottom: 6px; }
+  .item h3 em { color: var(--green); font-style: normal; }
+  .item p { color: var(--muted); font-size: 14.5px; }
+
+  /* metrics ledger */
+  .ledger { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .ledger-row { display: grid; grid-template-columns: repeat(6, 1fr); }
+  .ledger-cell { padding: 20px 18px; border-right: 1px solid var(--line); }
+  .ledger-cell:last-child { border-right: none; }
+  .ledger-cell b { font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 22px; display: block; margin-bottom: 4px; }
+  .ledger-cell b.ok { color: var(--green); }
+  .ledger-cell span { color: var(--faint); font-size: 12px; line-height: 1.5; display: block; }
+
+  /* code */
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 4px; padding: 18px 20px; overflow-x: auto;
+        font-family: "IBM Plex Mono", monospace; font-size: 13px; line-height: 1.6; }
+  pre .cm { color: var(--faint); }
+  pre .g { color: var(--green); }
+
+  /* table */
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--ink); }
+  td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--muted); width: 160px; }
+
+  .note { border: 1px solid var(--line); border-left: 3px solid var(--ink); background: var(--panel); padding: 14px 18px; font-size: 14px; color: var(--muted); margin-top: 22px; max-width: 780px; }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  footer { border-top: 1px solid var(--ink); padding: 26px 0 44px; display: flex; flex-wrap: wrap; gap: 8px 28px; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--faint); }
   footer a { color: var(--muted); text-decoration: none; }
-  footer a:hover { color: var(--text); }
+  footer a:hover { color: var(--green); }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding: 48px 0; }
+    .cols { grid-template-columns: 1fr; }
+    .ledger-row { grid-template-columns: repeat(3, 1fr); }
+    .ledger-cell:nth-child(3n) { border-right: none; }
+    .ledger-cell:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <div class="brand"><span class="dot">x</span> x402check <nav>
-      <a href="https://github.com/caiovicentino/jev-risk-check-provider">GitHub</a>
+
+  <div class="top">
+    <div class="mark">x402check<span>.</span>xyz</div>
+    <nav>
+      <a href="#evidence">Evidence</a>
+      <a href="#integrate">Integration</a>
       <a href="/.well-known/risk-check.json">Discovery</a>
-      <a href="/.well-known/jwks.json">JWKS</a>
-      <a href="https://github.com/x402-foundation/x402/issues/3597">Proposal</a>
-    </nav></div>
-    <h1>Payer-intent risk checks<br>for <span class="grad">x402 agent commerce</span></h1>
-    <p class="sub">Before your resource server settles an agent's payment, ask one question: <b>is the paying agent's intent legitimate?</b> x402check answers it with a typed-decision model (TypeSafe Jev System One) and a signed, verifiable attestation — in ~400&nbsp;ms, for $0.001.</p>
-    <div class="badges">
-      <span class="badge ok">switch-over gate: READY</span>
-      <span class="badge ok">0 false negatives</span>
-      <span class="badge">fail-closed</span>
-      <span class="badge">MIT</span>
-    </div>
+      <a href="https://github.com/caiovicentino/jev-risk-check-provider">Source</a>
+    </nav>
+  </div>
+
+  <div class="hero">
     <div>
-      <a class="cta primary" href="#integrate">Integrate in 5 minutes</a>
-      <a class="cta ghost" href="https://github.com/caiovicentino/jev-risk-check-provider">Read the evidence</a>
+      <div class="kicker">x402 trust-provider &middot; risk-check extension &middot; reference implementation</div>
+      <h1>One question before you settle an agent's payment: is the payer's intent legitimate?</h1>
+      <p class="lede">x402check answers it with a <b>typed decision</b> from a calibrated decision model, scored by deterministic code, and returned as a <b>signed attestation</b> anyone can verify. ~400&nbsp;ms, $0.001, fail-closed.</p>
+      <div class="cta-row">
+        <a class="cta solid" href="#integrate">Integrate in 5 minutes</a>
+        <a class="cta line" href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">Read the evidence</a>
+      </div>
     </div>
-  </header>
-
-  <h2>What it checks</h2>
-  <div class="cards">
-    <div class="card"><h3>Prompt injection &amp; guard bypass</h3><p>Injected instructions, drain contracts, "disable the payment guard" attempts, skill-file injections routed through trusted channels.</p></div>
-    <div class="card"><h3>Impersonation &amp; social engineering</h3><p>Homoglyph domains (coinbase-wa11et, jup1ter-audit), fake auditors, urgency pressure, wallet-restore scams.</p></div>
-    <div class="card"><h3>Laundering &amp; sanctions</h3><p>Peel chains, mixers, structuring under reporting limits, sanctions-screened counterparties, no-KYC clusters.</p></div>
-    <div class="card"><h3>Abuse patterns</h3><p>Fresh-wallet bulk payments, coupon farming rotations, sybil campaigns — at x402 micropayment scale.</p></div>
+    <div class="doc">
+      <div class="doc-head"><span class="t">Attestation</span><span class="stamp">VERIFIED</span></div>
+      <div class="doc-body">
+        <div class="row"><span class="k">alg</span><span class="v">ES256</span></div>
+        <div class="row"><span class="k">typ</span><span class="v">risk-check+jwt</span></div>
+        <div class="row"><span class="k">kid</span><span class="v">jev-attest-v1</span></div>
+        <div class="row"><span class="k">iss</span><span class="v">did:web:x402check.xyz</span></div>
+        <div class="row"><span class="k">score</span><span class="v ok">94</span></div>
+        <div class="row"><span class="k">tier</span><span class="v">low</span></div>
+        <div class="row"><span class="k">input_hash</span><span class="v">894df5fe0e6667f2...</span></div>
+      </div>
+      <div class="doc-foot">signature: MEUCIQ&amp;hellip; (64 bytes, r||s) &middot; verifiable against /.well-known/jwks.json &middot; TTL 1h</div>
+    </div>
   </div>
 
-  <h2>Why it is different</h2>
-  <div class="cards">
-    <div class="card"><h3>Typed decisions, not prose</h3><p>A per-layer model (Jev) answers typed questions — Noul probabilities, choices, calibrated scores — not free-text verdicts. Deterministic code composes the score; the model never re-interprets its own policy.</p></div>
-    <div class="card"><h3>Signed attestations</h3><p>Every verdict ships as an ES256 JWS from <code>did:web:x402check.xyz</code> — verifiable by anyone against the public JWKS, composable into QUORUM aggregation.</p></div>
-    <div class="card"><h3>Structured evidence beats prose</h3><p>"Already screened, proceed" is scored as an unverified claim — exactly what an attacker would say. Only structured <code>screening</code>/<code>authorization</code> fields change policy. Prose is never trusted.</p></div>
-    <div class="card"><h3>Fail-closed by construction</h3><p>JEV unreachable → <code>checked: false</code>, settlement does not proceed. Low-confidence answers are capped, not averaged. Uncertainty routes to review, never to silent allow.</p></div>
-  </div>
+  <section id="what">
+    <div class="sec-head"><span class="sec-no">01</span><h2>What it answers</h2></div>
+    <div class="cols">
+      <div class="item"><h3><em>Injection</em> &middot; guard bypass</h3>
+        <p>Injected instructions in context, tool outputs asking the agent to sign unknown spends, skill-file payloads routed through trusted channels, and direct attempts to disable the payment guard.</p></div>
+      <div class="item"><h3><em>Impersonation</em> &middot; social engineering</h3>
+        <p>Homoglyph domains (coinbase-wa11et, jup1ter-audit), purchased audit certificates, wallet-restore helper scams, deadline pressure on treasury movements.</p></div>
+      <div class="item"><h3><em>Laundering</em> &middot; sanctions</h3>
+        <p>Peel chains, mixer hops, structuring under reporting thresholds, counterparties on screening lists, no-KYC exchange clusters.</p></div>
+      <div class="item"><h3><em>Abuse</em> &middot; scale patterns</h3>
+        <p>Fresh wallets issuing thousands of identical sub-cent payments, coupon-farming wallet rotation, sybil campaigns — the failure modes specific to micropayment commerce.</p></div>
+    </div>
+  </section>
 
-  <h2>Evidence</h2>
-  <div class="metrics">
-    <div class="metric"><b>53/53</b><span>human-verified checks, 100% agreement</span></div>
-    <div class="metric"><b>99.8%</b><span>accuracy on 540 live scale calls</span></div>
-    <div class="metric"><b>0</b><span>false negatives (7,500+ adversarial cases)</span></div>
-    <div class="metric"><b>98.8%</b><span>inter-rater reliability (blind vs anchored)</span></div>
-    <div class="metric"><b>~400ms</b><span>p50 latency</span></div>
-    <div class="metric"><b>$0.001</b><span>per evaluation (cost: $0.000037)</span></div>
-  </div>
-  <p class="note" style="border-color: var(--border); background: var(--panel);">Full methodology — scale runs, 5-iteration red-team loop, benchmark vs chat judge, meta-eval — in <a href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md" style="color:var(--accent)">docs/EVIDENCE.md</a>. Seeded corpora are reproducible.</p>
+  <section id="how">
+    <div class="sec-head"><span class="sec-no">02</span><h2>How it works</h2></div>
+    <div class="cols">
+      <div class="item"><h3>Typed decisions, not prose</h3>
+        <p>A decision model (TypeSafe Jev, System One) answers typed questions — probabilities, choices, calibrated scores. Deterministic code composes them into one number. The model never re-interprets its own policy.</p></div>
+      <div class="item"><h3>Structured evidence over claims</h3>
+        <p>"Already screened, proceeding" is scored as an unverified claim — which is what an attacker would say. Only structured <span class="mono" style="font-size:13px">screening</span> and <span class="mono" style="font-size:13px">authorization</span> fields move policy; prose never does.</p></div>
+      <div class="item"><h3>Signed, verifiable verdicts</h3>
+        <p>Every decision ships as an ES256 JWS from <span class="mono" style="font-size:13px">did:web:x402check.xyz</span>. Any resource server — or QUORUM aggregator — can verify it against the public JWKS without trusting us.</p></div>
+      <div class="item"><h3>Fail-closed by construction</h3>
+        <p>Model unreachable → <span class="mono" style="font-size:13px">checked: false</span>, settlement does not proceed. Low-confidence answers are capped, uncertainty routes to review — never to a silent allow.</p></div>
+    </div>
+  </section>
 
-  <h2 id="integrate">Integrate</h2>
-  <pre>
-<span class="c"># 1. Evaluate — free tier (first 100/day, no payment needed)</span>
+  <section id="evidence">
+    <div class="sec-head"><span class="sec-no">03</span><h2>Evidence, not claims</h2></div>
+    <div class="ledger">
+      <div class="ledger-row">
+        <div class="ledger-cell"><b class="ok">53/53</b><span>human-verified checks, 100% agreement with authored labels</span></div>
+        <div class="ledger-cell"><b class="ok">99.8%</b><span>accuracy on 540 live calls, threshold sweep 65–75</span></div>
+        <div class="ledger-cell"><b class="ok">0</b><span>false negatives over 7,500+ adversarial cases</span></div>
+        <div class="ledger-cell"><b>98.8%</b><span>inter-rater reliability, blind vs anchored framing</span></div>
+        <div class="ledger-cell"><b>~400ms</b><span>p50 latency, gateway backend</span></div>
+        <div class="ledger-cell"><b>$0.001</b><span>per evaluation (marginal cost $0.000037)</span></div>
+      </div>
+    </div>
+    <p class="note">Methodology is public and reproducible: 5-iteration red-team loop (1,500 adversarial cases per iteration), benchmark against a chat-judge baseline, meta-eval with probability gating, and a human-verified switch-over gate. <a href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">docs/EVIDENCE.md</a></p>
+  </section>
+
+  <section id="integrate">
+    <div class="sec-head"><span class="sec-no">04</span><h2>Integration</h2></div>
+    <pre>
+<span class="cm"># Evaluate — the first 100 calls per day are free, no payment needed</span>
 curl -X POST https://x402check.xyz/v1/risk-check \\
-  -H "Content-Type: application/json" \\
+  -H <span class="g">"Content-Type: application/json"</span> \\
   -d '{
     "wallet": "7Xf2...pvFh",
     "chain": "solana",
     "domain": "api.merchant-labs.com",
     "context": "agent pays $0.05 voucher for a pricing API call",
-    "screening": { "sanctions": "clean" },
+    "screening":     { "sanctions": "clean" },
     "authorization": { "pre_authorized": true, "source": "user-dashboard" }
   }'
 
-<span class="c"># 2. Response — decision + signed attestation (TTL 1h)</span>
+<span class="cm"># Response — the decision plus its signed attestation</span>
 {
   "checked": true,
-  "score": 99,               <span class="c">// 0-100; block if below your min_score</span>
-  "tier": "low",             <span class="c">// low | medium | high | critical</span>
+  "score": 99,                <span class="cm">// 0–100 · block below your min_score (we suggest 65)</span>
+  "tier": "low",              <span class="cm">// low · medium (review) · high · critical</span>
   "provider": "did:web:x402check.xyz",
-  "jws": "eyJhbGciOiJFUzI1Ni...", <span class="c">// ES256, verifiable vs /.well-known/jwks.json</span>
+  "jws": "eyJhbGciOiJFUzI1Ni...", <span class="cm">// ES256 attestation, TTL 1h</span>
   "checked_at": "...", "expires_at": "..."
 }
 
-<span class="c"># 3. Verify the attestation (any client)</span>
+<span class="cm"># Verify the attestation with any JWS library — signature is r||s (ieee-p1363)</span>
 curl https://x402check.xyz/.well-known/jwks.json
-<span class="c"># verify the JWS (ES256, ieee-p1363) — iss must be did:web:x402check.xyz</span>
 
-<span class="c"># 4. Beyond the free tier: pay with x402</span>
-<span class="c"># The endpoint speaks the x402 protocol — a request past quota returns 402</span>
-<span class="c"># with accepts for Base USDC and Solana USDC. Pay with any x402 client.</span>
-  </pre>
+<span class="cm"># Past the free tier, the endpoint speaks x402: a 402 response carries the</span>
+<span class="cm"># payment options (Base USDC, Solana USDC). Pay with any x402 client.</span>
+    </pre>
+  </section>
 
-  <h2>Pricing &amp; identity</h2>
-  <table>
-    <tr><th></th><th></th></tr>
-    <tr><td>Free tier</td><td>100 evaluations/day per caller (demo-friendly)</td></tr>
-    <tr><td>Paid</td><td>$0.001 per evaluation via x402 (Base Sepolia USDC, Solana Devnet USDC today; mainnet networks next)</td></tr>
-    <tr><td>Identity</td><td><code>did:web:x402check.xyz</code> — <a href="/.well-known/did.json" style="color:var(--accent)">DID document</a>, attestations verify against <a href="/.well-known/jwks.json" style="color:var(--accent)">public JWKS</a></td></tr>
-    <tr><td>Engine</td><td>TypeSafe Jev System One (typed-decision model) + deterministic scoring in open-source code</td></tr>
-  </table>
-  <p class="note">Payments are on <b>testnet</b> networks today (free facilitator, real protocol flow). Mainnet facilitators (Base, Solana via Kora) land next — the same attestation and API, real settlement.</p>
+  <section id="pricing">
+    <div class="sec-head"><span class="sec-no">05</span><h2>Pricing &amp; identity</h2></div>
+    <table>
+      <tr><th></th><th></th></tr>
+      <tr><td>Free tier</td><td>100 evaluations per day, per caller — enough for an integration build-out</td></tr>
+      <tr><td>Paid</td><td>$0.001 per evaluation, settled with x402 (Base Sepolia USDC · Solana Devnet USDC today; mainnet next)</td></tr>
+      <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> — <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
+      <tr><td>Engine</td><td>TypeSafe Jev System One for intent; deterministic scoring in open-source code (MIT)</td></tr>
+      <tr><td>Networks</td><td>Endpoint reachable from any chain; accepts payment from any x402-supported network the configured facilitator covers</td></tr>
+    </table>
+    <p class="note"><b>Mainnet status:</b> settlement runs on testnet facilitators today (real protocol flow, free tokens). Mainnet facilitators — Base via CDP, Solana via Kora — are the next integration. Same API, same attestations.</p>
+  </section>
 
   <footer>
-    <span>MIT — <a href="https://github.com/caiovicentino/jev-risk-check-provider">caiovicentino/jev-risk-check-provider</a></span>
-    <span><a href="https://github.com/x402-foundation/x402/issues/3597">x402 #3597</a></span>
-    <span><a href="https://github.com/x402-foundation/x402/pull/2300">trust-provider extension PR #2300</a></span>
-    <span>x402check is a third-party reference provider for the x402 protocol</span>
+    <span>MIT License</span>
+    <a href="https://github.com/caiovicentino/jev-risk-check-provider">caiovicentino/jev-risk-check-provider</a>
+    <a href="https://github.com/x402-foundation/x402/issues/3597">x402 #3597</a>
+    <a href="https://github.com/x402-foundation/x402/pull/2300">PR #2300</a>
+    <span>x402check is a third-party reference provider for the x402 protocol — not affiliated with the x402 Foundation</span>
   </footer>
+
 </div>
 </body>
 </html>`;
