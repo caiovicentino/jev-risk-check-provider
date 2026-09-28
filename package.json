@@ -20,6 +20,7 @@
     "eval:suite:quick": "tsx eval/suite.ts --quick",
     "eval:audit": "tsx eval/audit.ts",
     "eval:crosslabel": "tsx eval/crosslabel.ts",
+    "prod": "tsx eval/prod.ts",
     "demo": "tsx demo/run.ts",
     "board": "tsx eval/scoreboard.ts",
     "verify": "tsx eval/verify.ts"
