@@ -134,9 +134,23 @@ def warn(s): return (s, TERM_WARN)
 def write_png(img, path):
     img.save(path)
 
-def tts(text, path, voice="pt-BR-AntonioNeural", rate="-8%"):
+KOKORO_PY = "/tmp/paysol-video/venv/bin/python"
+KOKORO_TTS = os.path.join(ROOT, "kokoro_tts.py")
+KOKORO_VOICE = os.environ.get("KOKORO_VOICE", "pm_alex")
+
+def tts(text, path, voice=None, rate="-8%"):
+    if os.path.exists(KOKORO_PY) and os.path.exists(KOKORO_TTS):
+        wav = path.replace(".mp3", ".wav")
+        try:
+            subprocess.run([KOKORO_PY, KOKORO_TTS, text.replace('"', "'"), KOKORO_VOICE, wav],
+                           check=True, capture_output=True, timeout=120)
+            import shutil
+            shutil.move(wav, path)
+            return
+        except Exception:
+            pass
     esc = text.replace('"', "'")
-    subprocess.run(["edge-tts", "--voice", voice, "--rate", rate, "--text", esc, "--write-media", path],
+    subprocess.run(["edge-tts", "--voice", voice or "pt-BR-AntonioNeural", "--rate", rate, "--text", esc, "--write-media", path],
                    check=True, capture_output=True)
 
 def build_video(name, frames):
