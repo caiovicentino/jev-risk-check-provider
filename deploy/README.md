@@ -9,7 +9,7 @@
 - `GET /.well-known/jwks.json` — stable EC P-256 key (kid `jev-attest-v1`)
 - `GET /.well-known/did.json` — DID document (`did:web:x402check.xyz`, QUORUM-resolvable)
 - `GET /.well-known/risk-check.json` — discovery document
-- Paywall: `@x402/core` v2 SDK, accepts Base Sepolia USDC + Solana Devnet USDC via the x402.org testnet facilitator; mainnet facilitators (CDP for EVM, Kora for Solana) are an env-gated upgrade (`X402_FACILITATOR_URL` + networks).
+- Paywall: `@x402/core` v2 SDK. **Mainnet live**: Base USDC (`eip155:8453`) + Solana USDC (`solana:5eykt4Us...`) via the PayAI facilitator (keyless; CDP is the key-based upgrade — same slot via `X402_FACILITATOR_URL_MAINNET`). Testnets (Base Sepolia, Solana Devnet) via x402.org fallback. One facilitator covers all four networks; `initialize()` validates routes against facilitator kinds at deploy.
 
 ## Steps to go live (once authenticated)
 
