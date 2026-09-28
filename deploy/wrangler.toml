@@ -1,9 +1,13 @@
-name = "jev-risk-check-provider"
+name = "x402check"
 main = "worker.ts"
 compatibility_date = "2026-09-01"
 
+routes = [
+  { pattern = "x402check.xyz", custom_domain = true }
+]
+
 [vars]
-PROVIDER_HOST = "risk-check.paysol.dev"
+PROVIDER_HOST = "x402check.xyz"
 
 # Secrets to set before deploy (do NOT commit):
 #   wrangler secret put AI_GATEWAY_API_KEY      (or TYPESAFE_API_KEY)
