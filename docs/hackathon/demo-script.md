@@ -46,13 +46,17 @@ VO: "The provider enriched the domain with deterministic analysis before the mod
 
 `npm run eval:suite` final table on screen (or pre-rendered screenshot to save time — the table):
 
+`curl -s https://x402check.xyz/v1/risk-check -X POST -H "Content-Type: application/json" -d '{"wallet":"Hu9TqN3LrZb7CxW2VyP8dMf5Gk1AsU6JcE4iRnB9YtQp","chain":"solana","domain":"api.merchant-labs.com","context":"weather subscription","screening":{"sanctions":"clean"}}'` — point at `provider: did:web:x402check.xyz`
+
 | layer | acc | FN | FP | p50 |
 |---|---|---|---|---|
-| scale 420 | 99.8% | 1 | 0 | 381ms |
-| red-team 1,419 | 99.7% | 0 | 4 | 419ms |
-| benchmark JEV | 293 | 100% | 0 | 419ms |
+| scale 420 | 99.8% | 1 | 0 | 390ms |
+| red-team 1,419 | 99.7% | 0 | 4 | 387ms |
+| benchmark JEV | 293 | 100% | 0 | 396ms |
+| production (live x402check.xyz) | 53/53 | 0 | 0 | 385ms |
+| security suite (live) | 20/20 PASS | - | - | - |
 
-VO: "Every number here is reproducible with one seeded command. Zero false positives on benign traffic across every live layer — because the one thing an intent gate must never do is break legitimate payments. PAYSOL: signed intent for agent payments."
+VO: "Everything you just saw runs as a public service — mainnet USDC settlement on Base and Solana, DID identity, every attestation verifiable against the published public key. Every number here is reproducible with one seeded command. Zero false positives on benign traffic across every live layer — because the one thing an intent gate must never do is break legitimate payments. PAYSOL: signed intent for agent payments."
 
 ---
 

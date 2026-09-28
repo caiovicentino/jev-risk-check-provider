@@ -10,8 +10,9 @@ PAYSOL is the signed-intent layer for agent payments. AI agents increasingly pay
 
 ## Blockchains and tools integrated
 
-- **Solana** (primary; devnet demo flow, Solana Foundation Kora paymaster integration proposed — issue #682)
-- **x402** (Linux Foundation standard; conformant to the `risk-check` extension spec, proposal #3597)
+- **Solana** (primary; mainnet + devnet USDC settlement live; Solana Foundation Kora paymaster integration proposed — issue #682)
+- **x402** (Linux Foundation standard; conformant to the `risk-check` extension spec, proposal #3597) — **USDC settlement live across 10 networks**: Base, Solana, Polygon, Arbitrum, Avalanche, Monad, Sei (mainnet) + Base Sepolia, Arbitrum Sepolia, Solana Devnet
+- **Production deployment live**: Cloudflare Workers + dedicated domain (x402check.xyz), free-tier accounting (public `/healthz` counter), DID `did:web:x402check.xyz`
 - **TypeSafe AI Jev** via Vercel AI Gateway (also TypeSafe direct API)
 - ES256/JWS attestations (RFC 7515), node:crypto only — zero runtime dependencies beyond the AI SDK
 - TypeScript, Node 22, Cloudflare Workers deploy-ready (fetch-handler architecture)
@@ -33,7 +34,7 @@ Work completed before the hackathon window (disclosed per Colosseum eligibility 
 
 Work completed **during** the hackathon window (what we're asking judges to evaluate, per the rules):
 
-1. Public deployment of the provider with a real `did:web:` identity and stable JWKS (in progress; blocked only on host credentials — being resolved this week).
+1. **Live public deployment** — `https://x402check.xyz`, live on 2026-09-28: `did:web:x402check.xyz` identity (DID document + stable JWKS, round-trip verified), x402 paywall with free tier (100/day) and **mainnet USDC settlement (Base + Solana, plus Polygon, Arbitrum, Avalanche, Monad, Sei)** via the Dexter facilitator (gas-sponsored, zero facilitator fee), and a public landing page with integration docs.
 2. Real-facilitator traffic shadowing (moving the evidence base from synthetic corpora to live x402 facilitator traffic).
 3. Human-verified labels completing the repository's switch-over gate (≥50 verified checks).
 4. Kora `decision_provider` integration advancing through the accepted-issue process.
@@ -47,7 +48,7 @@ Work completed **during** the hackathon window (what we're asking judges to eval
 
 **Monetization**: open-source provider (MIT) + paid tiers on the evidence layer — compliance-grade signed decision logs for PSPs and financial institutions (the segment paying for agent-payment infrastructure today: Fireblocks-style buyers), and volume-based API pricing for hosted risk-check above free tier. Land in the open ecosystem, monetize the audit trail.
 
-**Demand validation to date**: 2,200+ provider decisions across independent evaluation layers with zero false positives on benign traffic; active maintainer engagement on the x402 spec discussions; inbound interest pending the public deployment (measured: directory listing click-through, facilitator sandbox signups — targets set for the window).
+**Demand validation to date**: 2,200+ provider decisions across independent evaluation layers with zero false positives on benign traffic; **53/53 production checks against the live public endpoint with every attestation verified against the public JWKS; 20/20 security probes passed** (injection resistance, quota-integrity, payment-protocol hygiene); upstream recognition: the x402 trust-provider extension author publicly named the payer-intent slot ("jev's payer-intent scoring") in PR #2300; active maintainer engagement on the x402 spec discussions; inbound interest pending the public deployment (measured: directory listing click-through, facilitator sandbox signups — targets set for the window).
 
 ## Why we win this market (the insight)
 
