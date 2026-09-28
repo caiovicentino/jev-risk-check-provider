@@ -141,6 +141,9 @@ async function freeQuota(env: WorkerEnv, ip: string): Promise<number> {
   const used = Number((await env.RATE.get(key)) ?? "0");
   if (used >= daily) return 0;
   await env.RATE.put(key, String(used + 1), { expirationTtl: 172800 });
+  const totalKey = `free-total:${day}`;
+  const total = Number((await env.RATE.get(totalKey)) ?? "0");
+  await env.RATE.put(totalKey, String(total + 1), { expirationTtl: 172800 });
   return daily - used;
 }
 
@@ -190,6 +193,11 @@ export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const stack = await ensureStack(env);
     const path = new URL(request.url).pathname;
+    if (request.method === "GET" && path === "/healthz" && env.RATE) {
+      const day = new Date().toISOString().slice(0, 10);
+      const freeEvalsToday = Number((await env.RATE.get(`free-total:${day}`)) ?? "0");
+      return Response.json({ ok: true, freeEvalsToday });
+    }
     if (PROTECTED.has(path)) {
       return handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
     }
