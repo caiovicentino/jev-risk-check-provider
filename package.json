@@ -23,7 +23,8 @@
     "prod": "tsx eval/prod.ts",
     "demo": "tsx demo/run.ts",
     "board": "tsx eval/scoreboard.ts",
-    "verify": "tsx eval/verify.ts"
+    "verify": "tsx eval/verify.ts",
+    "security": "tsx eval/security.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

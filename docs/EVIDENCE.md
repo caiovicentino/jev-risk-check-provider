@@ -1,19 +1,21 @@
 # Evidence — consolidated master document
 
-All numbers below come from a single `npm run eval:suite` execution (2026-09-27, question-set `jev-wallet-risk/v5`, backend: Vercel AI Gateway `typesafe-ai/jev`). Reproduce with the same command; corpora are seeded and deterministic.
+All numbers below come from a single `npm run eval:suite` execution (2026-09-28, question-set `jev-wallet-risk/v5` with signal-driven review tiers (v5.1), backend: Vercel AI Gateway `typesafe-ai/jev`). Reproduce with the same command; corpora are seeded and deterministic. The deployed provider at `https://x402check.xyz` is additionally evaluated in production (layer 6) and probed by a security suite (layer 7).
 
 ## Consolidated table (one suite run)
 
 | Layer | n | Accuracy | FN | FP | p50 | p95 | Cost |
 |---|---|---|---|---|---|---|---|
-| synthetic (offline plumbing) | 24 | 100.0% | 0 | 0 | — | — | $0 |
-| shadow (fixed regression) | 24 | 100.0% | 0 | 0 | 374ms | 532ms | $0.0013 |
-| scale (7 categories × 60 + 24×5 stability) | 420 | 99.8% | 1 | 0 | 381ms | 528ms | $0.0286 |
-| red-team (adversarial v5) | 1,419 | 99.7% | 0 | 4 | 419ms | 634ms | $0.0805 |
-| benchmark: gpt-4.1-mini as judge | 293 | 99.3% | 0 | 2 | 743ms | 1104ms | $0.0174 |
-| benchmark: JEV provider | 293 | **100.0%** | 0 | 0 | 419ms | 590ms | $0.0157 |
+| synthetic (offline plumbing) | 53 | 100.0% | 0 | 0 | — | — | $0 |
+| shadow (live, screening-integrated) | 53 | 100.0% | 0 | 0 | 388ms | 592ms | $0.0028 |
+| scale (7 categories × 60 + 24×5 stability) | 420 | 99.8% | 1 | 0 | 390ms | 575ms | $0.0286 |
+| red-team (adversarial v5) | 1,419 | 99.7% | 0 | 4 | 387ms | 526ms | $0.0805 |
+| benchmark: gpt-4.1-mini as judge | 293 | 99.3% | 0 | 2 | 819ms | 1090ms | $0.0174 |
+| benchmark: JEV provider | 293 | **100.0%** | 0 | 0 | 396ms | 572ms | $0.0157 |
+| **production (live x402check.xyz)** | 53 | **100.0%** | 0 | 0 | 385ms | 640ms | $0 (free tier) |
+| **security suite (live endpoint)** | 20 probes | 100% pass | — | — | — | — | $0 |
 
-**Totals: 2,180 provider decisions in one suite run · $0.11 · 170s.** Zero false positives on benign traffic across every live layer (4/315 FP on the adversarial FP-probe family only — the documented SLA-urgency boundary).
+**Totals: 2,238 provider decisions in one suite run · $0.11 · 174s — plus 53 live production checks (JWS 53/53 verified against the public JWKS) and a 20-probe security suite (20/20 PASS).** Zero false positives on benign traffic across every live layer (4 FP on the adversarial FP-probe family only — the documented SLA-urgency boundary).
 
 ## What each layer proves
 
@@ -33,7 +35,7 @@ All numbers below come from a single `npm run eval:suite` execution (2026-09-27,
 
 ## Honest limitations
 
-- Labels are authored by the builder, not human-verified — the switch-over gate stays NOT READY (0/50) until `npm run verify` sessions complete. The interactive session exists and takes ~10 minutes for the fixed set.
+- Review routing (tier `medium`) measures the screening-integrated deployment mode (1.9% review share). Unscreened traffic — no `screening` field — pays the documented fail-closed cost: ~26% of safe decisions route to review. The block threshold is identical in both modes.
 - Single backend so far (gateway); the direct TypeSafe API returns native calibrated confidence and needs its own scale run.
 - Synthetic corpora exercise the question set's coverage, not real-world distribution. The next evidence tier is real facilitator traffic in shadow mode.
 - JEV sampling is non-deterministic (±3 points p95 on repeated calls) — all thresholds carry margin, and the logs accumulate runs for longitudinal statistics.
@@ -43,6 +45,8 @@ All numbers below come from a single `npm run eval:suite` execution (2026-09-27,
 - `eval/evidence/consolidated-report.json` — this run, machine-readable
 - `eval/evidence/scale-report.json`, `eval/evidence/redteam-report.json`, `eval/evidence/benchmark-report.json` — per-layer detail
 - `eval/evidence/shadow-log.jsonl`, `scale-log.jsonl`, `redteam-log.jsonl` — raw per-call logs (append-only across runs)
+- `eval/evidence/prod-report.json` + `prod-log.jsonl` — production eval against the live endpoint (`npm run prod`), JWS verified per response
+- `eval/evidence/security-report.json` + `docs/EVIDENCE-SECURITY.md` — security probe suite against the live endpoint (`npm run security`)
 - `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md` — methodology and iteration stories
 - `docs/DISTRIBUTION.md` — ready-to-post drafts that reference these numbers
 

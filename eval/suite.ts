@@ -3,7 +3,7 @@ import { writeFileSync, rmSync } from "node:fs";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient } from "../src/jev.js";
 import { QUESTION_SET_VERSION } from "../src/jev.js";
-import { buildProvider, runCases, appendEntries, EVAL_EVIDENCE_DIR, SYNTHETIC_LOG, LIVE_LOG } from "./harness.js";
+import { buildProvider, runCases, appendEntries, withScreeningSimulation, EVAL_EVIDENCE_DIR, SYNTHETIC_LOG, LIVE_LOG } from "./harness.js";
 import { syntheticFixturesFor } from "./fixtures.js";
 import { CASES } from "./cases.js";
 import { generateCorpus, sampleForStability, type ScaleOptions } from "./scale-cases.js";
@@ -85,9 +85,9 @@ async function main(): Promise<void> {
   layers.push({ name: "synthetic", n: CASES.length, accuracy: syn.acc, fn: syn.fn, fp: syn.fp, costUsd: 0, latencyP50: 0, latencyP95: 0, extra: "mock JEV — plumbing check" });
   console.log(`  accuracy: ${(syn.acc * 100).toFixed(1)}% (${CASES.length - syn.fn - syn.fp}/${CASES.length})`);
 
-  console.log("\n[2/5] shadow (live fixed regression set)");
+  console.log("\n[2/5] shadow (live, screening-integrated)");
   const liveProvider = provider;
-  const shadowEntries = await runCases(liveProvider, CASES);
+  const shadowEntries = await runCases(liveProvider, withScreeningSimulation(CASES));
   appendEntries(LIVE_LOG, shadowEntries, "live");
   totalTokens += shadowEntries.reduce((a, e) => a + (e.input_tokens ?? 0), 0);
   const shadow = accuracyOf(shadowEntries);

@@ -30,6 +30,13 @@ export function buildProvider(jev: JevLike | null): Provider {
   return new Provider({ host: "paysol.local", keyPair: generateKeyPair("jev-attest-v1"), jev });
 }
 
+export function withScreeningSimulation(cases: ShadowCase[]): ShadowCase[] {
+  return cases.map((c) => ({
+    ...c,
+    request: { ...c.request, screening: { sanctions: c.expected === "safe" ? ("clean" as const) : ("flagged" as const) } },
+  }));
+}
+
 export function decideFromScore(score: number | null, checked: boolean): "safe" | "risky" | "unchecked" {
   if (!checked || score === null) return "unchecked";
   return score >= DECISION_THRESHOLD ? "safe" : "risky";
