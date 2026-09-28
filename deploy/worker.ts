@@ -26,13 +26,14 @@ export type WorkerEnv = {
   SOL_RPC_URL?: string;
   SOL_RPC_URL_MAINNET?: string;
   X402_FACILITATOR_URL_MAINNET?: string;
+  X402_FACILITATOR_URL_PAYAI?: string;
   RATE?: KVNamespace;
 };
 
 const PROTECTED = new Set(["/v1/risk-check", "/v1/risk-check/batch"]);
 const DEFAULT_FACILITATOR = "https://x402.org/facilitator";
 const DEFAULT_MAINNET_FACILITATOR = "https://x402.dexter.cash";
-const FALLBACK_FACILITATORS = ["https://facilitator.payai.network", "https://x402.org/facilitator"];
+const DEFAULT_PAYAI_FACILITATOR = "https://facilitator.payai.network";
 const BASE_MAINNET = "eip155:8453";
 const BASE_SEPOLIA = "eip155:84532";
 const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
@@ -70,18 +71,24 @@ function buildStack(env: WorkerEnv): Stack {
   const payToSol = env.PAY_TO_SOL ?? "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X";
   const facilitators = [
     new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR }),
-    ...FALLBACK_FACILITATORS.map((url) => new HTTPFacilitatorClient({ url })),
+    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_PAYAI ?? DEFAULT_PAYAI_FACILITATOR }),
+    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL ?? DEFAULT_FACILITATOR }),
   ];
   const resourceServer = new x402ResourceServer(facilitators);
-  resourceServer.register(BASE_MAINNET, new ExactEvmScheme());
-  resourceServer.register(BASE_SEPOLIA, new ExactEvmScheme());
+  resourceServer.register("eip155:*", new ExactEvmScheme());
   resourceServer.register(SOLANA_MAINNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL_MAINNET ?? "https://api.mainnet-beta.solana.com" }));
   resourceServer.register(SOLANA_DEVNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL ?? "https://api.devnet.solana.com" }));
 
   const accepts: PaymentOption[] = [
     { scheme: "exact", network: BASE_MAINNET, payTo: payToEvm, price: "$0.001" },
+    { scheme: "exact", network: "eip155:137", payTo: payToEvm, price: "$0.001" },
+    { scheme: "exact", network: "eip155:42161", payTo: payToEvm, price: "$0.001" },
+    { scheme: "exact", network: "eip155:43114", payTo: payToEvm, price: "$0.001" },
+    { scheme: "exact", network: "eip155:143", payTo: payToEvm, price: "$0.001" },
+    { scheme: "exact", network: "eip155:1329", payTo: payToEvm, price: "$0.001" },
     { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: "$0.001" },
     { scheme: "exact", network: BASE_SEPOLIA, payTo: payToEvm, price: "$0.001" },
+    { scheme: "exact", network: "eip155:421614", payTo: payToEvm, price: "$0.001" },
     { scheme: "exact", network: SOLANA_DEVNET, payTo: payToSol, price: "$0.001" },
   ];
   const routes = {
@@ -97,7 +104,7 @@ function buildStack(env: WorkerEnv): Stack {
     },
   };
   const http = new x402HTTPResourceServer(resourceServer, routes);
-  return { deps, http, envKey: JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET]) };
+  return { deps, http, envKey: JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI]) };
 }
 
 async function ensureStack(env: WorkerEnv): Promise<Stack> {
@@ -112,7 +119,7 @@ async function ensureStack(env: WorkerEnv): Promise<Stack> {
 }
 
 function buildStackCacheKey(env: WorkerEnv): string {
-  return JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET]);
+  return JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI]);
 }
 
 function fetchAdapter(request: Request): HTTPAdapter {
