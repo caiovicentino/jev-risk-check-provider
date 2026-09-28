@@ -224,12 +224,12 @@ curl https://x402check.xyz/.well-known/jwks.json
     <table>
       <tr><th></th><th></th></tr>
       <tr><td>Free tier</td><td>100 evaluations per day, per caller — enough for an integration build-out</td></tr>
-      <tr><td>Paid</td><td>$0.001 per evaluation, settled with x402 (Base Sepolia USDC · Solana Devnet USDC today; mainnet next)</td></tr>
+      <tr><td>Paid</td><td>$0.001 per evaluation, settled with x402 — <b>Base USDC and Solana USDC on mainnet</b> (gas sponsored, zero facilitator fee), plus testnets</td></tr>
       <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> — <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
       <tr><td>Engine</td><td>TypeSafe Jev System One for intent; deterministic scoring in open-source code (MIT)</td></tr>
       <tr><td>Networks</td><td>Endpoint reachable from any chain; accepts payment from any x402-supported network the configured facilitator covers</td></tr>
     </table>
-    <p class="note"><b>Mainnet status:</b> settlement runs on testnet facilitators today (real protocol flow, free tokens). Mainnet facilitators — Base via CDP, Solana via Kora — are the next integration. Same API, same attestations.</p>
+    <p class="note"><b>Payment networks live:</b> mainnet settlement today — Base USDC and Solana USDC, any x402 client (agent wallets, SDKs) — plus testnets for integration builds. The facilitator verifies the buyer's signed authorization and submits the transfer onchain; buyer funds move directly to the provider wallet, and the facilitator never holds them.</p>
   </section>
 
   <footer>
