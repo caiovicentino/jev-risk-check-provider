@@ -4,7 +4,7 @@
 
 ## 0:00–0:10 — Who/what
 
-"PAYSOL — the signed-intent layer for agent payments. Agents pay with wallets; we gate each payment with a typed-decision model and a signed, verifiable verdict."
+"x402check — the signed-intent layer for agent payments. Agents pay with wallets; we gate each payment with a typed-decision model and a signed, verifiable verdict."
 
 ## 0:10–0:30 — Week 1 progress (show on screen)
 

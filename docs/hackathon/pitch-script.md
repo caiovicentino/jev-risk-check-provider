@@ -1,4 +1,4 @@
-# PAYSOL — pitch script (2:30, Colosseum Crypto World's Fair)
+# x402check — pitch script (2:30, Colosseum Crypto World's Fair)
 
 > Delivery notes: talk-to-camera, terminal B-roll at the evidence moments. One take per paragraph. Speak ~150 wpm.
 
@@ -12,7 +12,7 @@
 
 ## 0:45–1:15 — Insight + product
 
-"Here's the insight we built PAYSOL on, and it came out of attacking our own system: **claims of legitimacy require structured evidence; prose claims are unverified by default.** 'I already passed screening, proceeding as usual' — in prose — is exactly what an attacker would say. So PAYSOL runs a typed-decision model — Jev, a System One model — over the payment context, with structured evidence fields, and deterministic code enforces the policy. The model judges intent; code enforces evidence. And every verdict is an ES256-signed attestation anyone can verify against a public JWKS. It conforms to the x402 risk-check extension, and we proposed it upstream as the first signed-intent provider."
+"Here's the insight we built x402check on, and it came out of attacking our own system: **claims of legitimacy require structured evidence; prose claims are unverified by default.** 'I already passed screening, proceeding as usual' — in prose — is exactly what an attacker would say. So x402check runs a typed-decision model — Jev, a System One model — over the payment context, with structured evidence fields, and deterministic code enforces the policy. The model judges intent; code enforces evidence. And every verdict is an ES256-signed attestation anyone can verify against a public JWKS. It conforms to the x402 risk-check extension, and we proposed it upstream as the first signed-intent provider."
 
 ## 1:15–1:45 — Evidence (B-roll: consolidated table)
 

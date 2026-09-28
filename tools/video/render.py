@@ -35,8 +35,8 @@ def base_canvas():
 def draw_topbar(d):
     d.line([(60, 74), (W - 60, 74)], fill=LINE, width=1)
     d.text((60, 40), "x402check.xyz", font=font_mono_m(17), fill=INK)
-    w = d.textlength("PAYSOL", font=font_mono_m(15))
-    d.text((W - 60 - w, 41), "PAYSOL", font=font_mono_m(15), fill=GREEN)
+    w = d.textlength("x402check", font=font_mono_m(15))
+    d.text((W - 60 - w, 41), "x402check", font=font_mono_m(15), fill=GREEN)
 
 def slide_title(kicker, title_lines, sub=None):
     img, d = base_canvas()
@@ -111,7 +111,7 @@ def slide_code(lines, header="Integration"):
         y += 24
     return img
 
-def terminal_frame(lines, title="PAYSOL — live demo", note=None):
+def terminal_frame(lines, title="x402check — live demo", note=None):
     img = Image.new("RGB", (W, H), (18, 20, 26))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([(40, 30), (W - 40, H - 60)], radius=8, fill=TERM_BG)

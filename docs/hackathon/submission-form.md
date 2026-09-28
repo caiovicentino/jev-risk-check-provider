@@ -2,11 +2,11 @@
 
 ## Product name
 
-PAYSOL
+x402check
 
 ## Brief description
 
-PAYSOL is the signed-intent layer for agent payments. AI agents increasingly pay with wallets, but the industry's controls — spend caps, allowlists, signed mandates — check transaction *structure*, never *intent*: whether the payment corresponds to what the user authorized, or whether the payment context carries a prompt injection. PAYSOL evaluates intent with a typed-decision model (TypeSafe's Jev, a System One model), enforces evidence policy in deterministic code, and issues every verdict as an ES256-signed attestation verifiable against a public JWKS. It ships as an x402 `risk-check` provider (conformant to the live extension proposal) plus an agent-side counterparty gate, both demonstrated end-to-end on Solana.
+x402check is the signed-intent layer for agent payments. AI agents increasingly pay with wallets, but the industry's controls — spend caps, allowlists, signed mandates — check transaction *structure*, never *intent*: whether the payment corresponds to what the user authorized, or whether the payment context carries a prompt injection. x402check evaluates intent with a typed-decision model (TypeSafe's Jev, a System One model), enforces evidence policy in deterministic code, and issues every verdict as an ES256-signed attestation verifiable against a public JWKS. It ships as an x402 `risk-check` provider (conformant to the live extension proposal) plus an agent-side counterparty gate, both demonstrated end-to-end on Solana.
 
 ## Blockchains and tools integrated
 
@@ -52,4 +52,4 @@ Work completed **during** the hackathon window (what we're asking judges to eval
 
 ## Why we win this market (the insight)
 
-Red-teaming our own system produced a transferable principle: **claims of legitimacy require structured evidence; prose claims are unverified by default.** Chat-model judges trust prose ("already screened, proceeding as usual" — 27/27 approved by GPT-4.1-mini in our cross-rater study); PAYSOL holds them as unverified claims by design. This distinction maps directly onto AP2's "verifiable intent, not inferred action" — and it's the difference between a demo and an auditable control system.
+Red-teaming our own system produced a transferable principle: **claims of legitimacy require structured evidence; prose claims are unverified by default.** Chat-model judges trust prose ("already screened, proceeding as usual" — 27/27 approved by GPT-4.1-mini in our cross-rater study); x402check holds them as unverified claims by design. This distinction maps directly onto AP2's "verifiable intent, not inferred action" — and it's the difference between a demo and an auditable control system.

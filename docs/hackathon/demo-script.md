@@ -1,4 +1,4 @@
-# PAYSOL — demo script (≤3:00, one continuous terminal session)
+# x402check — demo script (≤3:00, one continuous terminal session)
 
 > All shots use real output from `npm run demo` and `npm run eval:suite` — nothing mocked. Record terminal at 16px+ font, dark theme, 1440p.
 
@@ -7,7 +7,7 @@
 Terminal 1 (split-screen left): `cat README.md | head -30`
 Terminal 2 (right): `npm run demo`
 
-VO: "This is PAYSOL's full payment flow, live. Three processes: the risk provider running Jev — a System One decision model — a resource server that requires risk checks, and a facilitator that verifies payment and enforces the gate."
+VO: "This is x402check's full payment flow, live. Three processes: the risk provider running Jev — a System One decision model — a resource server that requires risk checks, and a facilitator that verifies payment and enforces the gate."
 
 Wait for the three `[...] listening` lines. Point at: `JEV backend: vercel-ai-gateway`.
 
@@ -56,7 +56,7 @@ VO: "The provider enriched the domain with deterministic analysis before the mod
 | production (live x402check.xyz) | 53/53 | 0 | 0 | 385ms |
 | security suite (live) | 20/20 PASS | - | - | - |
 
-VO: "Everything you just saw runs as a public service — mainnet USDC settlement on Base and Solana, DID identity, every attestation verifiable against the published public key. Every number here is reproducible with one seeded command. Zero false positives on benign traffic across every live layer — because the one thing an intent gate must never do is break legitimate payments. PAYSOL: signed intent for agent payments."
+VO: "Everything you just saw runs as a public service — mainnet USDC settlement on Base and Solana, DID identity, every attestation verifiable against the published public key. Every number here is reproducible with one seeded command. Zero false positives on benign traffic across every live layer — because the one thing an intent gate must never do is break legitimate payments. x402check: signed intent for agent payments."
 
 ---
 
