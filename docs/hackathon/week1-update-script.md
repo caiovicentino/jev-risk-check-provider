@@ -8,9 +8,9 @@
 
 ## 0:10–0:30 — Week 1 progress (show on screen)
 
-Terminal: `npm run eval:suite` tail — the consolidated table.
+Terminal: `curl -s https://x402check.xyz/healthz` then `npm run eval:suite` tail — the consolidated table with the production and security rows.
 
-"Status at week one: two thousand two hundred live model decisions across five evaluation layers — scale, adversarial red-team, benchmark against a chat judge, and a meta-eval where the model judges its own verdicts. Zero false positives on legitimate traffic across every layer."
+"Status at week one: the product is LIVE at x402check.xyz — mainnet USDC settlement on Base and Solana, DID identity, paywall with a free tier. Two thousand two hundred live model decisions; 53 of 53 human-verified production checks; 20 of 20 security probes. Zero false positives on legitimate traffic across every layer."
 
 ## 0:30–0:50 — Upstream traction (show the GitHub issues/PRs)
 
@@ -20,7 +20,7 @@ Browser tabs: x402 issue #3597, Kora issue #682, awesome-jev PR #293.
 
 ## 0:50–1:00 — This week's focus + challenge (honest)
 
-"This week: public deployment with a did:web identity and the first real facilitator traffic in shadow mode. The hard part isn't the model — it's making signed verdicts verifiable from anywhere, with stable keys. That's what I'm shipping next."
+"Next: first real facilitator traffic in shadow mode, and the payment path end-to-end with real integrators. The hard part is making signed verdicts verifiable from anywhere with stable keys — and now anyone can verify one with two curls."
 
 ---
 
