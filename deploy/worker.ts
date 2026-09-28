@@ -31,7 +31,8 @@ export type WorkerEnv = {
 
 const PROTECTED = new Set(["/v1/risk-check", "/v1/risk-check/batch"]);
 const DEFAULT_FACILITATOR = "https://x402.org/facilitator";
-const DEFAULT_MAINNET_FACILITATOR = "https://facilitator.payai.network";
+const DEFAULT_MAINNET_FACILITATOR = "https://x402.dexter.cash";
+const FALLBACK_FACILITATORS = ["https://facilitator.payai.network", "https://x402.org/facilitator"];
 const BASE_MAINNET = "eip155:8453";
 const BASE_SEPOLIA = "eip155:84532";
 const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
@@ -69,7 +70,7 @@ function buildStack(env: WorkerEnv): Stack {
   const payToSol = env.PAY_TO_SOL ?? "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X";
   const facilitators = [
     new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR }),
-    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL ?? DEFAULT_FACILITATOR }),
+    ...FALLBACK_FACILITATORS.map((url) => new HTTPFacilitatorClient({ url })),
   ];
   const resourceServer = new x402ResourceServer(facilitators);
   resourceServer.register(BASE_MAINNET, new ExactEvmScheme());
