@@ -2,7 +2,14 @@
 
 ## Status
 
-The provider is deploy-ready (`src/handler.ts` is a framework-free fetch handler used by both the Node server and the Cloudflare Worker). Deployment is blocked only on credentials: no valid `CLOUDFLARE_API_TOKEN` / `wrangler login` on this machine (checked 2026-09-27 — token expired, refresh requires interactive login).
+**LIVE** (2026-09-28): `https://x402check.xyz` — `did:web:x402check.xyz`
+
+- `POST /v1/risk-check` — x402-protected (see below), free tier via `X-Risk-Check-Free`
+- `POST /v1/risk-check/batch` — batch endpoint, same pricing
+- `GET /.well-known/jwks.json` — stable EC P-256 key (kid `jev-attest-v1`)
+- `GET /.well-known/did.json` — DID document (`did:web:x402check.xyz`, QUORUM-resolvable)
+- `GET /.well-known/risk-check.json` — discovery document
+- Paywall: `@x402/core` v2 SDK, accepts Base Sepolia USDC + Solana Devnet USDC via the x402.org testnet facilitator; mainnet facilitators (CDP for EVM, Kora for Solana) are an env-gated upgrade (`X402_FACILITATOR_URL` + networks).
 
 ## Steps to go live (once authenticated)
 
@@ -13,6 +20,13 @@ wrangler login            # or: export CLOUDFLARE_API_TOKEN=...
 # secrets (never committed)
 wrangler secret put AI_GATEWAY_API_KEY          # or TYPESAFE_API_KEY
 wrangler secret put JEV_ATTEST_PRIVATE_KEY      # PEM (sec1 EC P-256) — reuse the SAME key across deploys so JWKS stays stable
+wrangler secret put JEV_ATTEST_PUBLIC_JWK       # the matching public JWK (kty/crv/x/y/kid/alg/use) — MUST match the private PEM
+
+NOTE: the public JWK must be derived from the private PEM at key-creation time:
+
+    openssl ec -in jev-attest.pem -pubout  # then export the JWK via node:crypto
+    # NEVER publish a generated-at-runtime publicJwk next to a stored private PEM:
+    # the published key and the signing key must be the same key pair.
 
 wrangler deploy --config deploy/wrangler.toml
 ```

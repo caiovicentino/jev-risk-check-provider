@@ -18,6 +18,7 @@ export type WorkerEnv = {
   TYPESAFE_API_KEY?: string;
   AI_GATEWAY_API_KEY?: string;
   JEV_ATTEST_PRIVATE_KEY?: string;
+  JEV_ATTEST_PUBLIC_JWK?: string;
   PAY_TO_EVM?: string;
   PAY_TO_SOL?: string;
   X402_FACILITATOR_URL?: string;
@@ -41,9 +42,11 @@ type Stack = {
 let cached: Stack | null = null;
 
 function loadKeyPair(env: WorkerEnv): KeyPair {
-  if (env.JEV_ATTEST_PRIVATE_KEY) {
-    const pair = generateKeyPair("jev-attest-v1");
-    return { privatePem: env.JEV_ATTEST_PRIVATE_KEY, publicJwk: pair.publicJwk };
+  if (env.JEV_ATTEST_PRIVATE_KEY && env.JEV_ATTEST_PUBLIC_JWK) {
+    const jwk = JSON.parse(env.JEV_ATTEST_PUBLIC_JWK) as KeyPair["publicJwk"];
+    if (jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string") {
+      return { privatePem: env.JEV_ATTEST_PRIVATE_KEY, publicJwk: jwk };
+    }
   }
   return generateKeyPair("jev-attest-v1");
 }
@@ -81,7 +84,7 @@ function buildStack(env: WorkerEnv): Stack {
     },
   };
   const http = new x402HTTPResourceServer(resourceServer, routes);
-  return { deps, http, envKey: JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL]) };
+  return { deps, http, envKey: JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL]) };
 }
 
 async function ensureStack(env: WorkerEnv): Promise<Stack> {
@@ -96,7 +99,7 @@ async function ensureStack(env: WorkerEnv): Promise<Stack> {
 }
 
 function buildStackCacheKey(env: WorkerEnv): string {
-  return JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL]);
+  return JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL]);
 }
 
 function fetchAdapter(request: Request): HTTPAdapter {
