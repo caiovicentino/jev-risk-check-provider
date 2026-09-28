@@ -28,6 +28,44 @@ if (queue.length === 0) {
 console.log(`labeling session: ${queue.length} pending (${disagreements.length} disagreements first)`);
 console.log("for each case: [r]eal (label is correct) / [f]p (label is wrong) / [s]kip\n");
 
+const argv = process.argv.slice(2);
+const sheetOnly = argv.includes("--sheet");
+const answersIdx = argv.indexOf("--answers");
+if (sheetOnly) {
+  for (let i = 0; i < queue.length; i++) {
+    const c = queue[i]!;
+    const entry = latest.get(c.id);
+    const decision = entry ? deriveDecision(entry.score, entry.checked) : "unchecked";
+    console.log(`[${String(i).padStart(2, "0")}] ${c.id}`);
+    console.log(`     category: ${c.category}`);
+    console.log(`     wallet:   ${c.request.wallet}`);
+    if (c.request.domain) console.log(`     domain:   ${c.request.domain}`);
+    console.log(`     context:  ${c.request.context ?? "(none)"}`);
+    console.log(`     authored label: ${c.expected.toUpperCase()} | JEV: ${decision.toUpperCase()} (score=${entry?.score ?? "-"}, tier=${entry?.tier ?? "-"})`);
+    if (c.note) console.log(`     note:     ${c.note}`);
+  }
+  console.log(`\nrespond with --answers <string> (${queue.length} chars: r/f/s in order)`);
+  process.exit(0);
+}
+if (answersIdx !== -1) {
+  const answers = argv[answersIdx + 1] ?? "";
+  if (answers.length !== queue.length) {
+    console.error(`need ${queue.length} answers (r/f/s), got ${answers.length}`);
+    process.exit(1);
+  }
+  let labeled = 0;
+  for (let i = 0; i < queue.length; i++) {
+    const c = queue[i]!;
+    const a = answers[i]!.toLowerCase();
+    if (a !== "r" && a !== "f") continue;
+    upsertLabel(LIVE_LOG, c.id, a === "r" ? "real" : "fp");
+    console.log(`${c.id} → ${a === "r" ? "real" : "fp"}`);
+    labeled++;
+  }
+  console.log(`\n${labeled} labels applied — run \`npm run board report\` for the gate`);
+  process.exit(0);
+}
+
 const rl = createInterface({ input: stdin, output: stdout });
 let labeled = 0;
 

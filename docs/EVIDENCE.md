@@ -58,3 +58,21 @@ The provider's own model evaluates its verdicts through two differently-framed a
 | **Anchored judge** | sees the verdict, judges whether it is correct | **100% agreement** after probability gating (P(wrong) ≥ 0.6); raw argmax showed 5.2% false-flag rate from sampling noise |
 
 Two transferable findings: (1) the AI SDK's `evaluate` validation requires `choice` = argmax of probabilities and JEV occasionally samples out-of-sync distributions — production adapters must tolerate this (our provider already fails closed); (2) judge "flags" must be probability-gated, not argmax-read — a 74/25 split would otherwise be reported as a disagreement. Both are exactly the failure modes the LLM-as-judge literature predicts (position/order bias, sampling instability), handled here with typed probabilities rather than prompt patching.
+
+## Switch-over gate: READY (`npm run board report`)
+
+The gate requires 50+ human-verified checks, ≥5 verified risky cases, 0 dismissed-real, 0 JEV false-confirms, and ≤20% review share.
+
+- **Suite expanded 24 → 53 cases** via a deterministic rule (documented in `eval/cases.ts`): first 16 benign cases by (context, domain) uniqueness, first 2 of each risky category, first 3 ambiguous — drawn from the same seeded scale corpus (seed 20260927). No score-peeking: selection depends only on corpus order.
+- **Human labels: 53/53 verified `real`, 100% agreement** with authored labels, applied by the project owner in two labeling sessions (24 + 29).
+- **Gate result: READY** — 53 verified checks, 25 risky-real, 0 dismissed-real, 0 false-confirms, review share 2%.
+
+### Review-routing semantics (policy change, v5.1)
+
+The gate's review-share criterion exposed a real policy gap: the `medium` tier was triggered by score proximity alone, routing score-noise benign traffic (~28%) to human review. Tier routing is now **signal-driven** (`src/scoring.ts`): a safe decision routes to review only when there is a positive reason to look — an intent signal ≥ 0.3 (JEV's honest "no screening data" noise sits at 0.2–0.3 on benign-class cases) or an uncertain risk class (`unclassifiable`/`automated_abuse`/`fraud_signal` at probability ≥ 0.5, which is what keeps genuinely ambiguous cases in review). The **block threshold is untouched** (score-only); the safety decision is identical across the change.
+
+### Screening-integrated simulation
+
+Shadow runs support `--screening integrated`: benign/ambiguous requests get `screening: {sanctions: "clean"}`, risky requests get `"flagged"` — simulating an integrator that actually runs screening (an honest integrator cannot return clean on a sanctioned counterparty). Results on the 53-case suite: **53/53 correct, review share 1.9%** screened vs **26.4%** unscreened. Review load is a function of screening coverage; the fail-closed cost of not screening is the 26%, by design.
+
+Note: a screening-`clean` field submitted against a context that asserts a sanctions listing flips that case to safe (51 → 78) — correct under the integrator-trust threat model (the integrator's screening result overrides stale prose), and the attacker-controlled-input surface for `screening`/`authorization` is the integrator, not the paying client, whose prose remains untrusted.

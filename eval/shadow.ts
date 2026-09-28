@@ -18,7 +18,19 @@ async function main(): Promise<void> {
     : new GatewayJevClient();
   console.log(`backend: ${typesafeKey ? "typesafe-direct" : "vercel-ai-gateway"}`);
   const provider = buildProvider(backend);
-  const entries = await runCases(provider, CASES);
+  const onlyIdx = process.argv.indexOf("--only");
+  const onlyPrefix = onlyIdx !== -1 ? (process.argv[onlyIdx + 1] ?? "") : "";
+  const selected = onlyPrefix ? CASES.filter((c) => c.id.startsWith(onlyPrefix)) : CASES;
+  const screeningIdx = process.argv.indexOf("--screening");
+  const screeningMode = screeningIdx !== -1 ? (process.argv[screeningIdx + 1] ?? "") : "";
+  const enriched = screeningMode
+    ? selected.map((c) => ({
+        ...c,
+        request: { ...c.request, screening: { sanctions: c.expected === "safe" ? ("clean" as const) : ("flagged" as const) } },
+      }))
+    : selected;
+  console.log(`cases: ${enriched.length}${onlyPrefix ? ` (only ${onlyPrefix}*)` : ""}${screeningMode ? ` | screening-integrated simulation (${screeningMode})` : ""}`);
+  const entries = await runCases(provider, enriched);
   appendEntries(LIVE_LOG, entries, "live");
 
   const latencies = entries.map((e) => e.latency_ms).sort((a, b) => a - b);

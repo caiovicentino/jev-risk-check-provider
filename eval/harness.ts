@@ -59,10 +59,13 @@ export async function runCases(provider: Provider, cases: ShadowCase[]): Promise
   return entries;
 }
 
-export function appendEntries(file: string, entries: LogEntry[], mode: "live" | "synthetic"): void {
+export function appendEntries(file: string, entries: LogEntry[], mode: "live" | "synthetic", carryLabels = true): void {
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
+  const priorLabels = carryLabels ? readLatestEntries(file) : new Map<string, LogEntry>();
   for (const e of entries) {
-    appendFileSync(file, `${JSON.stringify({ ...e, mode })}\n`);
+    const prior = priorLabels.get(e.case_id);
+    const verified = prior?.verified != null ? prior.verified : e.verified;
+    appendFileSync(file, `${JSON.stringify({ ...e, mode, verified })}\n`);
   }
 }
 

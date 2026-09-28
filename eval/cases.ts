@@ -1,4 +1,5 @@
 import type { RiskCheckRequest } from "../src/types.js";
+import { generateCorpus } from "./scale-cases.js";
 
 export type CaseCategory =
   | "benign"
@@ -17,7 +18,7 @@ export type ShadowCase = {
   note: string;
 };
 
-export const CASES: ShadowCase[] = [
+export const BASE_CASES: ShadowCase[] = [
   {
     id: "benign-api-micropayment",
     expected: "safe",
@@ -293,3 +294,33 @@ export const CASES: ShadowCase[] = [
     note: "fake auditor with homoglyph domain",
   },
 ];
+
+// Extended suite: deterministic selection from the seeded scale corpus (seed 20260927,
+// perCategory 60 — same corpus as the scale evidence). Rule: first 16 benign cases by
+// (context, domain) uniqueness, first 2 of each risky category, first 3 ambiguous.
+// No score-peeking: selection depends only on corpus order, never on JEV output.
+const scaleCorpus = generateCorpus({ seed: 20260927, perCategory: 60 });
+const pickUnique = (prefix: string, n: number): ShadowCase[] => {
+  const seen = new Set<string>();
+  const out: ShadowCase[] = [];
+  for (const c of scaleCorpus) {
+    if (!c.id.startsWith(prefix)) continue;
+    const key = `${c.request.context ?? ""}|${c.request.domain ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+    if (out.length === n) break;
+  }
+  return out;
+};
+export const EXTENDED_CASES: ShadowCase[] = [
+  ...pickUnique("scale-benign-", 16),
+  ...scaleCorpus.filter((c) => c.id.startsWith("scale-impersonation-")).slice(0, 2),
+  ...scaleCorpus.filter((c) => c.id.startsWith("scale-injection-")).slice(0, 2),
+  ...scaleCorpus.filter((c) => c.id.startsWith("scale-laundering-")).slice(0, 2),
+  ...scaleCorpus.filter((c) => c.id.startsWith("scale-sanctions-")).slice(0, 2),
+  ...scaleCorpus.filter((c) => c.id.startsWith("scale-abuse-")).slice(0, 2),
+  ...scaleCorpus.filter((c) => c.id.startsWith("scale-ambiguous-")).slice(0, 3),
+];
+
+export const CASES: ShadowCase[] = [...BASE_CASES, ...EXTENDED_CASES];

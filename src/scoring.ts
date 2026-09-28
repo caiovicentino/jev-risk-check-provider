@@ -101,13 +101,34 @@ export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DE
   if (inputs.riskClass === "fraud_signal" && inputs.riskClassProbability >= 0.8) score = Math.min(score, 40);
 
   score = Math.max(0, Math.min(100, score));
-  return { score, tier: tierFor(score), cappedByLowConfidence, signals: inputs };
+  return { score, tier: tierFor(score, inputs), cappedByLowConfidence, signals: inputs };
 }
 
-export function tierFor(score: number): RiskTier {
+// Review routing (medium tier) is signal-driven, not score-proximity-driven: a safe
+// decision only routes to human review when there is a positive reason to look —
+// a strong intent signal, or an uncertain risk class. Signals in the 0.2–0.3 range
+// on benign-class cases reflect data availability (e.g. absent sanctions screening),
+// not review-worthy concern. The block threshold is unaffected (score-only).
+export const REVIEW_SIGNAL_FLOOR = 0.3;
+export const REVIEW_CLASS_PROB_FLOOR = 0.5;
+
+export function tierFor(score: number, inputs?: ScoringInputs): RiskTier {
   if (score >= 80) return "low";
-  if (score >= 60) return "medium";
-  if (score >= 30) return "high";
+  if (score >= 30) {
+    if (score < 60) return "high";
+    if (!inputs) return "medium";
+    const elevatedSignal =
+      inputs.knownThreat >= REVIEW_SIGNAL_FLOOR ||
+      inputs.sanctionsConcern >= REVIEW_SIGNAL_FLOOR ||
+      inputs.launderingPattern >= REVIEW_SIGNAL_FLOOR ||
+      inputs.riskyDomain >= REVIEW_SIGNAL_FLOOR ||
+      inputs.guardBypassAttempt >= REVIEW_SIGNAL_FLOOR ||
+      ((inputs.riskClass === "automated_abuse" ||
+        inputs.riskClass === "fraud_signal" ||
+        inputs.riskClass === "unclassifiable") &&
+        inputs.riskClassProbability >= REVIEW_CLASS_PROB_FLOOR);
+    return elevatedSignal ? "medium" : "low";
+  }
   return "critical";
 }
 
