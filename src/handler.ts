@@ -1,6 +1,9 @@
 import { discoveryDocument, Provider } from "./provider.js";
 import { jwksDocument } from "./jws.js";
+import { landingPage } from "./landing.js";
 import type { RiskCheckRequest } from "./types.js";
+
+const MAX_BATCH = 25;
 
 export type HandlerDeps = {
   provider: Provider;
@@ -111,8 +114,17 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       const requests = (body as { requests: unknown[] }).requests
         .map((r) => validateRequest(r))
         .filter((r): r is RiskCheckRequest => r !== null);
+      if (requests.length === 0) return json(422, { error: "invalid_request" });
+      if (requests.length > MAX_BATCH) return json(413, { error: "batch_too_large", max: MAX_BATCH });
       const results = await Promise.all(requests.map((r) => deps.provider.evaluate(r)));
       return json(200, { results: results.map((e) => e.result) });
+    }
+    if (req.method === "GET" && path === "/" ) {
+      const accept = req.headers.get("accept") ?? "";
+      if (accept.includes("text/html")) {
+        return new Response(landingPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+      }
+      return json(200, discoveryDocument(deps.provider.host));
     }
     if (req.method === "GET" && path === "/healthz") {
       return json(200, { ok: true });
