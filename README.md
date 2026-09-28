@@ -114,14 +114,14 @@ npm run board report    # accuracy per category, cost, switch-over gate
 
 `npm run shadow` replays labeled cases through the provider (Jev enabled, no enforcement) and appends evidence to `eval/evidence/shadow-log.jsonl`: per-case verdicts, latency, token usage, estimated cost ($0.042/MTok input, output free), disagreements, and the switch-over gate. Threshold and question-set are versioned; changing them re-baselines the log.
 
-## Honest limitations (v0)
+## Honest limitations
 
 - Scoring runs on Jev-evaluated context only — no on-chain graph, address-cluster, or threat-feed enrichment yet (planned: Helius webhook enrichment, Solana program allowlist signals).
 - No sanctions feed integration; `sanctions_concern` is a Jev judgment, not a screened list. Do not use as a compliance control.
 - Attestation keys are Worker secrets (stable `jev-attest-v1`); KMS/HSM-backed key custody is the next hardening step.
 - Batch endpoint parallelizes rather than amortizing a single Jev call; caching per payer (per spec facilitator guidance) is not implemented server-side yet.
 
-## Red-team, benchmark, demo, deploy
+## Red-team, benchmark, demo, production, security
 
 - **Red-team loop** (`npm run eval:redteam`): 1,500 adversarial cases (synonym mutations, authority spoofing, encoded payloads, distributed malice) + legitimate-lookalike FP probe + prose-only-claim dual-use class. Five hardening iterations (v1→v5) — see `docs/EVIDENCE-REDTEAM.md`. Final: 100% adversarial accuracy, 1.3% FP. The reusable design principle: **claims of legitimacy require structured evidence** (`screening`, `authorization` fields); prose claims are unverified by default.
 - **Benchmark** (`npm run eval:benchmark`): same sample through a chat LLM judge (`gpt-4.1-mini` via AI Gateway) — JEV provider 100% @ p50 394ms / $0.0157 vs chat judge 99.3% @ p50 727ms / $0.0174 (approx. pricing). JEV additionally outputs typed, calibrated, signable verdicts.
