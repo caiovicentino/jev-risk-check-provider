@@ -227,9 +227,9 @@ curl https://x402check.xyz/.well-known/jwks.json
       <tr><td>Paid</td><td>$0.001 per evaluation, settled with x402 — <b>Base USDC and Solana USDC on mainnet</b> (gas sponsored, zero facilitator fee), plus testnets</td></tr>
       <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> — <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
       <tr><td>Engine</td><td>TypeSafe Jev System One for intent; deterministic scoring in open-source code (MIT)</td></tr>
-      <tr><td>Networks</td><td>Endpoint reachable from any chain; accepts payment from any x402-supported network the configured facilitator covers</td></tr>
+<tr><td>Networks</td><td>Accepts USDC settlement across the x402 networks: EVM chains (Base, Polygon, Arbitrum, Avalanche, Monad, Sei) and Solana, mainnet + testnet</td></tr>
     </table>
-    <p class="note"><b>Payment networks live:</b> mainnet settlement today — Base USDC and Solana USDC, any x402 client (agent wallets, SDKs) — plus testnets for integration builds. The facilitator verifies the buyer's signed authorization and submits the transfer onchain; buyer funds move directly to the provider wallet, and the facilitator never holds them.</p>
+<p class="note"><b>Payment networks live:</b> Base, Solana, Polygon, Arbitrum, Avalanche, Monad and Sei on mainnet — plus Base Sepolia, Arbitrum Sepolia and Solana Devnet testnets — all settling USDC via x402 with any client (agent wallets, SDKs). The facilitator verifies the buyer's signed authorization and submits the transfer onchain; buyer funds move directly to the provider wallet, and the facilitator never holds them.</p>
   </section>
 
   <footer>
