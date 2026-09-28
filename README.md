@@ -1,9 +1,45 @@
-# jev-risk-check-provider
+# x402check — signed-intent risk checks for x402 agent commerce
 
-An x402 `risk-check` provider that scores agent counterparties with **Jev** — TypeSafe AI's System One model for typed decisions — and issues **ES256-signed attestations** that facilitators and resource servers can verify independently.
+**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · 100 free evaluations/day · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
 
-Fully aligned with the `risk-check` extension spec proposed in
+x402check is an x402 `risk-check` provider that scores agent counterparties with **Jev** — TypeSafe AI's System One model for typed decisions — and issues **ES256-signed attestations** that facilitators and resource servers can verify independently. The verdict answers one question before settlement: **is the paying agent's intent legitimate?**
+
+Aligned with the `risk-check` extension spec proposed in
 [x402 PR #2422](https://github.com/x402-foundation/x402/pull/2422): discovery at `/.well-known/risk-check.json`, scoring at `POST /v1/risk-check` (+ `/batch`), and `RiskCheckResult` payloads with compact JWS attestations verified against `/.well-known/jwks.json`.
+
+## What it protects
+
+| Side | Protected from |
+|---|---|
+| Agent's user | hijacked intent (prompt injection → drain), impersonation, sanctions exposure, becoming a laundering mule |
+| Seller / resource server | malicious agent payments (charge-then-deny), abuse traffic, compliance exposure |
+| Facilitator | all of the above, once for every merchant |
+
+Between "the agent decided to pay" and "the payment settles" there is one instant where intent can still be checked. x402check lives in that instant — and proves every verdict with a signature, not a promise.
+
+## Payments (live, mainnet)
+
+`POST /v1/risk-check` is x402-protected: **100 free evaluations/day** per caller, then **$0.001 per evaluation** settled in USDC via x402 across **7 mainnets** — Base, Solana, Polygon, Arbitrum, Avalanche, Monad, Sei — plus Base Sepolia, Arbitrum Sepolia and Solana Devnet testnets (Dexter facilitator, gas-sponsored, zero facilitator fee; buyer funds move buyer → provider wallet directly, the facilitator never holds them).
+
+## Quickstart
+
+```bash
+curl -X POST https://x402check.xyz/v1/risk-check \
+  -H "Content-Type: application/json" \
+  -d '{"wallet":"7Xf2...pvFh","chain":"solana","domain":"api.merchant-labs.com","context":"agent pays $0.05 voucher for a pricing API call","screening":{"sanctions":"clean"}}'
+```
+
+```json
+{
+  "checked": true,
+  "score": 99,
+  "tier": "low",
+  "provider": "did:web:x402check.xyz",
+  "jws": "eyJhbGciOiJFUzI1Ni...",
+  "jwks_url": "https://x402check.xyz/.well-known/jwks.json",
+  "checked_at": "...", "expires_at": "..."
+}
+```
 
 ## Why
 
@@ -60,23 +96,11 @@ Two modes, same pipeline:
 - `npm run eval:synthetic` — full offline pipeline validation with a mock JEV backend (fixture answers per case). Validates plumbing, scoring math, log format, and gate derivation without any API access.
 - `npm run shadow` — live shadow run against the real TypeSafe API (`TYPESAFE_API_KEY` or `AI_GATEWAY_API_KEY` required). Never enforces; records verdicts next to expectations.
 
-### First live run (2026-09-27, Vercel AI Gateway)
-
-| Metric | Value |
-|---|---|
-| Accuracy vs authored expectations | 24/24 (100%) after 2 fixes from run 1 |
-| Run 1 (before fixes) | 18/24 (75%) |
-| Baseline (deterministic keyword rules) | 18/24 |
-| Latency | p50 426ms · p95 607ms |
-| Cost | ~$0.0009 for 24 decisions (~$0.000037/case) |
-
-Two defects found and fixed using run-1 data: (1) gateway `score` answers carry no calibrated confidence — treating `max(probability)` as confidence falsely capped 4 benign cases at 55; gateway score answers are now marked `noCalibration` and the confidence cap only applies to calibrated answers. (2) JEV could not detect leet-substitution lookalike domains from raw state; the provider now enriches state with deterministic `domain_analysis` (leet normalization, brand-token match, suspicious TLD) before the call — deterministic code first, Jev second.
-
-**Caveat**: expected labels are authored, not human-verified. The switch-over gate stays NOT READY (0/50 verified) until labels are checked via `npm run board label`. JEV sampling is non-deterministic — conclusions need accumulated runs, which the log is designed for.
+Two defects found and fixed using run-1 data: (1) gateway `score` answers carry no calibrated confidence — the confidence cap only applies to calibrated answers; (2) JEV could not detect leet-substitution lookalike domains from raw state — the provider enriches state with deterministic `domain_analysis` (leet normalization, brand-token match, suspicious TLD) before the call — deterministic code first, Jev second.
 
 ## Scale evidence
 
-`npm run eval:scale` runs a seeded corpus (60/category × 7) plus a stability matrix (24×5 repeats) with concurrent JEV calls. Full methodology and results: `docs/EVIDENCE-SCALE.md`. Headline: 98.6% at threshold 60, **99.76% at threshold 65–75 with zero false positives across 150 benign cases**, p95 552ms at concurrency 10, ~$0.000037/call, JWS sample 10/10, stability spread p95 = 3 points.
+`npm run eval:suite` runs the consolidated five-layer suite (synthetic, shadow, scale, red-team, benchmark) in one command — full numbers in `docs/EVIDENCE.md`. Latest consolidated run (v5 question set, signal-driven review tiers): **2,238 decisions, synthetic/shadow 100%, scale 99.8%, red-team 99.7% (0 FN), benchmark 100% vs chat-judge 99.3%, human-labeled gate READY (53 verified checks)** — plus **production eval 53/53 against the live endpoint with all attestations verified against the public JWKS** (`npm run prod`) and a **20/20-pass security probe suite** (`npm run security`).
 
 ```bash
 npm run board todo      # unlabeled cases, disagreements first
@@ -84,7 +108,7 @@ npm run board label <case_id> real|fp   # human-verified label
 npm run board report    # accuracy per category, cost, switch-over gate
 ```
 
-Switch-over gate (documented, derived from the log so threshold changes need no re-sweep): READY requires ≥50 verified checks, ≥5 verified real-risky cases with 0 dismissed, JEV false confirms ≤ baseline false flags, review share ≤20%. NOT READY until then — shadow only, no enforcement.
+**Switch-over gate: READY** (53 human-verified checks, 0 dismissed-real, 0 false-confirms, 2% review share in the screening-integrated mode; unscreened traffic pays a documented ~26% review cost — the fail-closed trade-off, block threshold identical in both modes).
 
 ## Shadow mode
 
@@ -94,7 +118,7 @@ Switch-over gate (documented, derived from the log so threshold changes need no 
 
 - Scoring runs on Jev-evaluated context only — no on-chain graph, address-cluster, or threat-feed enrichment yet (planned: Helius webhook enrichment, Solana program allowlist signals).
 - No sanctions feed integration; `sanctions_concern` is a Jev judgment, not a screened list. Do not use as a compliance control.
-- Attestation keys are in-process (`jev-attest-v1`); production needs KMS/HSM-backed keys and published JWKS under a real domain (`did:web`).
+- Attestation keys are Worker secrets (stable `jev-attest-v1`); KMS/HSM-backed key custody is the next hardening step.
 - Batch endpoint parallelizes rather than amortizing a single Jev call; caching per payer (per spec facilitator guidance) is not implemented server-side yet.
 
 ## Red-team, benchmark, demo, deploy
@@ -102,7 +126,7 @@ Switch-over gate (documented, derived from the log so threshold changes need no 
 - **Red-team loop** (`npm run eval:redteam`): 1,500 adversarial cases (synonym mutations, authority spoofing, encoded payloads, distributed malice) + legitimate-lookalike FP probe + prose-only-claim dual-use class. Five hardening iterations (v1→v5) — see `docs/EVIDENCE-REDTEAM.md`. Final: 100% adversarial accuracy, 1.3% FP. The reusable design principle: **claims of legitimacy require structured evidence** (`screening`, `authorization` fields); prose claims are unverified by default.
 - **Benchmark** (`npm run eval:benchmark`): same sample through a chat LLM judge (`gpt-4.1-mini` via AI Gateway) — JEV provider 100% @ p50 394ms / $0.0157 vs chat judge 99.3% @ p50 727ms / $0.0174 (approx. pricing). JEV additionally outputs typed, calibrated, signable verdicts.
 - **End-to-end demo** (`npm run demo`): three live scenarios — (A) legitimate agent pays, attestation JWS verified independently against JWKS; (B) compromised agent (injected guard-bypass) rejected by facilitator at score 0/critical; (C) agent-side counterparty gate: agent refuses to pay an impersonated recipient at score 8/critical before signing anything.
-- **Deploy** (`deploy/`): fetch-handler refactor (`src/handler.ts`) runs unchanged on Node and Cloudflare Workers; `wrangler.toml` + secret setup for a public `did:web:` provider with stable JWKS.
+- **Deploy** (`deploy/`): live at `https://x402check.xyz` — `did:web:x402check.xyz`, x402 paywall (SDK v2, multi-network), free tier + KV accounting; `deploy/README.md` documents the full setup.
 - **Distribution drafts**: `docs/DISTRIBUTION.md` — comment for x402 PR #2300, issue draft for x402-foundation, directory entries, X post, Kora issue (issue-first per house rules).
 
 ## Human verification
@@ -111,7 +135,11 @@ Switch-over gate (documented, derived from the log so threshold changes need no 
 
 ## Roadmap
 
-1. Human labels → switch-over gate READY (`npm run verify`).
+1. ~~Human labels → gate READY~~ ✅ done (53 verified checks).
+2. Real facilitator traffic in shadow mode — evidence moves from synthetic corpora to live x402 flows.
+3. Kora `decision_provider` integration (issue #682).
+4. CDP facilitator option for key-based mainnet settlement; KMS/HSM key custody.
+5. Payments beyond USDC (multi-asset), remaining x402 networks as facilitator coverage lands.
 2. x402 upstream: issue + docs-catalog PR (drafts ready in `docs/DISTRIBUTION.md`).
 3. Public deployment with real `did:web:` identity (`deploy/`).
 4. Kora `decision_provider` proposal (issue-first, after x402 traction).
