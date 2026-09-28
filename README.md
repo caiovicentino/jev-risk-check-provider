@@ -131,19 +131,20 @@ npm run board report    # accuracy per category, cost, switch-over gate
 
 ## Human verification
 
-`npm run verify` — interactive labeling session (disagreements first) that feeds the switch-over gate. The gate goes READY at ≥50 human-verified checks with 0 dismissed real-risky cases.
+`npm run verify` — labeling session (`--sheet` prints the full review set; `--answers <string>` applies r/f/s per case). **Status: DONE** — 53/53 human-verified, gate READY.
 
 ## Roadmap
 
-1. ~~Human labels → gate READY~~ ✅ done (53 verified checks).
-2. Real facilitator traffic in shadow mode — evidence moves from synthetic corpora to live x402 flows.
-3. Kora `decision_provider` integration (issue #682).
-4. CDP facilitator option for key-based mainnet settlement; KMS/HSM key custody.
-5. Payments beyond USDC (multi-asset), remaining x402 networks as facilitator coverage lands.
-2. x402 upstream: issue + docs-catalog PR (drafts ready in `docs/DISTRIBUTION.md`).
-3. Public deployment with real `did:web:` identity (`deploy/`).
-4. Kora `decision_provider` proposal (issue-first, after x402 traction).
-5. AP2 `RiskPayload` implementation once #165/#187 stabilize.
-6. Real facilitator traffic shadowing (the evidence tier above synthetic corpora).
+Done:
+1. ~~Human labels → gate READY~~ ✅ 53 verified checks, 0 dismissed-real, 0 false-confirms.
+2. ~~Public deployment with real `did:web:` identity~~ ✅ live at x402check.xyz.
+3. ~~x402 upstream: reference-provider proposal~~ ✅ issue #3597 + comments on PRs #2300/#2422.
 
-See `docs/PR-PLAN.md` and `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md` for the full evidence trail.
+Next:
+4. Real facilitator traffic in shadow mode — evidence moves from synthetic corpora to live x402 flows.
+5. Kora `decision_provider` integration (issue #682).
+6. CDP facilitator option for key-based mainnet settlement; KMS/HSM key custody.
+7. Payments beyond USDC (multi-asset) and remaining x402 networks as facilitator coverage lands.
+8. AP2 `RiskPayload` implementation once upstream stabilizes.
+
+See `docs/EVIDENCE.md` (consolidated master) and `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md`, `docs/EVIDENCE-SECURITY.md` for the full evidence trail.
