@@ -150,7 +150,16 @@ Reading: the model detects risk that is **present in the content it is given**. 
 
 The same probes passed on workerd with the production code before the deploy.
 
-**`security-v2` regression:** the 5 deterministic probes passed in production. These cover discovery, mainnet-only 402 options, batch pricing (25 × unit on all 7 networks), validation before payment, and health.
+**`security-v2` after the paid-only deploy: 6 PASS · 0 FAIL · 5 SKIP.**
+
+- **PASS:**
+  - discovery;
+  - mainnet-only 402 options;
+  - batch pricing (25 × unit on all 7 networks);
+  - validation before payment;
+  - **no free evaluations**: an unpaid request gets 402 and no attestation, and legacy free-tier headers are ignored;
+  - health.
+- **SKIP:** the five probes that need a verdict. They pay per evaluation, and no funded payer was configured.
 
 **No free tier (v0.3):** every evaluation is paid. The probes that need a verdict now pay through `eval/paid-fetch.ts` and wait on a funded payer key. Until then they report SKIP, never PASS. An unpaid request is verified to get 402 with the accepted options.
 

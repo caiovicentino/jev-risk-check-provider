@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-09-29T18:42:21.179Z",
+  "timestamp": "2026-09-29T19:07:52.590Z",
   "endpoint": "https://x402check.xyz",
-  "passed": 5,
+  "passed": 6,
   "failed": 0,
-  "skipped": 7,
+  "skipped": 5,
   "results": [
     {
       "id": "v2-discovery",
@@ -21,14 +21,14 @@
       "detail": "25-item batch = 25 × unit on all 7 networks (e.g. eip155:8453 1000 → 25000)"
     },
     {
-      "id": "v2-validation-before-quota",
+      "id": "v2-validation-before-payment",
       "status": "PASS",
       "detail": "5 malformed requests rejected (422/413) with the offending field named"
     },
     {
-      "id": "v2-free-quota-per-item-and-invalid-free",
-      "status": "SKIP",
-      "detail": "status=402 (free quota exhausted?)"
+      "id": "v3-no-free-evaluations",
+      "status": "PASS",
+      "detail": "unpaid → 402 with 7 mainnet options, no attestation; legacy free-tier headers ignored"
     },
     {
       "id": "v2-healthz-edge-cached",
@@ -38,32 +38,27 @@
     {
       "id": "v2-ofac-deterministic",
       "status": "SKIP",
-      "detail": "status=402"
+      "detail": "error: Error: no payer configured (~/.config/paysol)"
     },
     {
       "id": "v2-metamask-phishing-domain",
       "status": "SKIP",
-      "detail": "status=402"
+      "detail": "error: Error: no payer configured (~/.config/paysol)"
     },
     {
       "id": "v2-caller-clean-is-not-a-bypass",
       "status": "SKIP",
-      "detail": "status=402"
+      "detail": "error: Error: no payer configured (~/.config/paysol)"
     },
     {
       "id": "v2-approval-to-fresh-eoa",
       "status": "SKIP",
-      "detail": "status=402/402"
+      "detail": "error: Error: no payer configured (~/.config/paysol)"
     },
     {
       "id": "v2-evidence-and-signed-checks",
       "status": "SKIP",
-      "detail": "status=402"
-    },
-    {
-      "id": "v2-ipv6-slash64-aggregation",
-      "status": "SKIP",
-      "detail": "set IPV6_A and IPV6_B (two source addresses in one /64)"
+      "detail": "error: Error: no payer configured (~/.config/paysol)"
     }
   ]
 }
