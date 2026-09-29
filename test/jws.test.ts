@@ -70,3 +70,31 @@ test("signing accepts both SEC1 (production secret format) and PKCS#8 PEM keys",
     assert.ok(verifyJws(jws, pub), type);
   }
 });
+
+// Upstream review (x402-foundation/x402#3597): the v5 hash used a replacer array, so
+// nested keys outside the top-level whitelist vanished. These pin the JCS behaviour.
+test("input hash: nested value changes change the hash (x402#3597 example)", async () => {
+  assert.notEqual(inputHash({ context: { amount: 1 } }), inputHash({ context: { amount: 999 } }));
+  assert.notEqual(inputHash({ payment: { pay_to: "a", amount: "1" } }), inputHash({ payment: { pay_to: "a", amount: "2" } }));
+});
+
+test("input hash: nested key order does not matter, array order does", async () => {
+  assert.equal(inputHash({ a: { x: 1, y: { p: 1, q: 2 } } }), inputHash({ a: { y: { q: 2, p: 1 }, x: 1 } }));
+  assert.notEqual(inputHash({ q: ["a", "b"] }), inputHash({ q: ["b", "a"] }));
+  assert.equal(inputHash({ q: [{ b: 1, a: 2 }] }), inputHash({ q: [{ a: 2, b: 1 }] }));
+});
+
+test("canonical JSON follows RFC 8785 (JCS): official sample + numeric edge cases", async () => {
+  const { canonicalJson } = await import("../src/jws.js");
+  // RFC 8785 §3.2.2 sample input and its canonical form
+  const sample = JSON.parse('{"numbers":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001],"string":"\\u20ac$\\u000F\\u000aA\'\\u0042\\u0022\\u005c\\\\\\"\\/","literals":[null,true,false]}');
+  assert.equal(canonicalJson(sample), '{"literals":[null,true,false],"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27],"string":"€$\\u000f\\nA\'B\\"\\\\\\\\\\"/"}');
+  assert.equal(canonicalJson({ a: 1 }), canonicalJson({ a: 1.0 }));
+  assert.equal(canonicalJson({ a: -0 }), '{"a":0}');
+  assert.equal(canonicalJson({ a: 1e21 }), '{"a":1e+21}');
+  assert.equal(canonicalJson({ a: 0.1 + 0.2 }), '{"a":0.30000000000000004}');
+  assert.equal(canonicalJson({ "é": 1, e: 2, "😀": 3 }), '{"e":2,"é":1,"😀":3}'); // UTF-16 code-unit order
+  assert.throws(() => canonicalJson({ a: Number.NaN }));
+  assert.throws(() => canonicalJson({ a: Number.POSITIVE_INFINITY }));
+  assert.throws(() => canonicalJson({ a: 10n }));
+});

@@ -126,10 +126,20 @@ export function verifyJws(jws: string, jwk: Jwk): JwsClaims | null {
   }
 }
 
-/** Deterministic JSON: object keys sorted at every depth, undefined members dropped. */
+/**
+ * RFC 8785 (JCS) canonical JSON: object keys sorted by UTF-16 code units at every
+ * depth, ECMAScript number and string serialization, undefined members dropped.
+ * Non-finite numbers and non-JSON values (functions, symbols, bigint) throw instead
+ * of silently collapsing to null.
+ */
 export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("canonicalJson: non-finite number");
+    return JSON.stringify(value);
+  }
   if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? "null" : canonicalJson(v))).join(",")}]`;
+  if (typeof value !== "object") throw new TypeError(`canonicalJson: unsupported ${typeof value}`);
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
