@@ -198,10 +198,10 @@ const PAGE = `<!doctype html>
     <div class="ledger">
       <div class="ledger-row">
         <div class="ledger-cell"><b class="ok">24/24</b><span>OFAC SDN addresses (4 chains) &rarr; critical, deterministic</span></div>
-        <div class="ledger-cell"><b class="ok">29/30</b><span>drainer permits caught with the drainer feed <i>turned off</i> (approval-to-wallet rule)</span></div>
+        <div class="ledger-cell"><b class="ok">27/30</b><span>drainer permits caught with the drainer feed <i>turned off</i> (approval-to-wallet rule)</span></div>
         <div class="ledger-cell"><b class="ok">0/62</b><span>false positives on well-known contracts and top dApp domains</span></div>
         <div class="ledger-cell"><b>0.003%</b><span>of the Tranco top 200k domains capped by deterministic rules</span></div>
-        <div class="ledger-cell"><b>3/60</b><span>unlisted phishing domains caught without the feed &mdash; feeds do the heavy lifting</span></div>
+        <div class="ledger-cell"><b>0&ndash;3/60</b><span>unlisted phishing domains caught without the feed &mdash; feeds do the heavy lifting</span></div>
         <div class="ledger-cell"><b>0/30</b><span>plain transfers to unlisted drainers &mdash; not detectable from the address alone</span></div>
       </div>
     </div>
