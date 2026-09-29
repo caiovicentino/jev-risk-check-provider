@@ -220,7 +220,7 @@ const PAGE = `<!doctype html>
   <section id="integrate">
     <div class="sec-head"><span class="sec-no">04</span><h2>Integration</h2></div>
     <pre>
-<span class="cm"># Paid per call with x402: $0.001 in USDC ($0.002 on Solana); a batch of n is billed n.</span>
+<span class="cm"># Paid per call with x402: $0.001 in USDC ($0.002 on Solana); $0.005 with a transaction to simulate.</span>
 <span class="cm"># An unpaid call returns 402 with the accepted mainnet options; any x402 client pays and retries.</span>
 curl -X POST https://x402check.xyz/v1/risk-check \\
   -H <span class="g">"Content-Type: application/json"</span> \\
@@ -269,7 +269,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
     <div class="sec-head"><span class="sec-no">06</span><h2>Pricing &amp; identity</h2></div>
     <table>
       <tr><th></th><th></th></tr>
-      <tr><td>Price</td><td>$0.001 per evaluation ($0.002 on Solana), batch billed per item, USDC via x402 on mainnet &mdash; Base, Polygon, Arbitrum, Avalanche, Monad, Sei, Solana. Every evaluation is paid; the attestation is released only after settlement.</td></tr>
+      <tr><td>Price</td><td>$0.001 per evaluation ($0.002 on Solana); $0.005 when the request includes a transaction that is simulated; batch billed per item. USDC via x402 on mainnet &mdash; Base, Polygon, Arbitrum, Avalanche, Monad, Sei, Solana. Every evaluation is paid; the attestation is released only after settlement.</td></tr>
       <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> &mdash; <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
       <tr><td>Data</td><td>OFAC SDN (U.S. Treasury) and MetaMask eth-phishing-detect, refreshed daily; ScamSniffer (runtime); Forta labelled datasets; Blockscout; public JSON-RPC &mdash; see THIRD_PARTY_NOTICES.md and the live <a href="/status">data status</a></td></tr>
       <tr><td>Engine</td><td>Deterministic checks and scoring in open-source code (MIT); TypeSafe Jev System One for content intent</td></tr>

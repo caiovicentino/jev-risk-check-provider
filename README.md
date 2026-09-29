@@ -1,6 +1,6 @@
 # x402check — pre-payment risk checks for x402 agents and wallets
 
-**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · $0.001 per evaluation, paid with x402 · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
+**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · $0.001 per evaluation ($0.005 with transaction simulation), paid with x402 · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
 
 x402check is an x402 `risk-check` provider (wire format of [x402 PR #2422](https://github.com/x402-foundation/x402/pull/2422)). You call it before an agent or a wallet pays or signs, and it checks the counterparty. It combines provider-verified evidence with a typed model:
 
@@ -159,7 +159,7 @@ if (v.tier === "high" || v.tier === "critical") warnOrBlock(v);
 
 Every evaluation is paid; there is no free tier.
 
-- **Price:** $0.001 per evaluation ($0.002 on Solana). A batch of *n* is billed *n*.
+- **Price:** $0.001 per evaluation ($0.002 on Solana), and **$0.005 when the request includes a `transaction` that is simulated.** The simulated price covers the simulation, the classification of every recipient and spender, and code fingerprints through delegations and proxies. It is charged only on chains where simulation runs. A batch is billed per item.
 - **Settlement:** USDC via x402 v2 (`PAYMENT-SIGNATURE`), **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The x402 "exact" scheme is gasless for the payer, so USDC alone is enough.
 - **Facilitators:** EVM payments settle through PayAI, and Solana and Monad through Dexter. Dexter's published gas-cost floors are above $0.001 on Base, Polygon, Arbitrum and Avalanche. [`/status`](https://x402check.xyz/status) shows each network's facilitator and floor against the price.
 - **An unpaid request** gets `402` with the accepted options in `PAYMENT-REQUIRED`. Any x402 client pays and retries.

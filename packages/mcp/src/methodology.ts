@@ -23,7 +23,7 @@ Every verdict is an ES256 attestation signed by did:web:x402check.xyz. It lists 
 
 Published limits (measured):
 - Unknown drainers receiving a plain transfer are NOT detectable from the address alone (0/30 held-out drainer addresses with the feed off). Simulating the transaction is what catches a drain in flight.
-- Unlisted phishing domains are mostly NOT caught without a feed (0 to 3 of 60).
+- Unlisted phishing domains are mostly NOT caught without a feed (0 to 4 of 60).
 - The simulation replays at the latest block and is measured on Ethereum only. A drainer that returns any asset to the victim defeats the hidden-recipient rule.
 - Sanctions screening is direct OFAC listing only: funds received from listed addresses are not detected, and it is not a compliance program.
 - Laundering and other transaction-graph behaviour are not analyzed.
@@ -37,7 +37,7 @@ Policy for agents: call x402check_check BEFORE sending funds, signing approvals,
 - block: do not proceed
 - not_verified: the check did not complete or could not be verified. STOP; it is never an all-clear.
 
-Price: $0.001 per evaluation ($0.002 on Solana), paid per call with x402 (USDC); there is no free tier. This server pays from its configured payer (X402CHECK_PAYER_KEY), within its per-payment cap and budget.
+Price: $0.001 per evaluation ($0.002 on Solana), $0.005 when a transaction is simulated, paid per call with x402 (USDC); there is no free tier. This server pays from its configured payer (X402CHECK_PAYER_KEY), within its per-payment cap and budget.
 
 Evidence: ${EVIDENCE_URL}
 Methodology: ${METHODOLOGY_URL}

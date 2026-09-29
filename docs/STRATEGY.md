@@ -39,7 +39,9 @@ Every answer comes back as a signed attestation that a merchant, a facilitator, 
 
 ## Business model
 
-Every evaluation is paid per call via x402: $0.001 in USDC, $0.002 on Solana, with a batch billed per item. There is no free tier.
+Every evaluation is paid per call via x402: $0.001 in USDC ($0.002 on Solana), and $0.005 when the request includes a transaction that is simulated. A batch is billed per item. There is no free tier.
+
+- The simulation is priced higher because it is the most valuable layer: what the transaction will actually do, and whose code it runs.
 
 - The price is the product: an agent or wallet pays for a signed, evidence-backed verdict at the moment it matters.
 - The price is also the anti-abuse control: nothing is evaluated without settlement, and the attestation is released only after the payment settles.

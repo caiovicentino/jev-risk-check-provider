@@ -133,3 +133,22 @@ test("payment routing: EVM networks settle through PayAI (below Dexter's gas flo
   const dexterOnly = await paymentRouting({}, [{ name: "dexter", client: dexter }]);
   assert.equal(dexterOnly.find((r) => r.network === "eip155:8453")?.below_floor, true);
 });
+
+test("differentiated pricing: $0.005 for an evaluation that simulates a transaction, per item in a batch", async () => {
+  const { priceMilli, simulates } = await import("../deploy/protected.js");
+  const USER = "0x1111111111111111111111111111111111111111";
+  const tx = { from: USER, to: USER, value: "1" };
+  const ctx = (path: string, body: unknown) => ({ path, adapter: { getBody: () => body } }) as unknown as HTTPRequestContext;
+  // Simulated only where a simulation endpoint exists (not Avalanche) and when enabled.
+  assert.equal(simulates({ wallet: USER, chain: "base", transaction: tx }), true);
+  assert.equal(simulates({ wallet: `eip155:42161:${USER}`, transaction: tx }), true, "chain from a CAIP-10 wallet");
+  assert.equal(simulates({ wallet: USER, chain: "eip155:43114", transaction: tx }), false, "no simulation on Avalanche → basic price");
+  assert.equal(simulates({ wallet: USER, chain: "base" }), false);
+  assert.equal(makePrice(0.001)(ctx("/v1/risk-check", { wallet: USER, chain: "base", transaction: tx })), "$0.005");
+  assert.equal(makePrice(0.002)(ctx("/v1/risk-check", { wallet: USER, chain: "base", transaction: tx })), "$0.005", "same on Solana");
+  assert.equal(makePrice(0.001, false)(ctx("/v1/risk-check", { wallet: USER, chain: "base", transaction: tx })), "$0.001", "simulation off → never charged");
+  const mixed = { requests: [{ wallet: USER, chain: "base", transaction: tx }, { wallet: USER }, { wallet: USER, chain: "polygon" }] };
+  assert.equal(makePrice(0.001)(ctx("/v1/risk-check/batch", mixed)), "$0.007");
+  assert.equal(makePrice(0.002)(ctx("/v1/risk-check/batch", mixed)), "$0.009");
+  assert.equal(priceMilli("/v1/risk-check/batch", { requests: new Array(25).fill({ wallet: USER, chain: "base", transaction: tx }) }, 1), 125);
+});

@@ -4,7 +4,7 @@
 
 | Route | What |
 |---|---|
-| `POST /v1/risk-check` | single evaluation, paid with x402 ($0.001; $0.002 on Solana) |
+| `POST /v1/risk-check` | single evaluation, paid with x402 ($0.001; $0.002 on Solana; $0.005 when a `transaction` is simulated) |
 | `POST /v1/risk-check/batch` | up to 25 evaluations, billed per item |
 | `GET /.well-known/risk-check.json` | discovery: pricing networks, data sources, attestation claims |
 | `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation key (`kid jev-attest-v1`), `did:web` document |
@@ -27,7 +27,8 @@
    - **Unpaid request:** it gets the `402` challenge with the accepted options.
    - **Paid request:** verify → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed` and no attestation is returned.
 3. **Facilitator routing** (`mainnetFacilitators` in `protected.ts`): PayAI for the EVM networks it supports, then Dexter for Solana, Monad and any EVM network PayAI lacks. Dexter refuses payments below its published gas-cost floor, which is above $0.001 on Base, Polygon, Arbitrum and Avalanche. `/status` → `payments` lists each network's facilitator, floor and `below_floor`.
-4. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
+4. **Pricing** (`priceMilli`): $0.001 per evaluation ($0.002 on Solana). An item whose `transaction` will be simulated costs $0.005 on every network; that is a supported simulation chain, with `SIMULATION` not off. A batch is the sum of its items. The discovery document states both prices (`amount`, `amount_with_transaction`).
+5. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
 
 ## Secrets and variables
 

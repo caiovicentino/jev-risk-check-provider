@@ -4,11 +4,11 @@ An MCP server that lets any AI agent check a counterparty **before money moves**
 
 Each check screens the counterparty against the OFAC SDN list, phishing and drainer feeds, look-alike domains and on-chain facts. It can also simulate the transaction (API v0.3), and a typed model reads the content the agent acted on. The server verifies every verdict's ES256 attestation against `did:web:x402check.xyz` before the agent sees an action.
 
-**Every check is paid:** $0.001 in USDC per evaluation, via x402. There is no free tier. The server pays from a wallet you configure (`X402CHECK_PAYER_KEY`), with a per-payment cap and a total budget. The agent never handles money.
+**Every check is paid:** $0.001 in USDC per evaluation via x402, or $0.005 when the check includes a transaction to simulate. There is no free tier. The server pays from a wallet you configure (`X402CHECK_PAYER_KEY`), with a per-payment cap and a total budget. The agent never handles money.
 
 | Tool | What it does |
 |---|---|
-| `x402check_check` | Risk-checks a counterparty, paying $0.001. It returns an action (`allow`, `warn`, `block` or `not_verified`), the findings, the evidence, the attestation `jti`, the settlement receipt and the full structured result. |
+| `x402check_check` | Risk-checks a counterparty, paying $0.001, or $0.005 when a transaction is simulated. It returns an action (`allow`, `warn`, `block` or `not_verified`), the findings, the evidence, the attestation `jti`, the settlement receipt and the full structured result. |
 | `x402check_verify_attestation` | Verifies an x402check attestation (`{ jws, aud?, sub? }`) before relying on it. It makes no payment. |
 | `x402check_methodology` | Explains what is checked, the price, and the published, measured limits. It makes no payment. |
 

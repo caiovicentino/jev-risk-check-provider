@@ -587,10 +587,10 @@ describe("x402check_methodology", () => {
     try {
       const r = await callTool(session.client, "x402check_methodology");
       assert.match(r.text, /Unknown drainers receiving a plain transfer are NOT detectable from the address alone \(0\/30/);
-      assert.match(r.text, /Unlisted phishing domains are mostly NOT caught without a feed \(0 to 3 of 60\)/);
+      assert.match(r.text, /Unlisted phishing domains are mostly NOT caught without a feed \(0 to 4 of 60\)/);
       assert.match(r.text, /real drainer transactions on Ethereum 18\/25 flagged when assets move \(72%\), against 0\/84 legitimate transactions to 19 well-known contracts/);
       assert.match(r.text, /43\/100 listed contracts at creation from earlier deployments \(15\/100 cross-source from Forta 2023\), with 0 collisions among 9,625 legitimate contracts/);
-      assert.match(r.text, /Price: \$0\.001 per evaluation \(\$0\.002 on Solana\), paid per call with x402 \(USDC\); there is no free tier/);
+      assert.match(r.text, /Price: \$0\.001 per evaluation \(\$0\.002 on Solana\), \$0\.005 when a transaction is simulated, paid per call with x402 \(USDC\); there is no free tier/);
       assert.doesNotMatch(r.text, /per day|free tier:/i);
       assert.match(r.text, /Transaction simulation \(eth_simulateV1 on Ethereum, Base, Polygon, Arbitrum, Optimism and BSC; not Avalanche\)/);
       assert.match(r.text, /hidden recipients.*exceeds-declared.*unverified sinks/s);

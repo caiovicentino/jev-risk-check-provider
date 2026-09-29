@@ -9,7 +9,7 @@ Typed client and attestation verifier for [x402check](https://x402check.xyz). x4
 - a simulation of the transaction (API v0.3);
 - a typed model that reads the content the agent acted on.
 
-Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. Every evaluation is paid per call with [x402](#paying-x402): $0.001 in USDC ($0.002 on Solana). There is no free tier.
+Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. Every evaluation is paid per call with [x402](#paying-x402): $0.001 in USDC ($0.002 on Solana), and $0.005 when the request includes a `transaction` that is simulated. There is no free tier.
 
 - **Zero runtime dependencies.** ESM with bundled `.d.ts` types.
 - **Runs anywhere WebCrypto and `fetch` exist:** Node ≥ 20, browsers, Cloudflare Workers, Deno and Bun.
@@ -292,7 +292,7 @@ In the simulation evidence, an outflow's `counterparty` is the **final beneficia
 
 ## Paying (x402)
 
-Every evaluation is paid per call with x402 v2: $0.001 in USDC on Base, Polygon, Arbitrum, Avalanche, Monad or Sei, or $0.002 on Solana. A batch of *n* costs *n* times the unit price. There is no free tier.
+Every evaluation is paid per call with x402 v2: $0.001 in USDC on Base, Polygon, Arbitrum, Avalanche, Monad or Sei, or $0.002 on Solana. A request with a `transaction` that is simulated costs $0.005 on any network. A batch of *n* costs *n* times the unit price. There is no free tier.
 
 Without payment, the API answers `402`, and the client rejects with an `X402CheckError`: `code: "payment_required"`, with the decoded challenge in `paymentRequired.accepts`. `interpret()` turns that into `not_verified` with the next step to configure a payer.
 

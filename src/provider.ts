@@ -68,7 +68,7 @@ export type ScoredEvaluation = {
   error: string | null;
 };
 
-export type PricingInfo = { unitUsd: string; networks: string[] };
+export type PricingInfo = { unitUsd: string; simulationUsd?: string; networks: string[] };
 
 export function discoveryDocument(host: string, pricing?: PricingInfo): RiskCheckDiscovery {
   return {
@@ -80,7 +80,19 @@ export function discoveryDocument(host: string, pricing?: PricingInfo): RiskChec
     batch_endpoint: "/v1/risk-check/batch",
     method: "POST",
     ...(pricing
-      ? { pricing: { amount: pricing.unitUsd, currency: "USDC", protocol: "x402", network: pricing.networks[0] ?? "", unit: "per evaluation; batch billed per item", networks: pricing.networks } }
+      ? {
+          pricing: {
+            amount: pricing.unitUsd,
+            currency: "USDC",
+            protocol: "x402",
+            network: pricing.networks[0] ?? "",
+            unit: pricing.simulationUsd
+              ? `per evaluation ($0.002 on Solana); $${pricing.simulationUsd} when the request includes a transaction that is simulated; batch billed per item`
+              : "per evaluation ($0.002 on Solana); batch billed per item",
+            ...(pricing.simulationUsd ? { amount_with_transaction: pricing.simulationUsd } : {}),
+            networks: pricing.networks,
+          },
+        }
       : {}),
     signals: ["ofac_sdn_address", "threat_feeds", "domain_impersonation", "onchain_activity", "transaction_simulation", "contract_verification", "drainer_code_fingerprint", "operation_context_intent"],
     chains_supported: Object.keys(DEFAULT_RPC),

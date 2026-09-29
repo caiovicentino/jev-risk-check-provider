@@ -7,7 +7,9 @@ import { validateBatch, validateRequest } from "../src/validate.js";
 import { createOnchainLookup } from "../src/onchain.js";
 import { createSimulator } from "../src/simulation.js";
 import { createContractIntel } from "../src/contract-intel.js";
-import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
+import { normalizeChain, SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
+import { parseSubject } from "../src/address.js";
+import { SIMULATION_ENDPOINTS } from "../src/rpc.js";
 import type { ThreatIntelFeeds } from "../src/threat-intel.js";
 import { HTTPFacilitatorClient, x402ResourceServer, type FacilitatorClient } from "@x402/core/server";
 import { x402HTTPResourceServer, type HTTPAdapter, type HTTPRequestContext, type HTTPProcessResult, type HTTPResponseInstructions, type PaymentOption } from "@x402/core/http";
@@ -25,6 +27,12 @@ const MAX_BODY_BYTES = 64 * 1024;
 export const UNIT_PRICE_EVM = 0.001;
 // Solana mainnet settlement via Dexter has a dynamic floor above $0.001.
 export const UNIT_PRICE_SOL = 0.002;
+/**
+ * An evaluation that simulates a transaction (eth_simulateV1, classification of every
+ * recipient and spender, code fingerprints through delegations and proxies): the most
+ * valuable and most expensive layer. Charged only when the simulation can run.
+ */
+export const SIMULATION_PRICE = 0.005;
 
 export type Stack = {
   deps: HandlerDeps;
@@ -51,14 +59,33 @@ export function unitsFor(path: string, body: unknown): number {
   return Math.min(25, Math.max(1, n));
 }
 
-export function makePrice(unit: number): (ctx: HTTPRequestContext) => string {
-  return (ctx) => `$${(unit * unitsFor(ctx.path, ctx.adapter.getBody?.())).toFixed(3)}`;
+/** Whether this (raw, validated) request item will be simulated: a transaction on a chain with a simulation endpoint. */
+export function simulates(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as { transaction?: unknown; chain?: unknown; wallet?: unknown };
+  if (r.transaction === undefined) return false;
+  const network = typeof r.chain === "string" ? normalizeChain(r.chain)?.caip2 : typeof r.wallet === "string" ? parseSubject(r.wallet)?.caip2 : undefined;
+  return !!network && network in SIMULATION_ENDPOINTS;
+}
+
+/** Price in thousandths of a dollar (integer arithmetic): per item, basic unit or simulation price. */
+export function priceMilli(path: string, body: unknown, unitMilli: number, simulation = true): number {
+  const itemMilli = (item: unknown) => (simulation && simulates(item) ? Math.max(unitMilli, Math.round(SIMULATION_PRICE * 1000)) : unitMilli);
+  if (!path.endsWith("/batch")) return itemMilli(body);
+  const reqs = Array.isArray((body as { requests?: unknown } | null)?.requests) ? (body as { requests: unknown[] }).requests.slice(0, 25) : [];
+  return reqs.length ? reqs.reduce<number>((sum, r) => sum + itemMilli(r), 0) : unitMilli;
+}
+
+export function makePrice(unit: number, simulation = true): (ctx: HTTPRequestContext) => string {
+  const unitMilli = Math.round(unit * 1000);
+  return (ctx) => `$${(priceMilli(ctx.path, ctx.adapter.getBody?.(), unitMilli, simulation) / 1000).toFixed(3)}`;
 }
 
 export function buildAccepts(env: WorkerEnv): PaymentOption[] {
   const payToEvm = env.PAY_TO_EVM ?? "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178";
   const payToSol = env.PAY_TO_SOL ?? "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X";
-  const evm = makePrice(UNIT_PRICE_EVM);
+  const simulation = env.SIMULATION !== "off";
+  const evm = makePrice(UNIT_PRICE_EVM, simulation);
   const accepts: PaymentOption[] = [
     { scheme: "exact", network: BASE_MAINNET, payTo: payToEvm, price: evm },
     { scheme: "exact", network: "eip155:137", payTo: payToEvm, price: evm },
@@ -66,7 +93,7 @@ export function buildAccepts(env: WorkerEnv): PaymentOption[] {
     { scheme: "exact", network: "eip155:43114", payTo: payToEvm, price: evm },
     { scheme: "exact", network: "eip155:143", payTo: payToEvm, price: evm },
     { scheme: "exact", network: "eip155:1329", payTo: payToEvm, price: evm },
-    { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: makePrice(UNIT_PRICE_SOL) },
+    { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: makePrice(UNIT_PRICE_SOL, simulation) },
   ];
   if (env.ENABLE_TESTNETS === "true") {
     accepts.push(
@@ -174,7 +201,7 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   const contractIntel = env.CONTRACT_INTEL === "off" ? null : createContractIntel({ timeoutMs: 1500 });
   const simulator = env.SIMULATION === "off" ? null : createSimulator({ rpc: simRpc, timeoutMs: 2500, contractIntel });
   const accepts = buildAccepts(env);
-  const pricing: PricingInfo = { unitUsd: UNIT_PRICE_EVM.toFixed(3), networks: accepts.map((a) => String(a.network)) };
+  const pricing: PricingInfo = { unitUsd: UNIT_PRICE_EVM.toFixed(3), ...(env.SIMULATION !== "off" ? { simulationUsd: SIMULATION_PRICE.toFixed(3) } : {}), networks: accepts.map((a) => String(a.network)) };
   const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds, simulator, contractIntel }), pricing };
 
   const facilitators: FacilitatorClient[] = [

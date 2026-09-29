@@ -90,6 +90,8 @@ export type RiskCheckDiscovery = {
     protocol: string;
     network: string;
     unit?: string;
+    /** Price of an evaluation whose request includes a transaction that is simulated. */
+    amount_with_transaction?: string;
     networks?: string[];
   };
   signals?: string[];

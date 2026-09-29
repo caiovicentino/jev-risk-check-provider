@@ -118,6 +118,21 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
     },
   },
   {
+    id: "v3-simulation-priced",
+    run: async () => {
+      // $0.005 per item that simulates a transaction ($0.001 / $0.002 otherwise): read from the 402 challenge, nothing is paid.
+      const USER = "0x1111111111111111111111111111111111111111";
+      const tx = { from: USER, to: ROUTER, value: "1" };
+      const single = paymentRequired(await call("POST", "/v1/risk-check", { wallet: ROUTER, chain: "base", transaction: tx }));
+      const mixed = paymentRequired(await call("POST", "/v1/risk-check/batch", { requests: [{ wallet: ROUTER, chain: "base", transaction: tx }, { wallet: WALLET }, { wallet: ROUTER, chain: "base" }] }));
+      if (!single.length || !mixed.length) return { status: "SKIP", detail: "no 402 challenge" };
+      const sol = (list: typeof single) => list.find((a) => a.network.startsWith("solana:"))?.amount;
+      const evm = (list: typeof single) => list.filter((a) => a.network.startsWith("eip155:")).map((a) => a.amount);
+      const ok = evm(single).every((a) => a === "5000") && sol(single) === "5000" && evm(mixed).every((a) => a === "7000") && sol(mixed) === "9000";
+      return ok ? { status: "PASS", detail: "simulated item $0.005 on every network; mixed batch (1 simulated + 2 basic) = $0.007 EVM, $0.009 Solana" } : { status: "FAIL", detail: `single ${JSON.stringify(single)} mixed ${JSON.stringify(mixed)}` };
+    },
+  },
+  {
     id: "v2-validation-before-payment",
     run: async () => {
       const cases: Array<[string, unknown, number, string?]> = [
