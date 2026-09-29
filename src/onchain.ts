@@ -21,7 +21,8 @@ export const DEFAULT_RPC: Record<string, string> = {
   "eip155:10": "https://mainnet.optimism.io",
   "eip155:43114": "https://api.avax.network/ext/bc/C/rpc",
   "eip155:56": "https://bsc-dataseed.bnbchain.org",
-  [SOLANA_MAINNET]: "https://api.mainnet-beta.solana.com",
+  // api.mainnet-beta.solana.com refuses Cloudflare Worker egress; publicnode serves it.
+  [SOLANA_MAINNET]: "https://solana-rpc.publicnode.com",
 };
 
 export const SOLANA_SIG_LIMIT = 25;

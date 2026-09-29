@@ -1,12 +1,10 @@
 name = "x402check"
 main = "worker.ts"
 compatibility_date = "2026-09-01"
-
-# Embedded threat-feed hash sets (src/data/*.bin) are bundled as ArrayBuffer Data modules.
-[[rules]]
-type = "Data"
-globs = ["**/*.bin"]
-fallthrough = false
+# Single canonical origin (x402check.xyz): no workers.dev or preview entrypoints that
+# would sidestep zone-level rules.
+workers_dev = false
+preview_urls = false
 
 routes = [
   { pattern = "x402check.xyz", custom_domain = true }
@@ -39,3 +37,10 @@ class_name = "RateCounter"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RateCounter"]
+
+# Embedded threat-feed hash sets (src/data/*.bin) are bundled as ArrayBuffer Data modules.
+# Keep this table LAST: TOML keys written after a [[table]] header belong to that table.
+[[rules]]
+type = "Data"
+globs = ["**/*.bin"]
+fallthrough = false

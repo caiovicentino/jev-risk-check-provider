@@ -985,33 +985,31 @@ const probes: Probe[] = [
   {
     id: "dos2-quota-counter",
     category: "dos-abuse",
-    budget: 2,
-    evalBudget: 0,
+    budget: 12,
+    evalBudget: 12,
     run: async () => {
-      const before = await fetch(`${ENDPOINT}/healthz`);
-      if (before.status !== 200) return { status: "SKIP", detail: `healthz status=${before.status}` };
-      const beforeJson = (await before.json()) as Record<string, unknown>;
-      if (typeof beforeJson.freeEvalsToday !== "number") return { status: "SKIP", detail: "freeEvalsToday unavailable" };
-      const tag = `dos2q-${Date.now().toString(36)}`;
+      // v0.2.0: /healthz is edge-cached (60 s), so totals cannot be diffed. Atomicity is
+      // proven per key instead: N concurrent requests from ONE client id must receive N
+      // distinct, consecutive X-Risk-Check-Free-Remaining values (a lost update would
+      // repeat a value; an overcount would skip one).
+      const client = `dos2q-${Date.now().toString(36)}`;
       const N = 12;
-      const jobs = Array.from({ length: N }, (_, i) =>
+      const jobs = Array.from({ length: N }, () =>
         fetch(`${ENDPOINT}/v1/risk-check`, {
           method: "POST",
-          headers: { "content-type": "application/json", "x-risk-check-client": `${tag}-${i}` },
+          headers: { "content-type": "application/json", "x-risk-check-client": client },
           body: JSON.stringify({ wallet: walletFor(26), chain: "solana", context: "quota counter concurrency probe" }),
           signal: AbortSignal.timeout(30000),
-        }).then((r) => r.status),
+        }).then((r) => ({ status: r.status, remaining: r.headers.get("x-risk-check-free-remaining") })),
       );
-      const codes = await Promise.all(jobs);
-      const okCount = codes.filter((c) => c === 200).length;
-      const after = await fetch(`${ENDPOINT}/healthz`);
-      const afterJson = (await after.json()) as Record<string, unknown>;
-      const afterTotal = typeof afterJson.freeEvalsToday === "number" ? afterJson.freeEvalsToday : -1;
-      const beforeTotal = beforeJson.freeEvalsToday as number;
-      const delta = afterTotal - beforeTotal;
-      if (delta < okCount) return { status: "FAIL", detail: `counter undercounted: free-total advanced +${delta} while ${okCount}/${N} concurrent client-id requests succeeded (atomicity violated)` };
-      if (delta === okCount) return { status: "PASS", detail: `atomic counter: ${N} concurrent distinct-client requests → free-total advanced exactly +${delta} (no undercount, no overcount)` };
-      return { status: "PASS", detail: `free-total advanced +${delta} for ${okCount} concurrent requests — overcount attributable to concurrent external traffic; no undercount` };
+      const results = await Promise.all(jobs);
+      const free = results.filter((r) => r.status === 200 && r.remaining !== null).map((r) => Number(r.remaining)).sort((a, b) => b - a);
+      if (free.length < N) return { status: "SKIP", detail: `only ${free.length}/${N} free responses (allowance exhausted?)` };
+      const distinct = new Set(free).size === free.length;
+      const consecutive = free.every((v, i) => i === 0 || free[i - 1]! - v === 1);
+      return distinct && consecutive
+        ? { status: "PASS", detail: `atomic per-key counter: ${N} concurrent requests from one client id → remaining ${free[0]}…${free[free.length - 1]}, all distinct and consecutive` }
+        : { status: "FAIL", detail: `non-atomic: remaining values ${free.join(",")}` };
     },
   },
   {

@@ -98,7 +98,8 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
     rpc = {};
   }
   if (env.SOL_RPC_URL_MAINNET) rpc[SOLANA_MAINNET] = env.SOL_RPC_URL_MAINNET;
-  const onchain = env.ONCHAIN === "off" ? null : createOnchainLookup({ rpc, timeoutMs: 1500 });
+  // Runs in parallel with the model call (~0.5 s), so a 2 s ceiling only matters when an RPC is slow.
+  const onchain = env.ONCHAIN === "off" ? null : createOnchainLookup({ rpc, timeoutMs: 2000 });
   const accepts = buildAccepts(env);
   const pricing: PricingInfo = { unitUsd: UNIT_PRICE_EVM.toFixed(3), networks: accepts.map((a) => String(a.network)) };
   const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds }), pricing };

@@ -103,6 +103,10 @@ function verifyAttestation(jws: string, keys: Map<string, JsonWebKey>): JwsCheck
 }
 
 let payFetch: ((input: string, init?: RequestInit) => Promise<Response>) | null = null;
+// X402CHECK_CLIENT_IDS=a,b,c: install-style ids; on a free-tier 402 the run moves to the
+// next id and retries the same case (each id: its own allowance, then the IP allowance).
+const CLIENT_IDS = (process.env.X402CHECK_CLIENT_IDS ?? process.env.X402CHECK_CLIENT_ID ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+let clientIdx = 0;
 
 async function postRiskCheck(req: RiskCheckRequest): Promise<{ status: number; body: RiskCheckResult | null }> {
   if (process.env.PAID && !payFetch) payFetch = await buildPayFetch();
@@ -113,7 +117,7 @@ async function postRiskCheck(req: RiskCheckRequest): Promise<{ status: number; b
       "Content-Type": "application/json",
       ...(process.env.PAID ? { "X-Risk-Check-Paid": "1" } : {}),
       // Optional install-style id: the free tier then charges this id first, then the IP allowance.
-      ...(process.env.X402CHECK_CLIENT_ID ? { "X-Risk-Check-Client": process.env.X402CHECK_CLIENT_ID } : {}),
+      ...(CLIENT_IDS[clientIdx] ? { "X-Risk-Check-Client": CLIENT_IDS[clientIdx] as string } : {}),
     },
     body: JSON.stringify(req),
     signal: AbortSignal.timeout(60_000),
@@ -226,7 +230,13 @@ async function main(): Promise<void> {
     const c = CASES[i]!;
     const bucket = (perCategory[c.category] ??= { n: 0, correct: 0 });
     bucket.n++;
-    const { entry, outcome, detail, mismatch } = await runCase(c, keys, bucket);
+    let run = await runCase(c, keys, bucket);
+    while (run.outcome === "quota_exhausted" && !process.env.PAID && clientIdx + 1 < CLIENT_IDS.length) {
+      clientIdx++;
+      console.log(`  free allowance exhausted — switching to client id #${clientIdx + 1}`);
+      run = await runCase(c, keys, bucket);
+    }
+    const { entry, outcome, detail, mismatch } = run;
     entries.push(entry);
     appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
     if (mismatch) jwsMismatches.push(mismatch);
