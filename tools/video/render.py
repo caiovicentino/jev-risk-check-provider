@@ -194,6 +194,37 @@ def anim_code(lines, header="Integration"):
         return img
     return draw
 
+def anim_browser(shot_path, url, dark=False, zoom=1.10, pan=True):
+    """Browser window frame with a real screenshot; slow zoom + downward pan."""
+    def draw(t):
+        dur = globals()['CUR_DUR']
+        img, d = base_canvas()
+        progress_bar(d, t)
+        pad = 60
+        wx0, wy0, wx1, wy1 = pad, 104, W - pad, H - 64
+        chrome = (38, 41, 50) if dark else (240, 240, 238)
+        d.rounded_rectangle([(wx0, wy0), (wx1, wy1)], radius=10, fill=(24, 26, 32) if dark else (255, 255, 255), outline=INK, width=1)
+        d.rounded_rectangle([(wx0, wy0), (wx1, wy0 + 44)], radius=10, fill=chrome)
+        d.rectangle([(wx0, wy0 + 30), (wx1, wy0 + 44)], fill=chrome)
+        for i, cc in enumerate([(255, 95, 86), (255, 189, 46), (39, 201, 63)]):
+            d.ellipse([(wx0 + 20 + i * 22, wy0 + 16), (wx0 + 34 + i * 22, wy0 + 30)], fill=cc)
+        d.rounded_rectangle([(wx0 + 100, wy0 + 10), (wx1 - 100, wy0 + 36)], radius=6, fill=(56, 60, 70) if dark else (250, 250, 248))
+        d.text((wx0 + 116, wy0 + 14), url, font=font_mono(13), fill=(214, 219, 231) if dark else INK)
+        shot = Image.open(shot_path).convert("RGB")
+        sw, sh = shot.size
+        area_w, area_h = wx1 - wx0 - 2, wy1 - (wy0 + 45) - 1
+        scale0 = area_w / sw
+        s = scale0 * lerp(1.0, zoom, clamp01(t * dur / max(2.2, dur * 0.9)))
+        sw2, sh2 = int(sw * s), int(sh * s)
+        img2 = shot.resize((sw2, sh2), Image.LANCZOS)
+        max_y = max(0, sh2 - area_h)
+        py = int(max_y * ease_out(clamp01(t * dur / max(2.6, dur * 0.92)))) if pan else max_y // 2
+        px = max(0, (sw2 - area_w) // 2)
+        region = img2.crop((px, py, px + area_w, py + area_h))
+        img.paste(region, (wx0 + 1, wy0 + 46))
+        return img
+    return draw
+
 def anim_terminal(lines, note=None):
     def draw(t):
         dur = globals()['CUR_DUR']

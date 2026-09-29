@@ -197,18 +197,32 @@ async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, s
   return res;
 }
 
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, PAYMENT-SIGNATURE, X-PAYMENT, X-Risk-Check-Paid",
+  "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, PAYMENT-REQUIRED, X-Risk-Check-Free, X-Payment-Error",
+  "Access-Control-Max-Age": "86400",
+};
+
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
     const stack = await ensureStack(env);
     const path = new URL(request.url).pathname;
+    let res: Response;
     if (request.method === "GET" && path === "/healthz" && env.RATE) {
       const day = new Date().toISOString().slice(0, 10);
       const freeEvalsToday = Number((await env.RATE.get(`free-total:${day}`)) ?? "0");
-      return Response.json({ ok: true, freeEvalsToday });
+      res = Response.json({ ok: true, freeEvalsToday });
+    } else if (PROTECTED.has(path)) {
+      res = await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
+    } else {
+      res = await createHandler(stack.deps)(request);
     }
-    if (PROTECTED.has(path)) {
-      return handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
-    }
-    return createHandler(stack.deps)(request);
+    for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+    return res;
   },
 };

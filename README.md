@@ -43,6 +43,40 @@ curl -X POST https://x402check.xyz/v1/risk-check \
 }
 ```
 
+## Wallet integration
+
+Wallets and wallet apps can gate any outgoing payment the same way — check the counterparty **before** the user signs. CORS is open; the snippet below runs in any browser context (extensions, dApps, web wallets):
+
+```js
+const res = await fetch("https://x402check.xyz/v1/risk-check", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    wallet: destinationAddress,            // counterparty wallet
+    chain: "solana",                       // or "base", "polygon", ...
+    domain: destinationDomainIfAny,        // optional: site the payment is for
+    context: "user sends 50 USDC to this address",
+  }),
+});
+const v = await res.json();
+if (!v.checked) {
+  // fail-closed: hold the transaction, show "check unavailable"
+} else if (v.tier === "high" || v.tier === "critical") {
+  // block or require explicit user override; display v.jws for audit
+}
+```
+
+Suggested user-facing copy per tier:
+
+| Tier | Wallet UX |
+|---|---|
+| `low` | no warning; show attestation badge (verified, signed) |
+| `medium` | amber caution: "Some signals suggest caution. Review before signing." |
+| `high` | red warning: "High risk detected. We recommend you do not proceed." |
+| `critical` | hard block with override; show categories from the verdict |
+
+Batch scan of counterparties in one call: `POST /v1/risk-check/batch` with `{"requests": [...]}` (max 25). Any verdict can be verified without trusting the provider: `npx tsx scripts/verify-attest.ts <jws>` prints `valid: true` against the live JWKS. The free tier (100/day per caller) covers end-user traffic; heavy integrations pay per check over x402 in the same wallets they already manage.
+
 ## Why
 
 Agents pay with wallets they never see keys for. The x402 ecosystem gates settlement with deterministic policy engines, but nothing evaluates **intent**: whether a payment corresponds to what the user actually authorized, or whether the payer context carries injection / fraud patterns. This provider fills that layer with typed, calibrated Jev decisions — and because the verdict is signed, downstream verification does not have to trust the provider.
