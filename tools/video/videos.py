@@ -101,7 +101,7 @@ def f_pitch():
     ]),
         "We don't show you vibes — we show a reproducible evidence trail. A 540-call scale run: 99.76 percent accuracy, zero false positives. A five-iteration red-team loop ending at one hundred percent, with every failure published. Head-to-head against GPT-4.1-mini as a judge: we win on accuracy at a fifth of the cost. That makes intent-checking viable for sub-cent agent commerce."))
     segs.append(seg(anim_section("03", "Live — payments and distribution", [
-        ("x402check.xyz", "public endpoint: 100 free evaluations/day, x402 paywall beyond"),
+        ("x402check.xyz", "public endpoint: 25 free evaluations/day, x402 paywall beyond"),
         ("Mainnet today", "USDC settlement: Base, Solana, Polygon, Arbitrum, Avalanche, Monad, Sei"),
         ("Identity", "did:web:x402check.xyz — DID document + JWKS, QUORUM-ready"),
         ("Upstream", "payer-intent slot named in PR #2300; issue #3597 open"),

@@ -78,8 +78,8 @@ def f_demo():
         anim_browser(os.path.join(OUT, "shot-landing.png"), "x402check.xyz", dark=False, zoom=1.14),
         "The product is live at x402check dot xyz. A public discovery document, a resolvable D I D, and the public key set anyone can verify our verdicts against."))
     segs.append(seg(
-        anim_terminal(norm(FREE_LINES), note="free tier: 100 evaluations/day, no signup"),
-        "First, the free tier. One hundred evaluations a day, no signup. The response header says free, and the verdict arrives as a signed attestation."))
+        anim_terminal(norm(FREE_LINES), note="free tier: 25 evaluations/day, no signup"),
+        "First, the free tier. Twenty-five evaluations a day, no signup. The response header says free, and the verdict arrives as a signed attestation."))
     segs.append(seg(
         anim_terminal(norm(PAID_LINES), note="real settlement: 0.002 USDC on Solana mainnet"),
         "Now the paid path. Our payer wallet asks for the check, opting to pay. The x402 client receives the payment required response, signs the transfer, and the Dexter facilitator settles it. The verdict comes back: score ninety nine, tier low, signed."))

@@ -1,6 +1,6 @@
 # x402check — signed-intent risk checks for x402 agent commerce
 
-**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · 100 free evaluations/day · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
+**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · 25 free evaluations/day · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
 
 x402check is an x402 `risk-check` provider that scores agent counterparties with **Jev** — TypeSafe AI's System One model for typed decisions — and issues **ES256-signed attestations** that facilitators and resource servers can verify independently. The verdict answers one question before settlement: **is the paying agent's intent legitimate?**
 
@@ -21,7 +21,7 @@ Between "the agent decided to pay" and "the payment settles" there is one instan
 
 ## Payments (live, mainnet)
 
-`POST /v1/risk-check` is x402-protected: **100 free evaluations/day** per caller, then **$0.001 per evaluation** settled in USDC via x402 across **7 mainnets** — Base, Solana, Polygon, Arbitrum, Avalanche, Monad, Sei — plus Base Sepolia, Arbitrum Sepolia and Solana Devnet testnets (Dexter facilitator, gas-sponsored, zero facilitator fee; buyer funds move buyer → provider wallet directly, the facilitator never holds them).
+`POST /v1/risk-check` is x402-protected: **25 free evaluations/day** per caller, then **$0.001 per evaluation** settled in USDC via x402 across **7 mainnets** — Base, Solana, Polygon, Arbitrum, Avalanche, Monad, Sei — plus Base Sepolia, Arbitrum Sepolia and Solana Devnet testnets (Dexter facilitator, gas-sponsored, zero facilitator fee; buyer funds move buyer → provider wallet directly, the facilitator never holds them).
 
 ## Quickstart
 
@@ -75,7 +75,7 @@ Suggested user-facing copy per tier:
 | `high` | red warning: "High risk detected. We recommend you do not proceed." |
 | `critical` | hard block with override; show categories from the verdict |
 
-Batch scan of counterparties in one call: `POST /v1/risk-check/batch` with `{"requests": [...]}` (max 25). Any verdict can be verified without trusting the provider: `npx tsx scripts/verify-attest.ts <jws>` prints `valid: true` against the live JWKS. The free tier (100/day per caller) covers end-user traffic; heavy integrations pay per check over x402 in the same wallets they already manage.
+Batch scan of counterparties in one call: `POST /v1/risk-check/batch` with `{"requests": [...]}` (max 25). Any verdict can be verified without trusting the provider: `npx tsx scripts/verify-attest.ts <jws>` prints `valid: true` against the live JWKS. The free tier (25/day per caller) covers end-user traffic; heavy integrations pay per check over x402 in the same wallets they already manage.
 
 ## Why
 

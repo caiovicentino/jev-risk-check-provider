@@ -34,7 +34,7 @@ Work completed before the hackathon window (disclosed per Colosseum eligibility 
 
 Work completed **during** the hackathon window (what we're asking judges to evaluate, per the rules):
 
-1. **Live public deployment** — `https://x402check.xyz`, live on 2026-09-28: `did:web:x402check.xyz` identity (DID document + stable JWKS, round-trip verified), x402 paywall with free tier (100/day) and **mainnet USDC settlement (Base + Solana, plus Polygon, Arbitrum, Avalanche, Monad, Sei)** via the Dexter facilitator (gas-sponsored, zero facilitator fee), and a public landing page with integration docs.
+1. **Live public deployment** — `https://x402check.xyz`, live on 2026-09-28: `did:web:x402check.xyz` identity (DID document + stable JWKS, round-trip verified), x402 paywall with free tier (25/day) and **mainnet USDC settlement (Base + Solana, plus Polygon, Arbitrum, Avalanche, Monad, Sei)** via the Dexter facilitator (gas-sponsored, zero facilitator fee), and a public landing page with integration docs.
 2. Real-facilitator traffic shadowing (moving the evidence base from synthetic corpora to live x402 facilitator traffic).
 3. Human-verified labels completing the repository's switch-over gate (≥50 verified checks).
 4. Kora `decision_provider` integration advancing through the accepted-issue process.

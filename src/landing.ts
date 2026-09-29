@@ -4,7 +4,7 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>x402check — payer-intent risk checks for x402 agent commerce</title>
-<meta name="description" content="One question before you settle an agent's payment: is the payer's intent legitimate? Signed, typed risk checks with fail-closed defaults — $0.001 per evaluation, 100 free per day.">
+<meta name="description" content="One question before you settle an agent's payment: is the payer's intent legitimate? Signed, typed risk checks with fail-closed defaults — $0.001 per evaluation, 25 free per day.">
 <link rel="canonical" href="https://x402check.xyz/">
 <meta name="theme-color" content="#fcfcfa">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%239945ff'/%3E%3Cstop offset='1' stop-color='%2314f195'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='monospace' font-size='34' font-weight='bold' text-anchor='middle' fill='%230a0b10'%3Ex%3C/text%3E%3C/svg%3E">
@@ -12,7 +12,7 @@ const PAGE = `<!doctype html>
 <meta property="og:site_name" content="x402check">
 <meta property="og:url" content="https://x402check.xyz/">
 <meta property="og:title" content="x402check — payer-intent risk checks for x402 agent commerce">
-<meta property="og:description" content="One question before you settle an agent's payment: is the payer's intent legitimate? Signed, typed risk checks with fail-closed defaults — $0.001 per evaluation, 100 free per day.">
+<meta property="og:description" content="One question before you settle an agent's payment: is the payer's intent legitimate? Signed, typed risk checks with fail-closed defaults — $0.001 per evaluation, 25 free per day.">
 <meta property="og:image" content="https://x402check.xyz/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -248,7 +248,7 @@ curl https://x402check.xyz/.well-known/jwks.json
       <div class="item"><h3>Fail-closed UX, tiered copy</h3>
         <p>Check unavailable &rarr; hold the transaction. Tiered warnings out of the box: badge, amber caution, red warning, hard block with user override. Batch endpoint scans up to 25 counterparties in one call.</p></div>
       <div class="item"><h3>Free for end users</h3>
-        <p>The 100/day free tier per caller covers wallet traffic. Heavy integrations pay per check over x402 in the same wallets they already manage.</p></div>
+        <p>The 25/day free tier per caller covers wallet traffic. Heavy integrations pay per check over x402 in the same wallets they already manage.</p></div>
       <div class="item"><h3>Verifiable, not vibes</h3>
         <p>Every warning ships as an ES256 attestation. Users and auditors verify it against did:web:x402check.xyz without trusting the wallet &mdash; or us.</p></div>
     </div>
@@ -258,7 +258,7 @@ curl https://x402check.xyz/.well-known/jwks.json
     <div class="sec-head"><span class="sec-no">06</span><h2>Pricing &amp; identity</h2></div>
     <table>
       <tr><th></th><th></th></tr>
-      <tr><td>Free tier</td><td>100 evaluations per day, per caller — enough for an integration build-out</td></tr>
+      <tr><td>Free tier</td><td>25 evaluations per day, per caller — enough for an integration build-out</td></tr>
       <tr><td>Paid</td><td>$0.001 per evaluation, settled with x402 — <b>Base USDC and Solana USDC on mainnet</b> (gas sponsored, zero facilitator fee), plus testnets</td></tr>
       <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> — <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
       <tr><td>Engine</td><td>TypeSafe Jev System One for intent; deterministic scoring in open-source code (MIT)</td></tr>
