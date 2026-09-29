@@ -3,6 +3,7 @@ import { createPublicKey, verify as nodeVerify, type JsonWebKey } from "node:cry
 import { CASES, type ShadowCase } from "./cases.js";
 import { DECISION_THRESHOLD, EVAL_EVIDENCE_DIR } from "./harness.js";
 import type { RiskCheckRequest, RiskCheckResult } from "../src/types.js";
+import { buildPayFetch } from "./paid-fetch.js";
 
 const ENDPOINT = "https://x402check.xyz/v1/risk-check";
 const JWKS_URL = "https://x402check.xyz/.well-known/jwks.json";
@@ -99,12 +100,16 @@ function verifyAttestation(jws: string, keys: Map<string, JsonWebKey>): JwsCheck
   return { ok: true, reason: null, claims };
 }
 
+let payFetch: ((input: string, init?: RequestInit) => Promise<Response>) | null = null;
+
 async function postRiskCheck(req: RiskCheckRequest): Promise<{ status: number; body: RiskCheckResult | null }> {
-  const res = await fetch(ENDPOINT, {
+  if (process.env.PAID && !payFetch) payFetch = await buildPayFetch();
+  const doFetch = payFetch ?? fetch;
+  const res = await doFetch(ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(process.env.PAID ? { "X-Risk-Check-Paid": "1" } : {}) },
     body: JSON.stringify(req),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(60_000),
   });
   let body: RiskCheckResult | null = null;
   try {

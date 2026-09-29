@@ -13,7 +13,10 @@ function validateRequest(body: unknown): RiskCheckRequest | null {
   if (!body || typeof body !== "object") return null;
   const obj = body as Record<string, unknown>;
   if (typeof obj.wallet !== "string" || obj.wallet.trim().length === 0) return null;
-  if (obj.wallet.trim().length > 128) return null;
+  const trimmed = obj.wallet.trim();
+  if (trimmed.length > 96) return null;
+  if (obj.wallet !== trimmed) return null;
+  if (/[\u0000-\u001f\u007f\u200b-\u200f\u2060\u202a-\u202e]/.test(trimmed)) return null;
   for (const field of ["chain", "domain", "context", "aud"] as const) {
     if (obj[field] !== undefined && typeof obj[field] !== "string") return null;
   }
@@ -32,7 +35,7 @@ function validateRequest(body: unknown): RiskCheckRequest | null {
     }
   }
   return {
-    wallet: obj.wallet.trim(),
+    wallet: trimmed,
     chain: obj.chain as string | undefined,
     domain: obj.domain as string | undefined,
     context: obj.context as string | undefined,
@@ -95,13 +98,13 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     const url = new URL(req.url);
     const path = url.pathname;
 
-    if (req.method === "GET" && path === "/.well-known/risk-check.json") {
+    if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/risk-check.json") {
       return json(200, discoveryDocument(deps.provider.host));
     }
-    if (req.method === "GET" && path === "/.well-known/jwks.json") {
+    if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/jwks.json") {
       return json(200, jwksDocument(deps.provider.keyPair.publicJwk.kid, deps.provider.keyPair.publicJwk));
     }
-    if (req.method === "GET" && path === "/.well-known/did.json") {
+    if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/did.json") {
       return json(200, didDocument(deps.provider.host, deps.provider.keyPair.publicJwk as unknown as Record<string, unknown>));
     }
     if (req.method === "POST" && path === "/v1/risk-check") {
@@ -123,7 +126,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       const results = await Promise.all(requests.map((r) => deps.provider.evaluate(r)));
       return json(200, { results: results.map((e) => e.result) });
     }
-    if (req.method === "GET" && path === "/" ) {
+    if ((req.method === "GET" || req.method === "HEAD") && path === "/" ) {
       const accept = req.headers.get("accept") ?? "";
       if (accept.includes("text/html")) {
         return new Response(landingPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });

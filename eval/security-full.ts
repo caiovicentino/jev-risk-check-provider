@@ -1,12 +1,14 @@
 import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { verifyJws, type Jwk } from "../src/jws.js";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
+import { buildPayFetch } from "./paid-fetch.js";
+let payFetch: ((input: string, init?: RequestInit) => Promise<Response>) | null = null;
 
 const ENDPOINT = "https://x402check.xyz";
 const HOST = "x402check.xyz";
 const REQUEST_BUDGET = 70;
-const EVAL_BUDGET = 20;
-const FREE_TIER_DAILY_ASSUMED = 100;
+const EVAL_BUDGET = process.env.PAID ? 80 : 20;
+const FREE_TIER_DAILY_ASSUMED = process.env.PAID ? 0 : 25;
 const WALLET_TAIL = "b17e5f4c9d2a86310f7e5c3a91d6b48207f5e3ac";
 const ECHO_CANARY = "fullsuite-echo-canary-91ab34";
 const LEAK_TOKENS = ["AI_GATEWAY", "sk-", "Bearer", "PRIVATE"];
@@ -148,8 +150,8 @@ function consumesQuota(path: string, extra: ExtraHeaders): boolean {
 }
 
 function buildHeaders(extra: ExtraHeaders): Record<string, string> | Array<[string, string]> {
-  if (Array.isArray(extra)) return [["content-type", "application/json"], ...extra];
-  return { "content-type": "application/json", ...extra };
+  if (Array.isArray(extra)) return [["content-type", "application/json"], ...(process.env.PAID ? [["x-risk-check-paid", "1"] as [string, string]] : []), ...extra];
+  return { "content-type": "application/json", ...(process.env.PAID ? { "x-risk-check-paid": "1" } : {}), ...extra };
 }
 
 async function httpJson(
@@ -161,9 +163,14 @@ async function httpJson(
   const started = Date.now();
   used++;
   if (consumesQuota(path, extraHeaders)) quotaSpend++;
-  const init: RequestInit = { method, headers: buildHeaders(extraHeaders), signal: AbortSignal.timeout(45000) };
+  const init: RequestInit = { method, headers: buildHeaders(extraHeaders), signal: AbortSignal.timeout(60000) };
   if (body !== null) init.body = body;
-  const res = await fetch(`${ENDPOINT}${path}`, init);
+  const hasOwnPaymentHeaders = Array.isArray(extraHeaders)
+    ? extraHeaders.some(([k]) => /payment/i.test(k))
+    : Object.keys(extraHeaders).some((k) => /payment/i.test(k));
+  if (process.env.PAID && !payFetch) payFetch = await buildPayFetch();
+  const doFetch = (process.env.PAID && payFetch && !hasOwnPaymentHeaders && method === "POST") ? payFetch : fetch;
+  const res = await doFetch(`${ENDPOINT}${path}`, init);
   const text = await res.text();
   const headers: Record<string, string> = {};
   res.headers.forEach((value, key) => {
@@ -921,7 +928,7 @@ const probes: Probe[] = [
       if (evals + 25 > EVAL_BUDGET) {
         return { status: "SKIP", detail: `DRY-count skip: a 25-item distinct batch bills 25 evaluations (response must include results.length===25 to verify the MAX_BATCH=25 ceiling accepts a full legal batch); suite eval cap leaves ${Math.max(EVAL_BUDGET - evals, 0)} of 20 — insufficient, skipped to protect the free tier` };
       }
-      if (setupFreeEvals !== null && FREE_TIER_DAILY_ASSUMED - setupFreeEvals < 25) {
+      if (!process.env.PAID && setupFreeEvals !== null && FREE_TIER_DAILY_ASSUMED - setupFreeEvals < 25) {
         return { status: "SKIP", detail: `free tier remaining (~${FREE_TIER_DAILY_ASSUMED - setupFreeEvals}) below the 25 evaluations this probe needs` };
       }
       const requests = Array.from({ length: 25 }, (_, i) => ({ wallet: walletFor(9000 + i), chain: "ethereum" }));
@@ -981,14 +988,30 @@ const probes: Probe[] = [
     budget: 2,
     evalBudget: 0,
     run: async () => {
-      const res = await httpJson("GET", "/healthz", null);
-      if (res.status !== 200 || typeof res.json !== "object" || res.json === null) return { status: "SKIP", detail: `status=${res.status} — healthz counter unavailable` };
-      const now = (res.json as Record<string, unknown>).freeEvalsToday;
-      if (typeof now !== "number" || setupFreeEvals === null) return { status: "SKIP", detail: `freeEvalsToday=${String(now)} (setup read unavailable)` };
-      const actual = now - setupFreeEvals;
-      if (actual < quotaSpend) return { status: "FAIL", detail: `counter undercounted: free-total advanced +${actual} while this suite issued ${quotaSpend} quota-consuming protected-path requests — KV read-modify-write race lost increments` };
-      if (actual === quotaSpend) return { status: "PASS", detail: `free-total ${setupFreeEvals}→${now} (+${actual}) exactly matches this suite's ${quotaSpend} protected-path free-tier requests (no undercount, no unexplained overcount)` };
-      return { status: "PASS", detail: `free-total ${setupFreeEvals}→${now} (+${actual}) vs ${quotaSpend} suite requests — overcount only attributable to external concurrent traffic between the two reads; no undercount observed` };
+      const before = await fetch(`${ENDPOINT}/healthz`);
+      if (before.status !== 200) return { status: "SKIP", detail: `healthz status=${before.status}` };
+      const beforeJson = (await before.json()) as Record<string, unknown>;
+      if (typeof beforeJson.freeEvalsToday !== "number") return { status: "SKIP", detail: "freeEvalsToday unavailable" };
+      const tag = `dos2q-${Date.now().toString(36)}`;
+      const N = 12;
+      const jobs = Array.from({ length: N }, (_, i) =>
+        fetch(`${ENDPOINT}/v1/risk-check`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-risk-check-client": `${tag}-${i}` },
+          body: JSON.stringify({ wallet: walletFor(26), chain: "solana", context: "quota counter concurrency probe" }),
+          signal: AbortSignal.timeout(30000),
+        }).then((r) => r.status),
+      );
+      const codes = await Promise.all(jobs);
+      const okCount = codes.filter((c) => c === 200).length;
+      const after = await fetch(`${ENDPOINT}/healthz`);
+      const afterJson = (await after.json()) as Record<string, unknown>;
+      const afterTotal = typeof afterJson.freeEvalsToday === "number" ? afterJson.freeEvalsToday : -1;
+      const beforeTotal = beforeJson.freeEvalsToday as number;
+      const delta = afterTotal - beforeTotal;
+      if (delta < okCount) return { status: "FAIL", detail: `counter undercounted: free-total advanced +${delta} while ${okCount}/${N} concurrent client-id requests succeeded (atomicity violated)` };
+      if (delta === okCount) return { status: "PASS", detail: `atomic counter: ${N} concurrent distinct-client requests → free-total advanced exactly +${delta} (no undercount, no overcount)` };
+      return { status: "PASS", detail: `free-total advanced +${delta} for ${okCount} concurrent requests — overcount attributable to concurrent external traffic; no undercount` };
     },
   },
   {

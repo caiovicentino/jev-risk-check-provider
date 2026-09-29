@@ -28,7 +28,66 @@ export type WorkerEnv = {
   X402_FACILITATOR_URL_MAINNET?: string;
   X402_FACILITATOR_URL_PAYAI?: string;
   RATE?: KVNamespace;
+  COUNTER?: DurableObjectNamespace;
 };
+
+export class RateCounter {
+  private state: DurableObjectState;
+  private ready = false;
+  constructor(state: DurableObjectState, _env: WorkerEnv) {
+    this.state = state;
+  }
+  private init(day: string): void {
+    const sql = (this.state.storage as unknown as { sql: { exec: (q: string, ...p: unknown[]) => { toArray: () => unknown[] } } }).sql;
+    sql.exec(`CREATE TABLE IF NOT EXISTS counters (k TEXT PRIMARY KEY, used INTEGER NOT NULL, day TEXT NOT NULL)`);
+    sql.exec(`CREATE TABLE IF NOT EXISTS totals (day TEXT PRIMARY KEY, total INTEGER NOT NULL)`);
+    sql.exec(`DELETE FROM counters WHERE day != ?`, day);
+    sql.exec(`DELETE FROM totals WHERE day != ?`, day);
+    this.ready = true;
+  }
+  async fetch(request: Request): Promise<Response> {
+    const body = (await request.json()) as {
+      op: "consume" | "total";
+      key?: string;
+      day: string;
+      daily?: number;
+      countTotal?: boolean;
+    };
+    const day = body.day;
+    this.init(day);
+    const sql = (this.state.storage as unknown as { sql: { exec: (q: string, ...p: unknown[]) => { toArray: () => unknown[] } } }).sql;
+    if (body.op === "total") {
+      const rows = sql.exec(`SELECT total FROM totals WHERE day = ?`, day).toArray();
+      const total = rows.length ? Number((rows[0] as { total: number }).total) : 0;
+      return Response.json({ total });
+    }
+    const key = String(body.key ?? "unknown");
+    const daily = Number(body.daily ?? 25);
+    const upd = sql.exec(
+      `INSERT INTO counters (k, used, day) VALUES (?, 1, ?)
+       ON CONFLICT(k) DO UPDATE SET used = counters.used + 1
+       WHERE counters.used < ?
+       RETURNING used`,
+      key, day, daily,
+    ).toArray();
+    const allowed = upd.length > 0;
+    const usedRow = sql.exec(`SELECT used FROM counters WHERE k = ?`, key).toArray();
+    const used = usedRow.length ? Number((usedRow[0] as { used: number }).used) : 0;
+    const countTotal = body.countTotal !== false;
+    let total = 0;
+    if (allowed && countTotal) {
+      const t = sql.exec(
+        `INSERT INTO totals (day, total) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET total = totals.total + 1 RETURNING total`,
+        day,
+      ).toArray();
+      total = t.length ? Number((t[0] as { total: number }).total) : 1;
+    } else {
+      const t = sql.exec(`SELECT total FROM totals WHERE day = ?`, day).toArray();
+      total = t.length ? Number((t[0] as { total: number }).total) : 0;
+    }
+    return Response.json({ allowed, remaining: Math.max(0, daily - used), total });
+  }
+}
 
 const PROTECTED = new Set(["/v1/risk-check", "/v1/risk-check/batch"]);
 const DEFAULT_FACILITATOR = "https://x402.org/facilitator";
@@ -47,6 +106,7 @@ type Stack = {
 };
 
 let cached: Stack | null = null;
+let cachedPromise: Promise<Stack> | null = null;
 
 function loadKeyPair(env: WorkerEnv): KeyPair {
   if (env.JEV_ATTEST_PRIVATE_KEY && env.JEV_ATTEST_PUBLIC_JWK) {
@@ -108,14 +168,22 @@ function buildStack(env: WorkerEnv): Stack {
 }
 
 async function ensureStack(env: WorkerEnv): Promise<Stack> {
-  if (cached && cached.envKey === buildStackCacheKey(env)) return cached;
-  cached = buildStack(env);
-  try {
-    await cached.http.initialize();
-  } catch (err) {
-    cached.initError = String(err);
+  const envKey = buildStackCacheKey(env);
+  if (cached && cached.envKey === envKey) return cached;
+  if (!cachedPromise || cachedPromise.envKey !== envKey) {
+    const p = buildStack(env);
+    cachedPromise = Object.assign((async () => {
+      try {
+        await p.http.initialize();
+      } catch (err) {
+        p.initError = String(err);
+      }
+      return p;
+    })(), { envKey });
   }
-  return cached;
+  const stack = await cachedPromise;
+  if (stack.envKey === envKey) cached = stack;
+  return stack;
 }
 
 function buildStackCacheKey(env: WorkerEnv): string {
@@ -142,52 +210,78 @@ function instructionsToResponse(instr: HTTPResponseInstructions): Response {
 
 const NEW_CLIENT_BUDGET_DAILY = 1000;
 
+type ConsumeResult = { allowed: boolean; remaining: number };
+
+let lastCounterError = "";
+let dbgCounter = "";
+async function doConsume(env: WorkerEnv, key: string, daily: number, countTotal = true): Promise<ConsumeResult | null> {
+  if (!env.COUNTER) { lastCounterError = "no-binding"; return null; }
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
+    const res = await stub.fetch("https://counter/consume", {
+      method: "POST",
+      body: JSON.stringify({ op: "consume", key, day, daily, countTotal }),
+    });
+    if (!res.ok) { lastCounterError = `status-${res.status}`; return null; }
+    const data = (await res.json()) as { allowed: boolean; remaining: number };
+    lastCounterError = "";
+    return { allowed: data.allowed, remaining: data.remaining };
+  } catch (err) {
+    lastCounterError = String(err).slice(0, 140);
+    return null;
+  }
+}
+
+async function doTotal(env: WorkerEnv): Promise<number | null> {
+  if (!env.COUNTER) return null;
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
+    const res = await stub.fetch("https://counter/total", {
+      method: "POST",
+      body: JSON.stringify({ op: "total", day }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { total: number };
+    return data.total;
+  } catch {
+    return null;
+  }
+}
+
 async function freeQuota(env: WorkerEnv, ip: string): Promise<number> {
   const daily = Number(env.FREE_TIER_DAILY ?? "25");
-  if (!env.RATE || !Number.isFinite(daily) || daily <= 0) return 0;
-  const day = new Date().toISOString().slice(0, 10);
-  const key = `free:${ip}:${day}`;
-  const used = Number((await env.RATE.get(key)) ?? "0");
-  if (used >= daily) return 0;
-  await env.RATE.put(key, String(used + 1), { expirationTtl: 172800 });
-  const totalKey = `free-total:${day}`;
-  const total = Number((await env.RATE.get(totalKey)) ?? "0");
-  await env.RATE.put(totalKey, String(total + 1), { expirationTtl: 172800 });
-  return daily - used;
+  if (!Number.isFinite(daily) || daily <= 0) return 0;
+  const viaDo = await doConsume(env, `ip:${ip}`, daily);
+  if (viaDo) return viaDo.allowed ? viaDo.remaining : 0;
+  return 0;
 }
 
 async function clientQuota(env: WorkerEnv, clientId: string): Promise<number> {
   const daily = Number(env.FREE_TIER_DAILY ?? "25");
-  if (!env.RATE || !Number.isFinite(daily) || daily <= 0) return 0;
-  const day = new Date().toISOString().slice(0, 10);
-  const newClients = Number((await env.RATE.get(`new-clients:${day}`)) ?? "0");
-  const known = (await env.RATE.get(`client-known:${clientId}`)) === "1";
-  if (!known) {
-    if (newClients >= NEW_CLIENT_BUDGET_DAILY) return 0;
-    await env.RATE.put(`client-known:${clientId}`, "1", { expirationTtl: 172800 });
-    await env.RATE.put(`new-clients:${day}`, String(newClients + 1), { expirationTtl: 172800 });
-  }
-  const key = `client:${clientId}:${day}`;
-  const used = Number((await env.RATE.get(key)) ?? "0");
-  if (used >= daily) return 0;
-  await env.RATE.put(key, String(used + 1), { expirationTtl: 172800 });
-  const totalKey = `free-total:${day}`;
-  const total = Number((await env.RATE.get(totalKey)) ?? "0");
-  await env.RATE.put(totalKey, String(total + 1), { expirationTtl: 172800 });
-  return daily - used;
+  if (!Number.isFinite(daily) || daily <= 0) return 0;
+  const known = await doConsume(env, `client-known:${clientId}`, NEW_CLIENT_BUDGET_DAILY, false);
+  if (known && !known.allowed) return 0;
+  const viaDo = await doConsume(env, `client:${clientId}`, daily);
+  if (viaDo) return viaDo.allowed ? viaDo.remaining : 0;
+  return 0;
 }
 
 async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
   const paymentHeader = request.headers.get("PAYMENT-SIGNATURE") ?? request.headers.get("X-PAYMENT");
   const forcePaid = (request.headers.get("X-Risk-Check-Paid") ?? "").trim().length > 0;
+  dbgCounter = "";
   if (!paymentHeader && !forcePaid) {
     const clientId = (request.headers.get("X-Risk-Check-Client") ?? "").trim();
     const remaining = clientId
       ? await clientQuota(env, clientId.slice(0, 64))
       : await freeQuota(env, request.headers.get("CF-Connecting-IP") ?? "unknown");
+    dbgCounter = lastCounterError;
     if (remaining > 0) {
       const res = await serve(request);
       res.headers.set("X-Risk-Check-Free", "true");
+      res.headers.set("X-Quota-Debug", dbgCounter);
       return res;
     }
   }
@@ -239,12 +333,39 @@ export default {
     const stack = await ensureStack(env);
     const path = new URL(request.url).pathname;
     let res: Response;
-    if (request.method === "GET" && path === "/healthz" && env.RATE) {
-      const day = new Date().toISOString().slice(0, 10);
-      const freeEvalsToday = Number((await env.RATE.get(`free-total:${day}`)) ?? "0");
-      res = Response.json({ ok: true, freeEvalsToday });
-    } else if (PROTECTED.has(path)) {
-      res = await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
+    if (request.method === "GET" && path === "/debug-quota") {
+      let out: Record<string, unknown> = { hasCounter: !!env.COUNTER };
+      if (env.COUNTER) {
+        const day = new Date().toISOString().slice(0, 10);
+        try {
+          const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
+          const res = await stub.fetch("https://counter/total", {
+            method: "POST",
+            body: JSON.stringify({ op: "total", day }),
+          });
+          out = { ...out, status: res.status, body: await res.text() };
+        } catch (err) {
+          out = { ...out, error: String(err).slice(0, 300) };
+        }
+      }
+      return Response.json(out);
+    }
+    if (request.method === "GET" && path === "/healthz") {
+      const viaDo = await doTotal(env);
+      if (viaDo !== null) return Response.json({ ok: true, freeEvalsToday: viaDo });
+      if (env.RATE) {
+        const day = new Date().toISOString().slice(0, 10);
+        const freeEvalsToday = Number((await env.RATE.get(`free-total:${day}`)) ?? "0");
+        return Response.json({ ok: true, freeEvalsToday });
+      }
+      return Response.json({ ok: true });
+    }
+    if (PROTECTED.has(path)) {
+      if (request.method !== "POST") {
+        res = Response.json({ error: "method_not_allowed" }, { status: 405 });
+      } else {
+        res = await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
+      }
     } else {
       res = await createHandler(stack.deps)(request);
     }

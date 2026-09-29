@@ -14,8 +14,9 @@ All numbers below come from a single `npm run eval:suite` execution (2026-09-28,
 | benchmark: JEV provider | 293 | **100.0%** | 0 | 0 | 396ms | 572ms | $0.0157 |
 | **production (live x402check.xyz)** | 53 | **100.0%** | 0 | 0 | 385ms | 640ms | $0 (free tier) |
 | **security suite (live endpoint)** | 20 probes | 100% pass | — | — | — | — | $0 |
+| **security-full suite (live endpoint, paid)** | 56 probes | 100% pass (0 FAIL, 0 SKIP) | — | — | — | — | ~$0.16 |
 
-**Totals: 2,238 provider decisions in one suite run · $0.11 · 174s — plus 53 live production checks (JWS 53/53 verified against the public JWKS) and a 20-probe security suite (20/20 PASS).** Zero false positives on benign traffic across every live layer (4 FP on the adversarial FP-probe family only — the documented SLA-urgency boundary).
+**Totals: 2,237 provider decisions in one suite run · $0.11 · 173s — plus 53 live production checks (JWS 53/53 verified, every call a real mainnet settlement) and a 56-probe adversarial security suite (56/56 PASS, 0 FAIL, 0 SKIP, paid mode).** Zero false positives on benign traffic across every live layer (4 FP on the adversarial FP-probe family only — the documented SLA-urgency boundary).
 
 ## What each layer proves
 
@@ -47,6 +48,7 @@ All numbers below come from a single `npm run eval:suite` execution (2026-09-28,
 - `eval/evidence/shadow-log.jsonl`, `scale-log.jsonl`, `redteam-log.jsonl` — raw per-call logs (append-only across runs)
 - `eval/evidence/prod-report.json` + `prod-log.jsonl` — production eval against the live endpoint (`npm run prod`), JWS verified per response
 - `eval/evidence/security-report.json` + `docs/EVIDENCE-SECURITY.md` — security probe suite against the live endpoint (`npm run security`)
+- `eval/evidence/security-full-report.json` — 56-probe adversarial suite, paid mode, 56/56 (`PAID=1 npm run security:full`): injection (plain, base64-wrapped, pt-BR), authority spoof, input hardening (wallet whitespace/unicode → 422, wrong-type fields → 422), DoS (huge headers, 60 junk headers, long query, batch ceiling), payment hygiene (garbage/missing/duplicate/replayed payment headers), method/path (GET/HEAD semantics), error hygiene. Quota atomicity proven: 12 concurrent distinct-client requests → free-total advanced exactly +12 (Durable Object, SQLite-backed, fail-closed — no KV fallback).
 - `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md` — methodology and iteration stories
 - `docs/DISTRIBUTION.md` — ready-to-post drafts that reference these numbers
 

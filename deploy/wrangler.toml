@@ -25,3 +25,11 @@ FREE_TIER_DAILY = "25"
 #   2. route /.well-known/jwks.json on that domain (worker route or reverse proxy)
 #   3. the provider DID becomes did:web:<your-domain>, verifiable by any resource server
 #   4. publish the discovery doc URL in your x402 PaymentRequired extensions
+
+[[durable_objects.bindings]]
+name = "COUNTER"
+class_name = "RateCounter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateCounter"]
