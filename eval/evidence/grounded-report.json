@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-29T15:45:54.387Z",
+  "timestamp": "2026-09-29T17:34:52.201Z",
   "invalid_requests": 0,
   "sources": {
     "metamask": "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json",
@@ -48,7 +48,8 @@
         "fraud_signal": 30,
         "known_scam_address": 30,
         "approval_to_eoa": 27,
-        "new_address": 12
+        "new_address": 12,
+        "known_drainer_code": 2
       }
     },
     "B_scamsniffer_only_domain_feed_on": {
@@ -74,8 +75,8 @@
       "rate": "90.0% (95% CI 74.4–96.5%)",
       "tier_high_or_critical": "27/30",
       "misses": [
-        "ss:b0856be00b1b0878 → 82/low",
-        "ss:86b92e53622e292b → 80/low",
+        "ss:b0856be00b1b0878 → 81/low",
+        "ss:86b92e53622e292b → 81/low",
         "ss:31c79be2535a3130 → 82/low"
       ],
       "categories": {
@@ -91,14 +92,14 @@
       "rate": "0.0% (95% CI 0.0–11.4%)",
       "tier_high_or_critical": "0/30",
       "misses": [
-        "ss:b820f2e93f271c10 → 94/low",
+        "ss:b820f2e93f271c10 → 95/low",
         "ss:54a96d6d7adec21b → 94/low",
         "ss:b0856be00b1b0878 → 94/low",
         "ss:c0d55fdcee70e68d → 94/low",
+        "ss:c8f62354e4b980c1 → 94/low",
         "ss:86b92e53622e292b → 94/low",
-        "ss:c8f62354e4b980c1 → 95/low",
         "ss:d9bfeca2032f9346 → 94/low",
-        "ss:5413d03cf3ca7c80 → 94/low"
+        "ss:8b84bf7dcb5f2da3 → 94/low"
       ],
       "categories": {
         "new_address": 12
@@ -112,18 +113,18 @@
       "rate": "0.0% (95% CI 0.0–6.0%)",
       "tier_high_or_critical": "0/60",
       "misses": [
-        "ss:b4de761b1d180874 → 91/low",
+        "ss:b4de761b1d180874 → 92/low",
         "ss:2a62922b9e888e94 → 93/low",
-        "ss:dbd32cadb82461e4 → 93/low",
         "ss:d18ba33f39c56f47 → 92/low",
         "ss:a0436cb01d9c98f4 → 92/low",
+        "ss:dbd32cadb82461e4 → 93/low",
         "ss:2f7c7adad6cc4c84 → 92/low",
-        "ss:a73fb0e003cdf6f1 → 94/low",
-        "ss:eaff26343daab394 → 73/medium"
+        "ss:eaff26343daab394 → 70/medium",
+        "ss:e6c4760eb1404050 → 93/low"
       ],
       "categories": {
-        "fraud_signal": 7,
-        "impersonation": 1
+        "fraud_signal": 10,
+        "impersonation": 2
       }
     },
     "D_legit_address": {
@@ -148,18 +149,35 @@
     },
     "D_tranco_deterministic_scan": {
       "expected": "safe",
-      "n": 199999,
-      "strong_impersonation": 0,
-      "weak_brand_token_uncapped": 79,
-      "any_feed_hit": 78,
-      "capped_by_deterministic_rules": 5,
-      "capped_rate": "0.003% (95% CI 0.001–0.006%) — upper bound on FP: popular ≠ benign (some listed hosts are genuine abuse)",
+      "n": 199996,
+      "strong_impersonation": 2,
+      "weak_brand_token_uncapped": 86,
+      "any_feed_hit": 88,
+      "capped_by_deterministic_rules": 22,
+      "capped_rate": "0.011% (95% CI 0.007–0.017%) — upper bound on FP: popular ≠ benign (some listed hosts are genuine abuse)",
       "capped_examples": [
         "temporary.site: none feed:metamask-phishing-detect",
-        "ss:07789dc83cb686a1: none feed:scamsniffer-domains",
-        "xn--80affa3aj0al.xn--80asehdb: none feed:scamsniffer-domains",
-        "ss:a227373b500b8020: none feed:scamsniffer-domains",
-        "tornadoeth.cash: none feed:metamask-phishing-detect"
+        "plsleavemealone.com: none feed:metamask-phishing-detect",
+        "verificator.cc: none feed:metamask-phishing-detect",
+        "vanced.to: none feed:metamask-phishing-detect",
+        "layerzro.ru: strong(layerzero)",
+        "cricfy.net: none feed:metamask-phishing-detect",
+        "happymod.net: none feed:metamask-phishing-detect",
+        "pikashowsapks.pro: none feed:metamask-phishing-detect",
+        "roobett.net: none feed:metamask-phishing-detect",
+        "dns-jumper.com: none feed:metamask-phishing-detect",
+        "dnsjumper.io: none feed:metamask-phishing-detect",
+        "bitget.cafe: weak(bitget) feed:metamask-phishing-detect",
+        "lbkpro.net: none feed:metamask-phishing-detect",
+        "bitget.com.vn: strong(bitget)",
+        "vaadava7hl.com: none feed:metamask-phishing-detect",
+        "cricfytvap.net: none feed:metamask-phishing-detect",
+        "zoomvideo-install.com: none feed:metamask-phishing-detect",
+        "defender-control.com: none feed:metamask-phishing-detect",
+        "rarible-test.com: none feed:metamask-phishing-detect",
+        "bgw.live: none feed:metamask-phishing-detect",
+        "aurum.foundation: none feed:metamask-phishing-detect",
+        "studioobs.pro: none feed:metamask-phishing-detect"
       ]
     }
   }

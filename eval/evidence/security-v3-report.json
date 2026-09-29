@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-09-29T18:41:56.034Z",
+  "base": "https://x402check.xyz",
+  "client": "v3-probe-2e07b4c7-e780-444f-98d8-7ebe2c5a1260",
+  "pass": 8,
+  "fail": 0,
+  "skip": 0,
+  "outcomes": [
+    {
+      "id": "discovery_v03",
+      "status": "PASS",
+      "detail": "version=0.3.0 signals=ofac_sdn_address,threat_feeds,domain_impersonation,onchain_activity,transaction_simulation,contract_verification,drainer_code_fingerprint,operation_context_intent"
+    },
+    {
+      "id": "status_freshness",
+      "status": "PASS",
+      "detail": "ofac=2026-09-23(embedded) metamask=2026-09-29(embedded) scamsniffer={\"as_of\":\"2026-09-29\",\"age_days\":0,\"domains\":340004,\"addresses\":2530,\"code_finge leaks=false"
+    },
+    {
+      "id": "tx_non_evm_chain",
+      "status": "PASS",
+      "detail": "HTTP 422 field=chain"
+    },
+    {
+      "id": "tx_odd_hex_data",
+      "status": "PASS",
+      "detail": "HTTP 422 field=transaction.data"
+    },
+    {
+      "id": "tx_unknown_key",
+      "status": "PASS",
+      "detail": "HTTP 422 field=transaction"
+    },
+    {
+      "id": "drainer_code_fingerprint",
+      "status": "PASS",
+      "detail": "HTTP 200 score=30 tier=high feeds=metamask-phishing-detect:not_applicable,scamsniffer-domains:not_applicable,scamsniffer-addresses:clear,forta-phishing-code:hit,scamsniffer-code:clear jws=verified"
+    },
+    {
+      "id": "simulation_hidden_recipient",
+      "status": "PASS",
+      "detail": "replay of 0xfb9b011d81c5c05f… HTTP 200 score=20 simulation=ok:outflow_to_undisclosed_eoa signed={\"status\":\"ok\",\"network\":\"eip155:1\",\"findings\":[\"outflow_to_undisclosed_eoa\"]}"
+    },
+    {
+      "id": "simulation_legit_wrap",
+      "status": "PASS",
+      "detail": "HTTP 200 score=94 tier=low simulation=ok findings=none"
+    }
+  ]
+}

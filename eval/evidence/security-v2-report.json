@@ -1,14 +1,14 @@
 {
-  "timestamp": "2026-09-29T14:45:23.619Z",
+  "timestamp": "2026-09-29T18:42:21.179Z",
   "endpoint": "https://x402check.xyz",
-  "passed": 12,
+  "passed": 5,
   "failed": 0,
-  "skipped": 0,
+  "skipped": 7,
   "results": [
     {
       "id": "v2-discovery",
       "status": "PASS",
-      "detail": "v0.2.0; pricing networks=7 (no testnets); https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML (publis…"
+      "detail": "v0.3.0; pricing networks=7 (no testnets); https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML (publis…"
     },
     {
       "id": "v2-no-testnet-payments",
@@ -27,8 +27,8 @@
     },
     {
       "id": "v2-free-quota-per-item-and-invalid-free",
-      "status": "PASS",
-      "detail": "remaining 24 → batch of 2 → 22 → 3 invalid + 1 valid → 21"
+      "status": "SKIP",
+      "detail": "status=402 (free quota exhausted?)"
     },
     {
       "id": "v2-healthz-edge-cached",
@@ -37,33 +37,33 @@
     },
     {
       "id": "v2-ofac-deterministic",
-      "status": "PASS",
-      "detail": "Lazarus (OFAC SDN) → 0/critical, signed checks.sanctions=listed, model skipped"
+      "status": "SKIP",
+      "detail": "status=402"
     },
     {
       "id": "v2-metamask-phishing-domain",
-      "status": "PASS",
-      "detail": "spotgpus.com subdomain → 20/critical [phishing_domain]"
+      "status": "SKIP",
+      "detail": "status=402"
     },
     {
       "id": "v2-caller-clean-is-not-a-bypass",
-      "status": "PASS",
-      "detail": "self-asserted clean on a described listing → 30/high; claim 'asserted' marks it as unverified"
+      "status": "SKIP",
+      "detail": "status=402"
     },
     {
       "id": "v2-approval-to-fresh-eoa",
-      "status": "PASS",
-      "detail": "permit → fresh EOA 40/high; → Universal Router 85/low"
+      "status": "SKIP",
+      "detail": "status=402/402"
     },
     {
       "id": "v2-evidence-and-signed-checks",
-      "status": "PASS",
-      "detail": "evidence{sanctions,onchain=unavailable,feeds=3} + signed checks/payment/aud/jti; iss pinned via did:web"
+      "status": "SKIP",
+      "detail": "status=402"
     },
     {
       "id": "v2-ipv6-slash64-aggregation",
-      "status": "PASS",
-      "detail": "two source addresses in one /64 share the quota: remaining 14 → 13"
+      "status": "SKIP",
+      "detail": "set IPV6_A and IPV6_B (two source addresses in one /64)"
     }
   ]
 }

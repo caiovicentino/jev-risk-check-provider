@@ -1,17 +1,28 @@
-# Evidence — x402check v0.2.0
+# Evidence — x402check v0.3.0
 
-All numbers come from commit `1e27dff`:
+All numbers were measured on 2026-09-29 on the v0.3.0 code:
 
-- the consolidated suite (`npm run eval:suite -- --seed 200`, 2026-09-29, question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, ~$0.15 of model calls, 265 s);
-- the production deployment `https://x402check.xyz`. `security:v2` ran on Worker `76bc1051`, and the other production suites on `2c3937fa`, which differs only in the Solana on-chain RPC default and the 2 s lookup ceiling. The review fixes (§6) shipped in `161c912e`, verified in production with zero-cost probes and locally on workerd and in unit tests for paths that need evaluations. The current Worker `e1b8da98` changes only landing copy on top of it.
+- the consolidated suite (`npm run eval:suite -- --seed 200`: question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, $0.145 of model calls, 244 s);
+- the grounded layers with the Tranco scan (`TRANCO_LIST=top-1m.csv npm run eval:grounded -- --seed 200 --tranco-n 200000`, Tranco list of 2026-09-28);
+- two new layers that make no model calls, `eval/simulation.ts` and `eval/code-fingerprint.ts`;
+- local workerd runs of the production Worker, and production probes (§7).
 
-Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not. Every rate carries a Wilson 95% interval.
+Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not. Every rate carries a Wilson 95% interval. The rulebook these numbers measure is [`METHODOLOGY.md`](METHODOLOGY.md).
 
-v0.2.0 follows an independent review. Its findings changed how the earlier (v5) evidence reads, so this document leads with measurements whose labels this project did **not** author. v5 numbers are kept as historical records in `EVIDENCE-SCALE.md`, `EVIDENCE-REDTEAM.md` and `EVIDENCE-SECURITY.md`, with correction notes.
+**New in v0.3:**
+
+- transaction simulation;
+- drainer-kit code fingerprints;
+- contract-verification signals;
+- a daily runtime refresh of OFAC and MetaMask;
+- `/status`;
+- the TypeScript SDK and the MCP server.
+
+Sections 2 and 3 measure the new layers. The v0.2 layers were re-run: the numbers below are from this run, and the differences from v0.2 are noted.
 
 ## 1. Externally grounded labels (`eval/grounded.ts`)
 
-Positives and negatives come from third-party sources. Held-out layers use a sampling seed never inspected during development: seeds 0–99 were looked at while tuning the domain heuristics, so the canonical run uses seed 200.
+Positives and negatives come from third-party sources. Held-out layers use a sampling seed never inspected during development. Seeds 0–99 were looked at while tuning the domain heuristics, so the canonical run uses seed 200.
 
 | Layer | Source of truth | Result | Rate (95% CI) |
 |---|---|---|---|
@@ -21,20 +32,73 @@ Positives and negatives come from third-party sources. Held-out layers use a sam
 | B · feed coverage: ScamSniffer-only domains | ScamSniffer (not in MetaMask) | 60/60 flagged | 100% (94–100%) |
 | **C · held-out: drainer permits, feed OFF** | ScamSniffer addresses, feed disabled | **27/30** | **90% (74–97%)** |
 | **C · held-out: plain transfer to drainer, feed OFF** | same addresses, `native_transfer` | **0/30** | **0% (0–11%)** |
-| **C · held-out: unlisted phishing domain** | ScamSniffer-only domains, MetaMask feed only | **0/60** | **0% (0–6%)** |
+| **C · held-out: unlisted phishing domain** | ScamSniffer-only domains, MetaMask feed only | **0/60** (1/60 in the suite run) | **0% (0–6%)** |
 | D · legit contracts and wallets (22) | Uniswap, Permit2, 1inch, Aave, Seaport, USDC/USDT/WETH, Jupiter, Raydium… | 22/22 passed, 0 high/critical | 100% (85–100%) |
 | D · top dApp domains (40) | curated list (app.uniswap.org, jup.ag, wallet.coinbase.com…) | 40/40 passed, 0 high/critical | 100% (91–100%) |
-| D · Tranco top 200k (deterministic only) | popularity list, no model calls | 5 capped / 199,999 | 0.003% (0.001–0.006%) |
+| D · Tranco top 200k (deterministic only) | popularity list, no model calls | 22 capped / 199,996 | 0.011% (0.007–0.017%) |
 
 What this supports:
 
 - **Feeds and the OFAC screen do the detection of known bad actors.** The deterministic caps are independent of model sampling.
 - **The approval-to-EOA rule generalizes.** 27/30 drainer spenders are plain wallets; the 3 misses are drainer *contracts*.
 - **Unknown drainers receiving a plain transfer are not detectable** from the address alone (0/30).
-- **Look-alike analysis plus the model does not replace a phishing feed.** It caught 0–3 of 60 unlisted phishing domains across two fresh samples; those domains mostly do not imitate a known brand.
-- **False-positive pressure is low.** On the Tranco top 200k, the 5 capped hosts are `temporary.site` and `tornadoeth.cash` (MetaMask list) and `ss:07789dc83cb686a1`, `ss:a227373b500b8020` and one IDN host (ScamSniffer, corroborated). Most are genuine abuse.
+- **Look-alike analysis plus the model does not replace a phishing feed.** Across three fresh samples of 60 unlisted phishing domains it caught 0–3; those domains mostly do not imitate a known brand.
+- **False-positive pressure is low.** The Tranco figure rose from 5 (v0.2, older Tranco snapshot) to 22 capped hosts:
+  - 20 are on MetaMask's own list, which is refreshed daily now: `temporary.site`, `happymod.net`, `vanced.to` and other APK-mod, casino and DNS-tool sites;
+  - 2 are strong look-alikes of crypto brands: `layerzro.ru` and `bitget.com.vn`.
 
-## 2. Attacker-realistic context (`eval/realistic.ts`)
+  Popular does not mean benign. The figure is an upper bound on false positives.
+
+## 2. Transaction simulation (`eval/simulation.ts`, new)
+
+**Positives** are real transactions that victims sent to ScamSniffer-listed drainer contracts on Ethereum. **Negatives** are recent real user transactions to 19 well-known contracts:
+
+- routers and aggregators: Uniswap UR and SwapRouter02, 1inch, MetaMask Swaps, Pendle;
+- lending, staking and pools: Aave, Lido, Balancer, Curve, WETH;
+- NFT and naming: Seaport 1.5/1.6, Blur, ENS, Uniswap positions;
+- bridges and tokens: Across, and USDC/USDT transfers.
+
+Each is replayed with `eth_simulateV1` at the latest block. The declared counterparty is the called contract, which is all a wallet can say about a call it cannot decode. No model calls are made. Code fingerprints are deliberately not applied, because the drainer contracts come from the list the runtime fingerprints are built from (§3 measures them held out).
+
+| | Transactions | Reverted at latest | Simulated | Flagged | Rate (95% CI) | When assets move |
+|---|---|---|---|---|---|---|
+| Drainer interactions (20 contracts) | 56 | 23 | 33 | **18** | **54.5% (38.0–70.2%)** | **18/25 = 72.0% (52.4–85.7%)** |
+| Legitimate interactions (19 contracts) | 228 | 144 | 84 | **0** | **0.0% (0.0–4.4%)** | 0/49 = 0.0% (0.0–7.3%) |
+
+Reading:
+
+- **Every detection is the hidden-recipient rule.** Assets left the victim, nothing came back, and a wallet the victim never named ended up with them. This holds even when the drainer contract itself is on no list.
+- **The 15 misses are of three kinds:**
+  - 8 replays move nothing at the latest block: the victim's approvals were already spent or the balance drained. A historical replay needs archive state, which the free public RPCs refuse.
+  - 3 send ETH straight to an EIP-7702 delegated drainer account that is itself the called address. The address feed covers this one: it is listed.
+  - 4 park ETH in source-verified "SecurityUpdates" contracts. The code-fingerprint layer (§3) targets exactly this kit.
+- **No false positives.** Swaps, marketplace fills, bridge deposits, staking and withdrawal requests, ENS registrations and token transfers were not flagged. Recipients named in a `transfer`/`transferFrom` call count as declared for that token only.
+- **The high revert rate is expected when replaying at the latest block:** filled orders, expired deadlines, spent signatures. Reverts are reported, never counted as detections.
+- **Known evasion.** A drainer that returns any asset to the victim defeats the "nothing comes back" condition. Valuation-based rules need price data (roadmap).
+
+## 3. Drainer-kit code fingerprints (`eval/code-fingerprint.ts`, new)
+
+A fingerprint is the SHA-256 of a contract's runtime code without the compiler-metadata trailer. It is computed for logic code only: token, NFT, delegating (DELEGATECALL/CALLCODE) and <100-byte code is never fingerprinted. The set embedded in the Worker comes from Forta's MIT-licensed 2023 phishing labels, giving 46 fingerprints. The runtime set comes from ScamSniffer-listed addresses on 7 EVM chains, giving 52 fingerprints; it is GPL data, so it lives in KV and is never committed.
+
+| Measurement (Ethereum, 100 ScamSniffer-listed contracts) | Result | Rate (95% CI) |
+|---|---|---|
+| Cross-source: Forta 2023 fingerprints only | 15/100 | 15.0% (9.3–23.3%) |
+| **Temporal: contracts created earlier (listed set) or Forta** | **43/100** | **43.0% (33.7–52.8%)** |
+| Leave-one-out within ScamSniffer (upper bound) | 51/100 | 51.0% (41.3–60.6%) |
+| **False positives: contracts called in the latest 300 blocks + CoinGecko tokens** | **0/2,018 fingerprintable** (0/9,625 contracts) | 0.00% (0.00–0.19%) |
+
+Reading:
+
+- **Most drainer contracts are redeployments of a few kits.** "SecurityUpdates" alone accounts for 13 listed contracts. A continuously updated fingerprint set would have recognized 43% of listed contracts *when they were created*, before their own address could be listed.
+- **Fingerprints generalize across deployments, not across eras.** The 2023 set catches 15% of today's listed contracts.
+- **The exclusions are what make the signal safe.** Before they were added, 27 legitimate contracts collided with listed fingerprints, including the SHIB token: lists contain fake-token clones whose code is identical to the real token's.
+- **After the exclusions, 0 of 9,625 contracts collided.** The scan followed EIP-7702 delegations, proxies and hard-coded links, exactly as runtime matching does:
+  - 2,018 contracts were fingerprintable, 1,327 of them only through a delegate or implementation;
+  - the corpus also included 3,385 tokens, 4,065 delegating contracts and 1,055 delegated accounts.
+- **The temporal split assumes an earlier-created contract was already listed** when the later one appeared. Listing lag would lower the figure. The leave-one-out figure is an upper bound.
+- **A match caps the score at 30 (high).** It is not treated as proof: the verdict states which set matched.
+
+## 4. Attacker-realistic context (`eval/realistic.ts`)
 
 The same risky scale cases were run with three kinds of context: the self-describing context of the legacy corpus, the benign context an attacker would send, and no context. A fourth variant uses raw injected content, as an agent-side gate would pass it.
 
@@ -46,104 +110,91 @@ The same risky scale cases were run with three kinds of context: the self-descri
 | sanctions (described, not listed) | 20/20 | 0/20 | 0/20 | — |
 | abuse | 20/20 | 0/20 | 0/20 | — |
 
-Reading: the model detects risk that is **present in the content it is given**. That covers a look-alike domain, and injected instructions when the agent passes the content it acted on. It does not infer laundering, sanctions exposure or abuse from an address, because nothing in the request carries that information. Those categories need data (feeds, on-chain analytics), not prose.
+Reading: the model detects risk that is **present in the content it is given**. That covers a look-alike domain, and injected instructions when the agent passes the content it acted on. It does not infer laundering, sanctions exposure or abuse from an address, because nothing in the request carries that information. Those categories need data (feeds, on-chain analytics), not prose. The v0.3 run reproduces v0.2 exactly.
 
-## 3. Regression corpora (described scenarios — upper bounds, not real-world rates)
+## 5. Regression corpora (described scenarios: upper bounds, not real-world rates)
 
 | Layer | n | Accuracy (95% CI) | FN | FP | Notes |
 |---|---|---|---|---|---|
 | synthetic (mock model) | 53 | 100% (93–100%) | 0 | 0 | plumbing only |
 | shadow, production regime → gate | 53 | 100% (93–100%) | 0 | 0 | no caller screening; review share **0.0%**; gate **READY** |
-| shadow, legacy label-derived screening | 53 | 100% | 0 | 0 | comparison only (label leaked into input); review 7.5% |
+| shadow, legacy label-derived screening | 53 | 100% | 0 | 0 | comparison only (label leaked into input); review 9.4% |
 | scale (7 categories × 60) | 420 | 100% (99.1–100%) | 0 | 0 | stability 96% unanimous tier (24×5) |
-| red-team v6 corpus | 1,440 | 99.0% (98.4–99.4%) | 3 | 11 | 60 prose-only clearance claims held in the block band |
+| red-team v6 corpus | 1,440 | 99.1% (98.5–99.5%) | 1 | 12 | 60 prose-only clearance claims held in the block band |
 | benchmark: provider | 225 | 99.1% (96.8–99.8%) | 0 | 2 | same described-scenario sample |
-| benchmark: gpt-4.1-mini chat judge | 225 | 99.1% (96.8–99.8%) | 0 | 2 | one-line prompt; **identical accuracy: no difference** |
+| benchmark: gpt-4.1-mini chat judge | 225 | 99.6% (97.5–99.9%) | 0 | 1 | one-line prompt; **within noise of the provider** |
 
-- The switch-over gate runs in the production regime: no caller `screening`, and the provider's own OFAC screen and feeds in the state. The v5 gate reached READY only in a "screening-integrated" simulation that derived the caller's screening field from the label. Unscreened, it failed at a 26% review share.
+- The switch-over gate runs in the production regime: no caller `screening`, and the provider's own OFAC screen and feeds in the state.
 - The 53 "human-verified" labels were applied by the project owner to cases the project authored. They confirm that the authored intent was captured. They are not an independent ground truth.
-- The v5 claim that the provider beats the chat judge on accuracy and cost did not survive the corrected corpus. Accuracy is within noise, and cost per decision is similar ($0.0152 vs $0.0135 on this sample). The provider's differentiators are typed, signable outputs and deterministic evidence, not accuracy.
+- On described scenarios, a one-line chat judge performs as well as the provider ($0.0135 vs $0.0152 on this sample). The provider's differentiators are the layers a prompt cannot reproduce: provider-verified evidence (lists, simulation, code), typed and signed outputs, and deterministic caps.
 
-## 4. Production (`https://x402check.xyz`)
-
-| Suite | Result |
-|---|---|
-| `npm run prod` — 53 cases against the live endpoint | **53/53** correct, **53/53** attestations verified (issuer pinned, `exp` checked), 0 mismatches |
-| `npm run security:v2` — v0.2.0 fixes | **12/12 PASS**: see the list below |
-| `npm run security` — v5 probe suite | **20/20 PASS** (422s now name the offending field) |
-| `npm run security:full` — 56 probes | **54 PASS · 0 FAIL · 2 SKIP**. The concurrency probe was skipped for lack of free allowance on the test IP after the other runs; it passes against the same code locally (below). |
-
-The 12 `security:v2` probes:
-
-- discovery lists no testnets;
-- the 402 challenge offers mainnets only;
-- a 25-item batch is priced 25× the unit on all 7 networks;
-- malformed input gets 422 or 413 with the field named;
-- the free tier is charged per item and invalid input is free;
-- `/healthz` is edge-cached;
-- an OFAC-listed address gets 0/critical with the model skipped;
-- a MetaMask-listed domain gets 20/critical;
-- a self-asserted "clean" gets 30/high;
-- a permit to a fresh EOA gets 40/high, while one to the Universal Router gets 85/low;
-- signed `checks`/`payment`/`aud`/`jti`;
-- **two IPv6 source addresses in one /64 share the quota**.
-
-Per-key counter atomicity: 25 concurrent requests from one client id, run on workerd with the production code and a fresh Durable Object, received remaining values 24…0, all distinct and consecutive. The next 5 fell back to the IP allowance.
-
-Not re-exercised: a real paid settlement. Both payer wallets are unfunded (0 USDC). The paywall was verified up to the 402 challenge: prices, networks, and settle-before-release in unit tests with a fake facilitator.
-
-## 5. What each number does NOT show
+## 6. What each number does NOT show
 
 - Real x402 facilitator traffic has not been shadowed yet. All model-in-the-loop corpora are synthetic or curated.
-- ScamSniffer's public data lags 7 days. MetaMask's list is refreshed only when `npm run feeds:update` is run and deployed.
+- ScamSniffer's public data lags 7 days. OFAC and MetaMask are refreshed daily by `.github/workflows/feeds.yml`. Before v0.3 they changed only with a deploy.
+- The simulation replays at the latest block. It says nothing about transactions whose preconditions no longer hold, and it is measured on Ethereum only; Base, Polygon, Arbitrum, Optimism and BSC use the same code path.
 - OFAC screening covers direct listing only; it does not detect funds received from listed addresses.
 - The MetaMask Snap was exercised in the official SES execution environment (snaps-jest), not in the MetaMask extension. It is not published or allowlisted.
 
-## 6. Second adversarial review (after the fixes)
+## 7. Production (`https://x402check.xyz`)
 
-Two independent reviewers attacked the v0.2.0 code: one the backend and Worker, one the Snap decoders. They reported only findings they had reproduced.
+**`security-v3` against production (Worker `fbc0a6dc`): 8/8 PASS.** The run happened before the free tier was removed later the same day, so the evaluations did not need a payment:
 
-**Backend: 9 confirmed findings, all fixed in `1e27dff`**, with regression tests in `test/review-regressions.test.ts`:
+- discovery v0.3.0 and `/status`;
+- three 422 validations;
+- a Forta-fingerprinted drainer contract, on no address list, capped at **30** with a verified attestation;
+- a real drainer transaction replayed to **20**: a hidden recipient, whose address is also ScamSniffer-listed, with the finding signed in `checks.simulation`;
+- a WETH wrap left at **94/low**.
 
-- *(high)* Case-flipped variants of listed Base58Check addresses were accepted as different, unlisted addresses, and the reference verifier compared `sub` case-insensitively. Checksums are now enforced; across 666 checksummed OFAC entries, every case-flipped variant is rejected. OFAC is also indexed by the 20-byte hash an address encodes, so the same key in another encoding is listed. `sameSubject()` compares base58 case-sensitively.
-- A hostile punycode label crashed domain analysis before the OFAC short-circuit. Fixed with an RFC 3492 decoder that has bounds checks; sanctions now run first.
-- Self-asserted `pre_authorized` could raise the score. The trust floor is removed.
-- A CAIP-10 chain or `payment.network` could disagree with `chain`. That now returns 422.
-- The prototype keys `constructor` and `__proto__` were accepted as chains. The aliases now live in a `Map`, and the model's `risk_class` must be one of the declared choices.
-- The body cap was counted in UTF-16 units after buffering. It is now counted in bytes while streaming.
-- A paid request could be settled even though the evaluation failed. It now gets 503 with no charge.
-- At midnight, a request stamped with the previous day could reset the counters. The day is now monotonic.
-- An `X-PAYMENT`-only request skipped the free tier and could never pay.
+The same probes passed on workerd with the production code before the deploy.
 
-Removing the trust floor moved the red-team layer from 99.2% to 99.0% (FP 9 → 11), which is within noise.
+**`security-v2` regression:** the 5 deterministic probes passed in production. These cover discovery, mainnet-only 402 options, batch pricing (25 × unit on all 7 networks), validation before payment, and health.
 
-**Snap: 9 confirmed decoder findings**, all proven with MetaMask's own EIP-712 hashing. Examples:
+**No free tier (v0.3):** every evaluation is paid. The probes that need a verdict now pay through `eval/paid-fetch.ts` and wait on a funded payer key. Until then they report SKIP, never PASS. An unpaid request is verified to get 402 with the accepted options.
 
-- non-canonical encodings that sign the same hash as a drainer permit but redirect the check;
-- the DAI `allowed` truthiness;
-- native value sent to a contract under a known selector;
-- listing-drainer bypasses;
-- UniswapX outputs;
-- wrapper calls;
-- a stack overflow on huge inputs.
+The v0.2 production record (53/53 cases, 53 attestations verified; `security:v2` 12/12, `security` 20/20, `security:full` 54 PASS / 0 FAIL / 2 SKIP) was measured on Worker `76bc1051`/`2c3937fa` and is kept in the corresponding reports.
 
-All nine are fixed and each probe is now a regression test (199 Snap tests). The main changes:
+## 8. Reviews
 
-- Typed data is decoded only through the fields declared in `types`, with MetaMask's own normalization. An unknown permit amount is treated as unlimited.
-- Native value always makes the value recipient the primary counterparty.
-- Wrappers (multicall, Safe, Universal Router, ERC-7579/4337, 7702 self-calls) are decoded.
-- Seaport/Blur/LooksRare dust listings and UniswapX outputs are checked.
-- Every handler is wrapped so that any exception renders "NOT verified".
-- Up to 3 candidate counterparties go through the batch endpoint, and the worst verdict is shown.
+**v0.3 adversarial review: 11 reproduced findings, all fixed.** An independent reviewer attacked the new code. It reported only findings it had reproduced, 5 of them high severity. Each fix has a regression test in `test/review-v03.test.ts`, and the reviewer's repro scripts no longer reproduce.
+
+- *(high)* **A named payee covered any asset and any amount.** A Snap request for `transfer(X, 1)` whose transaction actually moved 1e24 of another token to X scored 100/low.
+  - Fix: payees are scoped to `payment.asset` and `payment.amount`, and explicit calldata recipients to the called token and amount. A payee scope overrides the bare naming of the subject, and anything beyond it is `outflow_exceeds_declared` (40).
+- *(high)* **The code lookup failed open.** A rate-limited `eth_getCode` batch, or a recipient beyond the 7 then classified, made a drain look clean.
+  - Fix: every recipient and spender is classified, up to 40, with a fallback RPC. Anything unclassified is `simulation_incomplete` (75 and review).
+- *(high)* **False positives on bridges and batch senders.** Relay deposits went 12/12 and Disperse payouts 7/7 to "hidden recipient" at 40.
+  - Fix: when a source-verified contract forwards to the recipient, the cap is 75 with review instead of 40.
+- *(high)* **Paying a Safe or smart-wallet payee was capped at 55,** because fresh proxies are unverified on explorers.
+  - Fix: payees are excluded from the "unverified sink" rule, and exact forwarding proxies are judged by their implementation.
+- *(high)* **CPU amplification.** Net-movement accounting was quadratic, and logs and responses were unbounded: 500 TransferBatch logs took about 11 s.
+  - Fix: linear accounting, caps on response size, logs and flows, and "incomplete" when a cap is hit. The same input now takes milliseconds.
+- *(medium)* **CAIP-10 payees did not match the declared set.** Fix: canonical addresses.
+- *(medium)* **The feed refresh authenticated nothing.** A self-consistent publish could replace the OFAC rows.
+  - Fix: an Ed25519-signed manifest with the publisher key pinned in the Worker, sane dates, shrink checks against the list in use, and a bounded allowlist.
+  - The workflow was hardened too: build with a read-only token, no persisted credentials and no install scripts, then sign and publish in a separate job that runs no dependency code.
+- *(medium)* **Drainer code behind a 7702 delegation or a proxy was never fingerprinted.** Fix: one level of indirection is followed, with a build-time guard for widely used implementations.
+- *(low)* TransferBatch entries after the 64th were dropped. "Not verified" was cached for 24 h. A cold isolate screened with the older embedded OFAC list.
+  - Fixes: all entries are decoded under a global cap, the negative cache lasts 10 minutes, and a cold isolate briefly waits for the first verified refresh.
+
+**SDK and MCP server review:** 1 critical and 15 other findings, all fixed but one documented residual.
+
+- The critical one: the verdict was read from the unsigned response body, so a proxy could turn BLOCK into ALLOW. Verdicts are now read from the signed claims only, bound to the request.
+- The review also led to two provider changes:
+  - `request_hash`, a client-recomputable binding of the exact request;
+  - fail-closed review floors when on-chain facts or the simulation are unavailable.
+
+**v0.2:** v0.2.0 followed an independent review. A second adversarial review then confirmed and fixed 9 backend and 9 Snap findings. Each is a regression test (`test/review-regressions.test.ts`, and the Snap suite). The details are in the v0.2 record of this file in git history (`git show v0.2.0:docs/EVIDENCE.md`).
 
 ## Reproduce
 
 ```bash
-npm test                                     # 63 unit tests
-npm --prefix snap test                       # 199 Snap tests (built bundle in SES)
+npm test                                     # provider unit tests
+npm --prefix snap test                       # Snap tests (built bundle in SES)
 npm run eval:suite -- --seed 200             # needs AI_GATEWAY_API_KEY or TYPESAFE_API_KEY
-TRANCO_LIST=top-1m.txt npm run eval:grounded -- --seed 200 --tranco-n 200000
-npm run security:v2 && npm run prod          # against production (free tier: 25/day)
+TRANCO_LIST=top-1m.csv npm run eval:grounded -- --seed 200 --tranco-n 200000
+npm run eval:simulation -- --drainers 400 --per-contract 3 --legit-per-contract 12 --seed 11
+npm run eval:code                            # needs .cache ScamSniffer list (eval:grounded caches it)
+PAID=1 npm run security:v3 && PAID=1 npm run security:v2   # against production: every evaluation is paid (funded payer key)
 ```
 
 Historical meta-evaluations (`audit-report.json`, `crosslabel-report.json`, 2026-09-27) used the same model family to judge its own verdicts. They measure framing stability, not correctness, and are kept for the record.

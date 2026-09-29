@@ -1,11 +1,13 @@
 # x402check — pre-payment risk checks for x402 agents and wallets
 
-**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · 25 free evaluations/day · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
+**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · $0.001 per evaluation, paid with x402 · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
 
 x402check is an x402 `risk-check` provider (wire format of [x402 PR #2422](https://github.com/x402-foundation/x402/pull/2422)). You call it before an agent or a wallet pays or signs, and it checks the counterparty. It combines provider-verified evidence with a typed model:
 
-- the **OFAC SDN** list;
+- the **OFAC SDN** list, refreshed daily;
 - curated **phishing and drainer feeds**;
+- **transaction simulation**: where the assets actually go, and which approvals are granted;
+- **drainer-kit code fingerprints**, which recognize redeployed drainer contracts before their address is listed;
 - **look-alike domain** analysis;
 - **on-chain facts** about the counterparty, such as whether an approval is being granted to a plain wallet;
 - a typed model (TypeSafe **Jev**) that reads the content the agent acted on for **injected instructions**.
@@ -28,6 +30,11 @@ Every verdict is an **ES256 attestation**. It states which checks the provider a
 | Community-flagged domain | ScamSniffer domain list | capped at **40** only when our own domain analysis corroborates it |
 | Look-alike domain | public-suffix aware: leet, IDN homoglyphs, typosquats, brand + lure word, official domain reused as a subdomain | "strong" impersonation → capped at **40** |
 | Approval granted to a plain wallet | on-chain `eth_getCode` / activity (EVM), account data (Solana) | permits and approvals to an EOA → capped at **55**; **40** if the address has no activity |
+| Hidden recipient | simulation of `transaction` (`eth_simulateV1` + `traceTransfers`) | assets leave, nothing comes back, and a wallet the user never named ends up with them → **40** (**75**, review, when a source-verified contract such as a bridge forwarded them) |
+| Payee gets more than declared | simulation + `payment` / the explicit transfer in the calldata | the named payee receives a different asset, or more, than declared → **40** |
+| Assets parked in an unverified contract | simulation + Blockscout source verification | nothing in return, contract source not verified → **55** |
+| Drainer-kit code | logic-code fingerprints of contracts listed by Forta (embedded) and ScamSniffer (runtime) | the subject, or a contract in the simulated transaction, runs a listed drainer's code → **30** |
+| Unverified spender | Blockscout source verification | approval or permit to an unverified contract → **75** and at least `medium` (review) |
 | Injected / manipulated intent | Jev typed questions over `context` (what the agent acted on) | model penalties and caps |
 | New address | on-chain activity | informational `new_address` category |
 
@@ -68,6 +75,18 @@ curl -X POST https://x402check.xyz/v1/risk-check \
 }
 ```
 
+To also check **what a transaction will do**, send it as `transaction`. The provider simulates it against the latest block and reports the net asset movements, the approvals granted, and any findings:
+
+```bash
+curl -X POST https://x402check.xyz/v1/risk-check -H "Content-Type: application/json" -d '{
+  "wallet": "0x…called contract or decoded counterparty…", "chain": "eip155:1",
+  "transaction": { "from": "0x…user…", "to": "0x…contract…", "value": "0x2386f26fc10000", "data": "0x…" }
+}'
+# evidence.simulation → { "status": "ok", "outflows": [{ "standard": "native", "amount": "10000000000000000",
+#   "counterparty": "0x…", "counterparty_is_contract": false }], "inflows": [], "approvals": [],
+#   "findings": ["outflow_to_undisclosed_eoa"] }   → score capped at 40
+```
+
 ## Request fields
 
 | Field | Required | Rules |
@@ -79,6 +98,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \
 | `interaction` | no | `{type, unlimited?}`; `type` ∈ `native_transfer`, `token_transfer`, `token_approval`, `nft_approval`, `permit_signature`, `order_signature`, `message_signature`, `contract_call` |
 | `payment` | no | binds the attestation to a payment: `{network, pay_to, amount (base units), asset, resource}` |
 | `aud` | no | ≤ 256 chars; copied into the attestation, never shown to the model |
+| `transaction` | no | EVM `{from, to?, value?, data?}` to simulate; needs an `eip155` chain. `value` is decimal or 0x-hex; `data` is 0x-hex, ≤ 49,152 chars. Simulated on Ethereum, Base, Polygon, Arbitrum, Optimism and BSC |
 | `screening`, `authorization` | no | caller assertions, recorded as `asserted` (can only raise risk) |
 
 Batch: `POST /v1/risk-check/batch` with `{"requests": [...]}` (≤ 25). It is all-or-nothing: an invalid item returns `422` with its `index`.
@@ -91,10 +111,12 @@ A compact JWS (`alg: ES256`, `typ: risk-check+jwt`, `kid: jev-attest-v1`), TTL 1
 |---|---|
 | `iss`, `sub`, `iat`, `exp`, `jti` | issuer `did:web:x402check.xyz`, the subject wallet, times, unique id |
 | `score`, `tier`, `categories` | the verdict and the findings behind it |
-| `checks` | **what the provider verified**: `sanctions` (list, date, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`), `model` (question set, or `skipped`) |
+| `checks` | **what the provider verified**: `sanctions` (list, date, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`, including code-fingerprint sets), `simulation` (status, network, findings), `model` (question set, or `skipped`) |
+| `interaction` | the interaction type the verdict covers |
 | `asserted` | what the caller **claimed** (screening / pre-authorization): not verified |
 | `payment`, `interaction`, `aud` | what the verdict was issued for |
-| `input_hash` | SHA-256 over the canonical inputs, sources and question set |
+| `input_hash` | SHA-256 over the canonical normalized inputs, sources and question set |
+| `request_hash` | SHA-256 over the request fields exactly as sent (RFC 8785): recompute it to prove nothing was dropped or altered in transit |
 
 Verify it by **pinning the issuer**. Never trust a key URL carried by a response or an intermediary:
 
@@ -120,7 +142,7 @@ const res = await fetch("https://x402check.xyz/v1/risk-check", {
     interaction: { type: "permit_signature", unlimited: true },
   }),
 });
-if (res.status !== 200) return showNotVerified(res.status);   // 402 = free checks used up
+if (res.status !== 200) return showNotVerified(res.status);   // 402 = not paid (every check is paid via x402)
 const v = await res.json();
 if (!v.checked) return showNotVerified();                     // fail-closed, never an all-clear
 if (v.tier === "high" || v.tier === "critical") warnOrBlock(v);
@@ -133,12 +155,28 @@ if (v.tier === "high" || v.tier === "critical") warnOrBlock(v);
 | `high` | red: "We recommend you do not proceed" |
 | `critical` | hard block with override; show the categories and evidence |
 
-`X-Risk-Check-Free-Remaining` reports the caller's daily allowance.
+## Payments
 
-## Payments and free tier
+Every evaluation is paid; there is no free tier.
 
-- **Free:** 25 evaluations per day per caller. An IPv6 caller is counted per /64. A batch of *n* uses *n*. Invalid requests are rejected before any quota is used. Wallet installs can send `X-Risk-Check-Client` for their own allowance; it falls back to the IP allowance.
-- **Paid:** $0.001 per evaluation ($0.002 on Solana), and a batch is billed per item. Settlement is USDC via x402 on **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The facilitator is Dexter (gas-sponsored), with PayAI as fallback. A paid result is released **only after settlement succeeds**.
+- **Price:** $0.001 per evaluation ($0.002 on Solana). A batch of *n* is billed *n*.
+- **Settlement:** USDC via x402 v2 (`PAYMENT-SIGNATURE`), **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The facilitator is Dexter (gas-sponsored), with PayAI as fallback. The x402 "exact" scheme is gasless for the payer, so USDC alone is enough.
+- **An unpaid request** gets `402` with the accepted options in `PAYMENT-REQUIRED`. Any x402 client pays and retries.
+- **Invalid input** is rejected (`422`/`413`) before anything is priced.
+- **Release after settlement:** the attestation is returned only once the payment settles. If the evaluation cannot be produced, nothing is settled (`503`, no charge).
+
+```ts
+import { createClient } from "@x402check/client";
+import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
+import { ExactEvmScheme } from "@x402/evm/exact/client";
+import { privateKeyToAccount } from "viem/accounts";
+
+const payer = new x402Client();
+payer.register("eip155:*", new ExactEvmScheme(privateKeyToAccount(process.env.PAYER_KEY as `0x${string}`)));
+payer.setSpendControls({ maxAmountPerPayment: "$0.05" }); // a batch of 25 costs $0.025
+const x402check = createClient({ fetch: wrapFetchWithPayment(fetch, payer) });
+const verdict = await x402check.check({ wallet: "0x…", chain: "base" });
+```
 
 ## Architecture
 
@@ -148,8 +186,9 @@ request ─► validate (422 names the field) ─► quota / x402 (per item) ─
       deterministic, provider-side ──────────────────────────────────────┤
         OFAC SDN screen ── listed? ──► score 0 · critical (no model call)│
         domain analysis (PSL, homoglyph, typosquat, lure)                │
-        threat feeds (MetaMask embedded, ScamSniffer via KV)             │
-        on-chain facts (JSON-RPC, in parallel with the model)            │
+        threat feeds (MetaMask + OFAC refreshed daily, ScamSniffer KV)   │
+        on-chain facts + code fingerprints (JSON-RPC)                    │
+        transaction simulation (eth_simulateV1) + contract verification  │
       model ─ Jev typed questions over provider checks + context ────────┤
       code  ─ weights, deterministic caps, tiers (src/scoring.ts) ───────┤
                                                                          ▼
@@ -164,28 +203,31 @@ Source layout:
 - `eval/`: evaluation layers.
 - `scripts/`: data refresh and the verifier.
 
-## Evidence (v0.2.0, commit `1e27dff`)
+## Evidence (v0.3.0)
 
 | What | Result |
 |---|---|
 | OFAC SDN addresses (external labels) | 24/24 critical |
 | MetaMask-listed phishing domains · ScamSniffer drainer addresses | 40/40 · 30/30 |
 | Drainer **permits**, drainer feed switched off (approval-to-EOA rule) | **27/30** |
+| **Simulation:** real drainer transactions that still move assets at the latest block | **18/25 flagged** (72%), all as hidden recipients |
+| **Simulation:** real transactions to 19 well-known contracts | **0/84** flagged |
+| **Code fingerprints:** listed drainer contracts matched by earlier kits' code, at creation time | **43/100** |
+| **Code fingerprints:** legitimate contracts (latest blocks + CoinGecko tokens), following delegations and proxies | **0/9,625** matched |
 | Plain **transfers** to unlisted drainers | **0/30**: not detectable from the address alone |
 | Unlisted phishing domains without a feed | 0–3/60: feeds do the heavy lifting |
 | Well-known contracts and top dApp domains | 0 false positives (0/22, 0/40) |
-| Tranco top 200k, deterministic rules | 5 capped (0.003%) |
+| Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
-| Production: 53 cases · security probes | 53/53 (53 JWS verified) · v2 12/12, v5 20/20, full 54/0 FAIL |
 
-Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). The pre-v0.2.0 evidence documents are kept as historical records with correction notes.
+Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). How each verdict is formed, with every cap: [docs/METHODOLOGY.md](docs/METHODOLOGY.md). Earlier evidence documents are kept as historical records with correction notes.
 
 ## Run locally
 
 ```bash
 npm install
-npm test                           # 63 unit tests
+npm test                           # provider unit tests
 npm run typecheck                  # root + deploy + scripts + snap
 AI_GATEWAY_API_KEY=... npm start   # :8787 (or TYPESAFE_API_KEY=...)
 curl localhost:8787/.well-known/risk-check.json
@@ -194,18 +236,31 @@ npm run eval:suite -- --seed 200   # full evaluation (~$0.15 of model calls)
 
 Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deploy/README.md](deploy/README.md) for secrets, feeds, deploy and rollback.
 
+## For agents: SDK and MCP server
+
+- **[`@x402check/client`](packages/client)** is a typed TypeScript client with zero runtime dependencies. It runs on Node ≥ 20, browsers, Cloudflare Workers, Deno and Bun.
+  - `verifyAttestation` checks the signature against the issuer's `did:web` key and binds it to the request you made, including `request_hash`.
+  - `interpret` applies the fail-closed policy. Its verdicts come from the **signed** claims only, never from the unsigned body.
+- **[`@x402check/mcp`](packages/mcp)** is an MCP server for any agent (Claude Code, Claude Desktop, other MCP clients), with the tools `x402check_check`, `x402check_verify_attestation` and `x402check_methodology`. Every verdict is verified before the agent sees an action.
+
+```bash
+claude mcp add x402check -- npx -y @x402check/mcp      # once published to npm
+```
+
+Both packages are ready to publish, but not yet published.
+
 ## MetaMask Snap (preview)
 
-`snap/` has `onTransaction` / `onSignature` insights that decode the request locally, check the real counterparty and render the signed verdict with its evidence. Supported decoding:
+`snap/` has `onTransaction` / `onSignature` insights that decode the request locally, check the real counterparty and render the signed verdict with its evidence. Since 0.3.0 it also sends the transaction for simulation and shows what it will do: "You send 1.5 ETH → 0x… (wallet)", approvals granted, and plain-language warnings for hidden recipients and known drainer code. Supported decoding:
 
 - calldata: ERC-20 approve / transfer, Permit2, EIP-2612, setApprovalForAll, NFT transfers;
 - typed data: v1, v3 and v4, including Permit2 and Seaport;
 - `personal_sign` messages, decoded to text.
 
-On install and on update it shows a disclosure listing exactly what is sent. The install id is random, not derived from the recovery phrase.
+On install and on update it shows a disclosure listing exactly what is sent, including the full transaction for simulation. The install id is random, not derived from the recovery phrase.
 
 ```bash
-cd snap && npm install && npm test          # builds, then 199 tests incl. the built bundle in SES
+cd snap && npm install && npm test          # builds, then 256 tests incl. the built bundle in SES
 npx mm-snap serve                           # then wallet_requestSnaps "local:http://localhost:8062" in MetaMask Flask
 ```
 
@@ -213,12 +268,21 @@ The Snap is **not yet published to npm nor allowlisted by MetaMask**, so there i
 
 ## Data sources and licenses
 
-Code is MIT. Data sources: OFAC SDN (U.S. Treasury), MetaMask eth-phishing-detect (DBAD-1.2, embedded as a derived hash set, attributed), ScamSniffer scam-database (GPL-3.0, runtime only: never committed or bundled) and public JSON-RPC endpoints. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Refresh with `npm run ofac:update` and `npm run feeds:update`.
+Code is MIT. Data sources:
+
+- OFAC SDN (U.S. Treasury);
+- MetaMask eth-phishing-detect (DBAD-1.2, embedded as a derived hash set, attributed);
+- ScamSniffer scam-database (GPL-3.0, runtime only: never committed or bundled);
+- Forta labelled datasets (MIT, derived code fingerprints);
+- Blockscout and public JSON-RPC endpoints.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). OFAC and MetaMask are refreshed daily by `.github/workflows/feeds.yml` and swapped in at runtime after verification. [`/status`](https://x402check.xyz/status) shows the versions in use. Manual refresh: `npm run ofac:update`, `npm run feeds:update`.
 
 ## Roadmap
 
 1. Shadow real x402 facilitator traffic, moving the evidence from curated corpora to live flows.
-2. Fresher address intelligence: real-time drainer feeds and funding-source analytics for plain transfers.
-3. Publish the Snap and request MetaMask allowlisting.
-4. KMS/HSM custody for the attestation key; key rotation with overlapping `kid`s.
-5. Kora `decision_provider` integration (issue #682); AP2 `RiskPayload` once upstream stabilizes.
+2. Fresher address intelligence: real-time drainer feeds and funding-source analytics for plain transfers; EIP-7702 sweeper detection.
+3. Valuation-aware simulation rules (price data), closing the "return a dust asset" evasion.
+4. Publish the Snap and request MetaMask allowlisting.
+5. KMS/HSM custody for the attestation key; key rotation with overlapping `kid`s.
+6. Kora `decision_provider` integration (issue #682); AP2 `RiskPayload` once upstream stabilizes.

@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-09-29T18:52:18.837Z",
+  "network": "eip155:1",
+  "fingerprint": "sha256 of runtime code minus the CBOR metadata trailer; token, NFT, delegating (DELEGATECALL/CALLCODE) and <100-byte code is never fingerprinted itself, but runtime matching follows 7702 delegations, proxies and hard-coded links to the code they run",
+  "sets": {
+    "forta": {
+      "as_of": "2023-01-26",
+      "commit": "40a9c2f2bd7e9ddfdd0f3540db589f0288e1e88a",
+      "fingerprints": 46
+    },
+    "scamsniffer_runtime": {
+      "as_of": "2026-09-29",
+      "fingerprints": 52
+    }
+  },
+  "recall": {
+    "scamsniffer_listed_addresses": 2530,
+    "contracts_on_ethereum": 100,
+    "code_kinds": {
+      "logic": 88,
+      "delegating": 11,
+      "nft": 1
+    },
+    "cross_source_forta_2023": "15/100 = 15.0% (95% CI 9.3–23.3%)",
+    "temporal_prior_listed_or_forta": {
+      "dated": 100,
+      "caught": "43/100 = 43.0% (95% CI 33.7–52.8%)"
+    },
+    "leave_one_out_upper_bound": "51/100 = 51.0% (95% CI 41.3–60.6%)",
+    "caught_cross_source": [
+      "ss:af6bfd93e73a9bdb",
+      "ss:b1b17bf6beff17c7",
+      "ss:4a3181e464f5a51e",
+      "ss:764b9dc084412209",
+      "ss:ae7aff603fd33df6",
+      "ss:9ed58a381da34072",
+      "ss:b9d3c5faf9bd68f7",
+      "ss:506d7ecf703ced0b",
+      "ss:681a68c33e0f0d9e",
+      "ss:b92b0eed72e1653d",
+      "0xd13b093eafa3878de27183388fea7d0d2b0abf9e",
+      "ss:6ec54477a90e128b",
+      "ss:5f5f04a7812780c9",
+      "ss:0ea0314fdd2ffc0b",
+      "ss:e82eed530da4758f"
+    ]
+  },
+  "false_positives": {
+    "corpus": {
+      "recent_block_callees": 4946,
+      "coingecko_tokens": 6009,
+      "blocks": 300
+    },
+    "contracts": 9625,
+    "code_kinds": {
+      "token": 3385,
+      "delegating": 4065,
+      "delegated": 1055,
+      "logic": 691,
+      "tiny": 114,
+      "nft": 315
+    },
+    "fingerprintable": 2018,
+    "fingerprintable_via_delegation_or_proxy": 1327,
+    "collisions": "0/2018 = 0.000% (95% CI 0.000–0.190%)",
+    "collisions_all_contracts": "0/9625 = 0.000% (95% CI 0.000–0.040%)",
+    "collision_list": []
+  }
+}

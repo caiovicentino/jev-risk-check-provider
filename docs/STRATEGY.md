@@ -32,10 +32,18 @@ Every answer comes back as a signed attestation that a merchant, a facilitator, 
 
 | Layer | Question | Sources (today → next) |
 |---|---|---|
-| Counterparty intelligence | Is this address or site known to be bad? | OFAC SDN (with same-key cross-encoding), MetaMask phishing list, ScamSniffer, look-alike analysis → contract verification (Blockscout), fresher feeds |
-| Interaction intelligence | What will this do to the user's assets? | decoding of calldata and typed data (Snap), approval-to-EOA rule → **transaction simulation (`eth_simulateV1`): asset outflows, approvals granted, value forwarded to plain wallets** |
+| Counterparty intelligence | Is this address or site known to be bad? | OFAC SDN (same-key cross-encoding, refreshed daily), MetaMask phishing list (refreshed daily), ScamSniffer, look-alike analysis, contract verification (Blockscout), **drainer-kit code fingerprints** → 7702 sweeper detection, funding-source analytics |
+| Interaction intelligence | What will this do to the user's assets? | decoding of calldata and typed data (Snap), approval-to-EOA rule, **transaction simulation (`eth_simulateV1`): net asset movements, approvals granted, value forwarded to undisclosed wallets or parked in unverified contracts** → historical replay for evaluation (archive state) |
 | Content intelligence | Was the agent manipulated? | Jev typed questions over the content the agent acted on |
-| Attestation and transparency | Can anyone verify this verdict? | ES256 JWS, `did:web`, JCS input hash, `checks`/`asserted` → public evidence page, status of data freshness |
+| Attestation and transparency | Can anyone verify this verdict? | ES256 JWS, `did:web`, JCS input hash, `checks`/`asserted`, public rulebook (`METHODOLOGY.md`), live data freshness (`/status`) → public verdict transparency log |
+
+## Business model
+
+Every evaluation is paid per call via x402: $0.001 in USDC, $0.002 on Solana, with a batch billed per item. There is no free tier.
+
+- The price is the product: an agent or wallet pays for a signed, evidence-backed verdict at the moment it matters.
+- The price is also the anti-abuse control: nothing is evaluated without settlement, and the attestation is released only after the payment settles.
+- Partners get the same per-call economics through x402. Volume pricing is on the roadmap, not a free tier.
 
 ## Distribution
 
@@ -43,16 +51,19 @@ The same API reaches everyone who moves value: x402 facilitators and resource se
 
 ## Roadmap
 
-- **v0.3 (now)**
-  - Transaction simulation with asset-flow rules.
+- **v0.3 (shipped)**
+  - Transaction simulation with asset-flow rules, measured on real drainer transactions.
+  - Drainer-kit code fingerprints, measured held out (cross-source and temporal).
   - Contract verification signal.
-  - Threat feeds refreshed without a redeploy.
+  - OFAC and MetaMask refreshed daily without a redeploy (verified runtime swap).
   - MCP server and SDK for agents.
-  - Public evidence and status pages.
+  - Public rulebook (`METHODOLOGY.md`) and a live data-status endpoint (`/status`).
   - CI on every push.
 - **v0.4**
   - Shadow real facilitator traffic.
   - Real-time drainer intelligence for plain transfers, the measured 0/30 gap.
+  - EIP-7702 sweeper detection: 30 of the 2,530 ScamSniffer-listed addresses are delegated accounts.
+  - Automated ScamSniffer refresh into KV.
   - KMS custody and key rotation.
   - Publish the Snap and seek allowlisting.
   - AP2 `RiskPayload`.
