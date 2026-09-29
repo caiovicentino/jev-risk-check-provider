@@ -115,7 +115,7 @@ export type BatchCall = (requests: Array<{ method: string; params: unknown[] }>)
  * facts in place (implementation, implementation_fingerprint). At most two batched
  * round trips; failures leave the facts as they were.
  */
-export async function resolveIndirection(entries: Map<string, CodeFacts>, call: BatchCall): Promise<void> {
+export async function resolveIndirection(entries: Map<string, CodeFacts>, call: BatchCall, opts: { maxLinks?: number } = {}): Promise<void> {
   const byImpl = new Map<string, string[]>();
   const link = (address: string, impl: string) => byImpl.set(impl.toLowerCase(), [...(byImpl.get(impl.toLowerCase()) ?? []), address]);
   const byLinked = new Map<string, string[]>();
@@ -146,7 +146,8 @@ export async function resolveIndirection(entries: Map<string, CodeFacts>, call: 
     }
   }
   const impls = [...byImpl.keys()];
-  const links = [...byLinked.keys()].filter((l) => !byImpl.has(l)).slice(0, 6);
+  // Hard-coded links are a best-effort signal: bounded per call at runtime (latency).
+  const links = [...byLinked.keys()].filter((l) => !byImpl.has(l)).slice(0, opts.maxLinks ?? 6);
   if (!impls.length && !links.length) return;
   try {
     const targets = [...impls, ...links];
