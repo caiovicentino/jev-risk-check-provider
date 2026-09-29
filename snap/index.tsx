@@ -1,43 +1,35 @@
 /**
  * x402check MetaMask Snap.
  *
- * Decodes every transaction and signature locally, risk-checks the real
- * counterparty (recipient / spender / operator / contract) with x402check
- * before the user signs, and renders the signed verdict.
+ * Decodes every transaction and signature locally and shows who really
+ * receives your funds or permissions (recipient / spender / operator /
+ * contract), with the dangers it can prove locally, before you sign.
+ *
+ * Risk checks with x402check are paid per call (x402) and this version cannot
+ * pay yet, so it sends nothing (PAID_CHECKS_SUPPORTED in src/config.ts). The
+ * paid pipeline in src/check.ts is kept for when it can.
  *
  * Runtime: only the `snap` and `ethereum` globals exist in the Snap sandbox
- * (plus the granted endowments such as `fetch`), so every Snap API call goes
+ * (plus the endowments granted by the manifest), so every Snap API call goes
  * through `snap.request(...)`.
  */
-import type {
-  Component,
-  OnInstallHandler,
-  OnSignatureHandler,
-  OnSignatureResponse,
-  OnTransactionHandler,
-  OnTransactionResponse,
-  OnUpdateHandler,
-} from "@metamask/snaps-sdk";
+import type { OnInstallHandler, OnSignatureHandler, OnTransactionHandler, OnUpdateHandler } from "@metamask/snaps-sdk";
 
-import type { Decoded } from "./src/decode";
-import { decodeSignature, decodeTransaction } from "./src/decode";
-import { buildRiskCheckBodies, originHost, postRiskChecks } from "./src/request";
-import { clearLegacyState, getInstallIdSafe, isDisclosureShown, markDisclosureShown } from "./src/state";
-import type { InsightResult, RequestKind } from "./src/ui";
-import { disclosureContent, renderLocalOnly, renderOutcome, withFallback } from "./src/ui";
+import { insightHandlers } from "./src/check";
+import { PAID_CHECKS_SUPPORTED } from "./src/config";
+import { clearLegacyState, forgetInstallId, isDisclosureShown, markDisclosureShown } from "./src/state";
+import { disclosureContent } from "./src/ui";
 
-async function runCheck(decoded: Decoded, origin: string | undefined, kind: RequestKind): Promise<InsightResult> {
-  const host = originHost(origin);
-  const bodies = buildRiskCheckBodies(decoded, origin);
-  if (bodies.length === 0) {
-    // Nothing to check (e.g. contract deployment): no network request at all.
-    return renderLocalOnly(decoded, host);
-  }
-  const installId = await getInstallIdSafe();
-  const outcome = await postRiskChecks(bodies, installId, async (input, init) => fetch(input, init));
-  return renderOutcome(decoded, outcome, kind, host);
-}
+const insights = insightHandlers({
+  paidChecks: PAID_CHECKS_SUPPORTED,
+  // Only ever called in paid mode. While PAID_CHECKS_SUPPORTED is false the
+  // manifest grants no network access, so `fetch` does not even exist here.
+  fetchImpl: async (input, init) => fetch(input, init),
+});
 
+export const onTransaction: OnTransactionHandler = insights.onTransaction;
+
+export const onSignature: OnSignatureHandler = insights.onSignature;
 
 async function showDisclosure(): Promise<void> {
   await snap.request({
@@ -51,45 +43,25 @@ async function showDisclosure(): Promise<void> {
   }
 }
 
-export const onTransaction: OnTransactionHandler = async ({ transaction, chainId, transactionOrigin }) => {
-  const result = await withFallback("transaction", async () =>
-    runCheck(decodeTransaction(transaction, chainId), transactionOrigin, "transaction"),
-  );
-  const response: OnTransactionResponse = result.severity
-    ? { content: result.content, severity: result.severity }
-    : { content: result.content };
-  return response;
-};
-
-export const onSignature: OnSignatureHandler = async ({ signature, signatureOrigin }) => {
-  const result = await withFallback("signature", async () =>
-    runCheck(decodeSignature(signature, originHost(signatureOrigin)), signatureOrigin, "signature"),
-  );
-  // snaps-sdk 8.x types `OnSignatureResponse.content` as the legacy `Component`,
-  // but the runtime validates it with the same struct as transaction insights,
-  // which accepts JSX elements.
-  const content = result.content as unknown as Component;
-  const response: OnSignatureResponse = result.severity
-    ? { content, severity: result.severity }
-    : { content };
-  return response;
-};
-
 export const onInstall: OnInstallHandler = async () => {
-  // Creates and persists the random install id; never blocks the disclosure.
-  await getInstallIdSafe();
   await showDisclosure();
   return null;
 };
 
 export const onUpdate: OnUpdateHandler = async () => {
-  // 0.1.x stored an SRP-derived id in the encrypted state; drop it.
+  // Earlier versions stored an identifier that is no longer used or sent:
+  // 0.1.x an SRP-derived client id (encrypted state), 0.2-0.3 a random install
+  // id (unencrypted state). Delete both; best effort, never blocks the update.
   try {
     await clearLegacyState();
   } catch {
-    // Best effort: the random install id below supersedes it either way.
+    // Ignored: nothing reads it any more.
   }
-  await getInstallIdSafe();
+  try {
+    await forgetInstallId();
+  } catch {
+    // Ignored: nothing reads it, and markDisclosureShown drops it as well.
+  }
   let shown = false;
   try {
     shown = await isDisclosureShown();

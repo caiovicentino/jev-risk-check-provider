@@ -14,7 +14,7 @@ export type RecordedRequest = {
 };
 
 export type MockReply =
-  | { status: number; json?: unknown; text?: string }
+  | { status: number; json?: unknown; text?: string; headers?: Record<string, string> }
   | 'network-error';
 
 export type Responder = (request: RecordedRequest) => MockReply;
@@ -67,6 +67,7 @@ export class MockApi {
       const payload = reply.json !== undefined ? JSON.stringify(reply.json) : (reply.text ?? '');
       res.writeHead(reply.status, {
         'Content-Type': reply.json !== undefined ? 'application/json' : 'text/plain',
+        ...reply.headers,
       });
       res.end(payload);
     });

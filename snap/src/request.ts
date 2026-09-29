@@ -99,7 +99,8 @@ export type CheckOutcome =
   | { kind: "ok"; verdict: Verdict }
   | { kind: "batch"; items: BatchItem[] }
   | { kind: "unverified"; reason?: string }
-  | { kind: "quota" }
+  /** HTTP 402: every check is paid per call (x402), and this Snap cannot pay yet. */
+  | { kind: "payment_required" }
   | { kind: "http_error"; status: number }
   | { kind: "invalid_response" }
   | { kind: "network_error"; timedOut: boolean };
@@ -376,7 +377,7 @@ export function parseVerdict(json: unknown): Verdict | Unverified | undefined {
  * @returns The outcome.
  */
 export function classifyResponse(status: number, json: unknown): CheckOutcome {
-  if (status === 402) return { kind: "quota" };
+  if (status === 402) return { kind: "payment_required" };
   if (status !== 200) return { kind: "http_error", status };
   const verdict = parseVerdict(json);
   if (!verdict) return { kind: "invalid_response" };
@@ -393,7 +394,7 @@ export function classifyResponse(status: number, json: unknown): CheckOutcome {
  * @returns The outcome.
  */
 export function classifyBatchResponse(status: number, json: unknown, expected: number): CheckOutcome {
-  if (status === 402) return { kind: "quota" };
+  if (status === 402) return { kind: "payment_required" };
   if (status !== 200) return { kind: "http_error", status };
   if (!isObject(json) || !Array.isArray(json.results) || json.results.length !== expected) return { kind: "invalid_response" };
   const items: BatchItem[] = json.results.map((result) => {
@@ -405,14 +406,15 @@ export function classifyBatchResponse(status: number, json: unknown, expected: n
   return { kind: "batch", items };
 }
 
-type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{
+/** The subset of `fetch` the Snap uses (injected, so tests can supply their own). */
+export type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{
   status: number;
   json(): Promise<unknown>;
 }>;
 
 type Posted = { status: number; json: unknown } | { failed: true; timedOut: boolean };
 
-async function postJson(url: string, payload: unknown, installId: string, fetchImpl: FetchLike, timeoutMs: number): Promise<Posted> {
+async function postJson(url: string, payload: unknown, fetchImpl: FetchLike, timeoutMs: number): Promise<Posted> {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -422,14 +424,14 @@ async function postJson(url: string, payload: unknown, installId: string, fetchI
   try {
     const response = await fetchImpl(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Risk-Check-Client": installId,
-      },
+      // No client or install identifier: every check is paid per call (x402).
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
     let json: unknown;
+    // Only a 200 body is read. A 402 carries the accepted x402 payment options
+    // (PAYMENT-REQUIRED header), which this Snap cannot act on yet.
     if (response.status === 200) {
       try {
         json = await response.json();
@@ -449,18 +451,16 @@ async function postJson(url: string, payload: unknown, installId: string, fetchI
  * POSTs one body to the risk-check endpoint with a timeout.
  *
  * @param body - The request body.
- * @param installId - Random per-install id (free-tier accounting only).
  * @param fetchImpl - The fetch implementation.
  * @param timeoutMs - Abort after this many milliseconds.
  * @returns The outcome; never throws.
  */
 export async function postRiskCheck(
   body: RiskCheckBody,
-  installId: string,
   fetchImpl: FetchLike,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<CheckOutcome> {
-  const posted = await postJson(ENDPOINT, body, installId, fetchImpl, timeoutMs);
+  const posted = await postJson(ENDPOINT, body, fetchImpl, timeoutMs);
   if ("failed" in posted) return { kind: "network_error", timedOut: posted.timedOut };
   return classifyResponse(posted.status, posted.json);
 }
@@ -469,23 +469,21 @@ export async function postRiskCheck(
  * Checks one address (single endpoint) or several (batch endpoint).
  *
  * @param bodies - Request bodies, primary first.
- * @param installId - Random per-install id.
  * @param fetchImpl - The fetch implementation.
  * @param timeoutMs - Abort after this many milliseconds.
  * @returns The outcome; never throws.
  */
 export async function postRiskChecks(
   bodies: RiskCheckBody[],
-  installId: string,
   fetchImpl: FetchLike,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<CheckOutcome> {
   if (bodies.length <= 1) {
     const [body] = bodies;
-    return body ? postRiskCheck(body, installId, fetchImpl, timeoutMs) : { kind: "invalid_response" };
+    return body ? postRiskCheck(body, fetchImpl, timeoutMs) : { kind: "invalid_response" };
   }
   const requests = bodies.slice(0, MAX_CHECKS);
-  const posted = await postJson(BATCH_ENDPOINT, { requests }, installId, fetchImpl, timeoutMs);
+  const posted = await postJson(BATCH_ENDPOINT, { requests }, fetchImpl, timeoutMs);
   if ("failed" in posted) return { kind: "network_error", timedOut: posted.timedOut };
   return classifyBatchResponse(posted.status, posted.json, requests.length);
 }

@@ -7,7 +7,7 @@
     "url": "https://github.com/caiovicentino/jev-risk-check-provider"
   },
   "source": {
-    "shasum": "q2x4lB1x4TroIh5dYN8Ufqdo8pPt5DdEZol2Reup1/Y=",
+    "shasum": "SgTJcO9wGcIlV1cRunDjBCRGKPqzKxrFhdApZ5MNrMo=",
     "location": {
       "npm": {
         "filePath": "dist/bundle.js",
@@ -25,7 +25,6 @@
     "endowment:signature-insight": {
       "allowSignatureOrigin": true
     },
-    "endowment:network-access": {},
     "endowment:lifecycle-hooks": {},
     "snap_manageState": {},
     "snap_dialog": {}

@@ -254,16 +254,22 @@ Both packages are ready to publish, but not yet published.
 
 ## MetaMask Snap (preview)
 
-`snap/` has `onTransaction` / `onSignature` insights that decode the request locally, check the real counterparty and render the signed verdict with its evidence. Since 0.3.0 it also sends the transaction for simulation and shows what it will do: "You send 1.5 ETH → 0x… (wallet)", approvals granted, and plain-language warnings for hidden recipients and known drainer code. Supported decoding:
+`snap/` has `onTransaction` / `onSignature` insights that decode the request locally and show the real counterparty, the amounts (including UNLIMITED approvals) and local danger findings.
+
+**Checks are paid per call and a Snap cannot pay yet.** So 0.3.0 sends **nothing** to x402check.xyz and has no network permission. Every insight says "NOT verified by x402check" and never shows an all-clear.
+
+The paid mode is complete and tested behind a single flag (`src/config.ts`), ready for when wallet-side payment exists. It checks the counterparty, simulates the transaction ("You send 1.5 ETH → 0x… (wallet)"), and renders the signed verdict with its evidence and warnings for hidden recipients and known drainer code.
+
+Supported decoding:
 
 - calldata: ERC-20 approve / transfer, Permit2, EIP-2612, setApprovalForAll, NFT transfers;
 - typed data: v1, v3 and v4, including Permit2 and Seaport;
 - `personal_sign` messages, decoded to text.
 
-On install and on update it shows a disclosure listing exactly what is sent, including the full transaction for simulation. The install id is random, not derived from the recovery phrase.
+On install and on update it shows a disclosure that states exactly what happens. In this version nothing is sent. It stores only which disclosure you have seen.
 
 ```bash
-cd snap && npm install && npm test          # builds, then 256 tests incl. the built bundle in SES
+cd snap && npm install && npm test          # builds, then 322 tests (285 run; paid-mode scenarios also run in Node) incl. the built bundle in SES
 npx mm-snap serve                           # then wallet_requestSnaps "local:http://localhost:8062" in MetaMask Flask
 ```
 

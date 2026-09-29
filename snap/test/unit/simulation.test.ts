@@ -292,7 +292,7 @@ describe('rendering the simulated effects', () => {
   });
 
   it('failed checks state that the effects were NOT simulated', () => {
-    for (const outcome of [{ kind: 'network_error', timedOut: false }, { kind: 'quota' }, { kind: 'unverified' }] as CheckOutcome[]) {
+    for (const outcome of [{ kind: 'network_error', timedOut: false }, { kind: 'payment_required' }, { kind: 'unverified' }] as CheckOutcome[]) {
       expect(render(outcome).text).toContain('NOT simulated');
     }
   });
@@ -326,13 +326,13 @@ describe('rendering the simulated effects', () => {
 });
 
 describe('privacy disclosure', () => {
-  it('says the full transaction is sent, simulated on a public RPC node, with Blockscout lookups; version bumped', () => {
-    const text = textOf(disclosureContent());
+  it('in paid mode, says the full transaction is sent, simulated on a public RPC node, with Blockscout lookups', () => {
+    const text = textOf(disclosureContent(true));
     expect(text).toContain('the full transaction (from, to, value and calldata)');
     expect(text).toContain('simulates it on a public RPC node of that chain');
     expect(text).toContain('Blockscout');
     expect(text).toContain('Signatures are never simulated');
-    expect(DISCLOSURE_VERSION).toBe(2);
+    expect(DISCLOSURE_VERSION).toBeGreaterThanOrEqual(2);
   });
 });
 

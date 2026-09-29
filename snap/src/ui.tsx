@@ -16,8 +16,9 @@ import {
   Text,
 } from "@metamask/snaps-sdk/jsx";
 
+import { PAID_CHECKS_SUPPORTED } from "./config";
 import type { BatchItem, CheckOutcome, Evidence, FeedEvidence, Tier, Verdict } from "./request";
-import { API_ORIGIN, JWKS_URL } from "./request";
+import { API_ORIGIN, JWKS_URL, MAX_CHECKS } from "./request";
 import type { AssetMovement, SimulationEvidence } from "./simulation";
 import { accountKind, approvalText, isIncomplete, midAddress, movementText, simulationFindingLines } from "./simulation";
 import type { Candidate, Decoded, InteractionType, Role } from "./util";
@@ -734,6 +735,17 @@ function renderBatch(decoded: Decoded, items: BatchItem[], kind: RequestKind, ho
 }
 
 /**
+ * Why an HTTP 402 is not a verdict: every x402check evaluation is paid per call
+ * (x402), and this Snap cannot pay yet.
+ *
+ * @param kind - Transaction or signature.
+ * @returns The explanation.
+ */
+export function paymentRequiredText(kind: RequestKind): string {
+  return `x402check checks are paid per call (x402) and this Snap cannot pay yet — the ${kind} was NOT checked.`;
+}
+
+/**
  * Renders the result of a risk check.
  *
  * @param decoded - The decoded request.
@@ -761,13 +773,13 @@ export function renderOutcome(decoded: Decoded, outcome: CheckOutcome, kind: Req
         "unavailable — NOT verified",
         `The risk service could not be reached${outcome.timedOut ? " in time" : ""}, so this ${kind} was NOT checked. This is not an all-clear: proceed only if you fully trust the counterparty.`,
       );
-    case "quota":
+    case "payment_required":
       return failureContent(
         decoded,
         host,
         kind,
-        "free daily checks used up — this was NOT checked",
-        `This install has used all of its free daily risk checks, so this ${kind} was NOT checked. The free quota resets daily.`,
+        "payment required — NOT verified",
+        `${paymentRequiredText(kind)} This is not an all-clear: proceed only if you fully trust the counterparty.`,
       );
     case "http_error":
       return failureContent(
@@ -818,6 +830,57 @@ export function renderLocalOnly(decoded: Decoded, host?: string): InsightResult 
   };
 }
 
+/** Shown on every request while this Snap cannot pay for checks (src/config.ts). */
+export const NOT_SENT_TEXT =
+  "NOT verified by x402check: checks are paid per call (x402) and this Snap version cannot pay yet — nothing was sent.";
+
+function involvedSection(others: Candidate[]): Child {
+  if (others.length === 0) return null;
+  return (
+    <Section>
+      {others.slice(0, MAX_CHECKS - 1).map((candidate) => (
+        <Row label={`Also involved: ${ROLE_LABEL[candidate.role]}`} variant="warning">
+          <Address address={candidate.address as `0x${string}`} />
+        </Row>
+      ))}
+    </Section>
+  );
+}
+
+/**
+ * The insight while paid checks are off: only what was decoded locally, marked
+ * NOT verified by x402check, never an all-clear. Locally proven danger is
+ * still critical.
+ *
+ * @param decoded - The decoded request.
+ * @param host - Hostname of the requesting site.
+ * @param kind - Transaction or signature (for copy).
+ * @returns Content and optional severity.
+ */
+export function renderUnpaid(decoded: Decoded, host: string | undefined, kind: RequestKind): InsightResult {
+  return {
+    content: (
+      <Box>
+        {compact([
+          dangerBanner(decoded.danger),
+          <Heading>x402check · NOT verified</Heading>,
+          <Text>
+            <Bold>{NOT_SENT_TEXT}</Bold>
+          </Text>,
+          <Text>
+            {`This is not an all-clear. What follows was decoded locally from the ${kind}; no address or site was risk-checked. Proceed only if you fully trust the site and the counterparty.`}
+          </Text>,
+          decoded.localNote ? <Text color="muted">{decoded.localNote}</Text> : null,
+          subjectSection(decoded, primarySubject(decoded), host, false),
+          involvedSection(decoded.others),
+          warningsBanner(decoded.warnings),
+        ])}
+      </Box>
+    ),
+    ...(decoded.danger.length > 0 ? { severity: "critical" as const } : {}),
+  };
+}
+
 /**
  * Static content for an unexpected internal error: never throws, never an
  * all-clear.
@@ -857,12 +920,46 @@ export async function withFallback(kind: RequestKind, work: () => Promise<Insigh
 }
 
 /**
- * One-time privacy disclosure shown on install (and after updating from a
- * version that did not show it).
+ * Disclosure while paid checks are off: nothing leaves the wallet.
  *
  * @returns Dialog content.
  */
-export function disclosureContent(): JSXElement {
+function localOnlyDisclosure(): JSXElement {
+  return (
+    <Box>
+      <Heading>x402check: nothing leaves your wallet</Heading>
+      <Text>
+        <Bold>This version of x402check sends nothing</Bold>: not to x402check.xyz and not anywhere else. It has no network access.
+      </Text>
+      <Text>
+        Before you confirm a transaction or signature, it decodes the request inside your wallet and shows who really receives your
+        funds or permissions (recipient, spender, operator or contract), with warnings about risky patterns it can detect locally,
+        such as unlimited approvals or orders that give your assets away for nothing.
+      </Text>
+      <Text>
+        It does not check addresses or sites with x402check's risk service: those checks are paid per call (x402), and this version
+        cannot pay yet. Every request is therefore shown as NOT verified by x402check, never as an all-clear.
+      </Text>
+      <Text>
+        Paid checks are planned for a later version, which will show you an updated notice listing what it sends.
+      </Text>
+      <Text>The only thing it stores is which version of this notice you have seen.</Text>
+      <Text>
+        <Bold>Your private keys and Secret Recovery Phrase never leave your wallet.</Bold> x402check cannot sign or move anything.
+      </Text>
+      <Link href={API_ORIGIN}>x402check.xyz</Link>
+    </Box>
+  );
+}
+
+/**
+ * Disclosure for the paid mode (PAID_CHECKS_SUPPORTED true): exactly what the
+ * request code in src/request.ts sends. Before turning paid checks on, add how
+ * a check is paid (who pays, how much, and what the user approves).
+ *
+ * @returns Dialog content.
+ */
+function paidModeDisclosure(): JSXElement {
   return (
     <Box>
       <Heading>x402check: what this Snap sends</Heading>
@@ -889,14 +986,22 @@ export function disclosureContent(): JSXElement {
         Purpose: score the counterparty and site for drainer, fraud, sanctions and impersonation risk, and show you a signed verdict
         before you sign.
       </Text>
-      <Text>
-        A random install ID is sent only to count your free daily checks. It is not derived from your Secret Recovery Phrase and is
-        reset if you reinstall.
-      </Text>
+      <Text>No install ID is added to these requests. x402check checks are paid per call (x402).</Text>
       <Text>
         <Bold>Your private keys and Secret Recovery Phrase never leave your wallet.</Bold> x402check cannot sign or move anything.
       </Text>
       <Link href={API_ORIGIN}>x402check.xyz</Link>
     </Box>
   );
+}
+
+/**
+ * One-time privacy disclosure shown on install, and after an update whose
+ * disclosure changed (DISCLOSURE_VERSION).
+ *
+ * @param paidChecks - Whether paid checks are on (defaults to the Snap's switch).
+ * @returns Dialog content.
+ */
+export function disclosureContent(paidChecks: boolean = PAID_CHECKS_SUPPORTED): JSXElement {
+  return paidChecks ? paidModeDisclosure() : localOnlyDisclosure();
 }

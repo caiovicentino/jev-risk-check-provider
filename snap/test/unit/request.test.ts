@@ -96,7 +96,9 @@ describe('buildRiskCheckBody', () => {
 
 describe('response handling', () => {
   it('classifies statuses and bodies', () => {
-    expect(classifyResponse(402, undefined)).toStrictEqual({ kind: 'quota' });
+    expect(classifyResponse(402, undefined)).toStrictEqual({ kind: 'payment_required' });
+    // A 402 is never read as a verdict, whatever its body says.
+    expect(classifyResponse(402, { checked: true, score: 99, tier: 'low' })).toStrictEqual({ kind: 'payment_required' });
     expect(classifyResponse(500, undefined)).toStrictEqual({ kind: 'http_error', status: 500 });
     expect(classifyResponse(422, { error: 'invalid_request' })).toStrictEqual({ kind: 'http_error', status: 422 });
     expect(classifyResponse(200, undefined)).toStrictEqual({ kind: 'invalid_response' });
@@ -158,9 +160,9 @@ describe('response handling', () => {
 describe('postRiskCheck', () => {
   const body = { wallet: RECIPIENT, context: 'test', interaction: { type: 'native_transfer' as const } };
 
-  it('POSTs JSON with the install id header', async () => {
+  it('POSTs JSON with only a Content-Type header (no client or install id)', async () => {
     const calls: { url: string; init: { method: string; headers: Record<string, string>; body: string } }[] = [];
-    const outcome = await postRiskCheck(body, 'ab'.repeat(16), async (url, init) => {
+    const outcome = await postRiskCheck(body, async (url, init) => {
       calls.push({ url, init });
       return { status: 200, json: async () => ({ checked: true, score: 5, tier: 'low' }) };
     });
@@ -168,22 +170,18 @@ describe('postRiskCheck', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(ENDPOINT);
     expect(calls[0]?.init.method).toBe('POST');
-    expect(calls[0]?.init.headers).toStrictEqual({
-      'Content-Type': 'application/json',
-      'X-Risk-Check-Client': 'ab'.repeat(16),
-    });
+    expect(calls[0]?.init.headers).toStrictEqual({ 'Content-Type': 'application/json' });
     expect(JSON.parse(calls[0]?.init.body ?? '')).toStrictEqual(body);
   });
 
   it('maps thrown errors and timeouts to network_error', async () => {
     expect(
-      await postRiskCheck(body, 'id', async () => {
+      await postRiskCheck(body, async () => {
         throw new TypeError('fetch failed');
       }),
     ).toStrictEqual({ kind: 'network_error', timedOut: false });
     const hanging = await postRiskCheck(
       body,
-      'id',
       async (_url, init) =>
         new Promise((_resolve, reject) => {
           init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
@@ -193,8 +191,22 @@ describe('postRiskCheck', () => {
     expect(hanging).toStrictEqual({ kind: 'network_error', timedOut: true });
   });
 
+  it('maps HTTP 402 (x402 payment required) to payment_required without reading the body, single and batch', async () => {
+    let bodyRead = false;
+    const paymentRequired = async () => ({
+      status: 402,
+      json: async () => {
+        bodyRead = true;
+        return { checked: true, score: 99, tier: 'low' };
+      },
+    });
+    expect(await postRiskCheck(body, paymentRequired)).toStrictEqual({ kind: 'payment_required' });
+    expect(await postRiskChecks([body, { ...body, wallet: USER }], paymentRequired)).toStrictEqual({ kind: 'payment_required' });
+    expect(bodyRead).toBe(false);
+  });
+
   it('treats an unparseable 200 body as invalid', async () => {
-    const outcome = await postRiskCheck(body, 'id', async () => ({
+    const outcome = await postRiskCheck(body, async () => ({
       status: 200,
       json: async () => {
         throw new SyntaxError('bad json');
@@ -228,8 +240,9 @@ describe('batch checks (several addresses)', () => {
 
   it('POSTs {requests} to the batch endpoint and maps results in order', async () => {
     const calls: { url: string; body: string }[] = [];
-    const outcome = await postRiskChecks(bodies, 'id', async (url, init) => {
+    const outcome = await postRiskChecks(bodies, async (url, init) => {
       calls.push({ url, body: init.body });
+      expect(init.headers).toStrictEqual({ 'Content-Type': 'application/json' });
       return {
         status: 200,
         json: async () => ({ results: [{ checked: true, score: 10, tier: 'critical' }, { checked: false }] }),
@@ -246,7 +259,7 @@ describe('batch checks (several addresses)', () => {
 
   it('a single address still uses the single endpoint', async () => {
     const urls: string[] = [];
-    await postRiskChecks([bodies[0] as never], 'id', async (url) => {
+    await postRiskChecks([bodies[0] as never], async (url) => {
       urls.push(url);
       return { status: 200, json: async () => ({ checked: true }) };
     });
@@ -257,7 +270,7 @@ describe('batch checks (several addresses)', () => {
     expect(classifyBatchResponse(200, { results: [{ checked: true }] }, 2)).toStrictEqual({ kind: 'invalid_response' });
     expect(classifyBatchResponse(200, { nope: [] }, 1)).toStrictEqual({ kind: 'invalid_response' });
     expect(classifyBatchResponse(200, { results: [42] }, 1)).toStrictEqual({ kind: 'batch', items: [{ status: 'invalid' }] });
-    expect(classifyBatchResponse(402, undefined, 2)).toStrictEqual({ kind: 'quota' });
+    expect(classifyBatchResponse(402, undefined, 2)).toStrictEqual({ kind: 'payment_required' });
     expect(classifyBatchResponse(413, undefined, 2)).toStrictEqual({ kind: 'http_error', status: 413 });
     expect(classifyBatchResponse(422, { error: 'invalid_request', field: 'wallet', index: 1 }, 2)).toStrictEqual({
       kind: 'http_error',

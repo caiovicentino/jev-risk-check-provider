@@ -256,7 +256,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
       <div class="item"><h3>Fail-closed UX, tiered copy</h3>
         <p>Check unavailable or not paid &rarr; say &ldquo;not verified&rdquo;, never all-clear. Tiers map to badge, amber caution, red warning and hard block with override.</p></div>
       <div class="item"><h3>MetaMask Snap (preview)</h3>
-        <p>Open-source Snap with <span class="mono" style="font-size:13px">onTransaction</span> / <span class="mono" style="font-size:13px">onSignature</span> insights and a privacy notice on install. Not yet published to npm nor allowlisted by MetaMask: build it from source and load it in MetaMask Flask.</p></div>
+        <p>Open-source Snap with <span class="mono" style="font-size:13px">onTransaction</span> / <span class="mono" style="font-size:13px">onSignature</span> insights. Checks are paid per call and a Snap cannot pay yet, so this version decodes locally, sends nothing and says &ldquo;not verified&rdquo;; the paid mode is built and tested behind one flag. Not yet published to npm nor allowlisted by MetaMask.</p></div>
       <div class="item"><h3>Verifiable, not vibes</h3>
         <p>Every warning ships as an ES256 attestation listing the checks behind it. Users and auditors verify it against did:web:x402check.xyz without trusting the wallet &mdash; or us.</p></div>
     </div>

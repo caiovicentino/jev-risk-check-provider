@@ -6,7 +6,18 @@ import { RootJSXElementStruct } from '@metamask/snaps-sdk/jsx';
 
 import { decodePersonalSign, decodeTransaction } from '../../src/decode';
 import type { BatchItem, CheckOutcome, Verdict } from '../../src/request';
-import { categoryLabel, disclosureContent, feedHitLabel, renderInternalError, renderLocalOnly, renderOutcome, withFallback } from '../../src/ui';
+import { PAID_CHECKS_SUPPORTED } from '../../src/config';
+import { DISCLOSURE_VERSION } from '../../src/state';
+import {
+  categoryLabel,
+  disclosureContent,
+  feedHitLabel,
+  paymentRequiredText,
+  renderInternalError,
+  renderLocalOnly,
+  renderOutcome,
+  withFallback,
+} from '../../src/ui';
 import { BAYC, DRAINER, MAX_UINT256, RECIPIENT, SAFE, USDC, USER, ZERO, calldata, safeExec, textOf, utf8Hex } from '../helpers';
 
 const approval = decodeTransaction({ from: USER, to: USDC, data: calldata('095ea7b3', DRAINER, MAX_UINT256) }, 'eip155:1');
@@ -143,7 +154,7 @@ describe('renderOutcome', () => {
     const cases: [CheckOutcome, string][] = [
       [{ kind: 'network_error', timedOut: false }, 'x402check · unavailable — NOT verified'],
       [{ kind: 'network_error', timedOut: true }, 'could not be reached in time'],
-      [{ kind: 'quota' }, 'x402check · free daily checks used up — this was NOT checked'],
+      [{ kind: 'payment_required' }, 'x402check · payment required — NOT verified'],
       [{ kind: 'http_error', status: 503 }, 'x402check · check failed — NOT verified'],
       [{ kind: 'invalid_response' }, 'x402check · check failed — NOT verified'],
       [{ kind: 'unverified' }, 'x402check · verification failed — NOT verified'],
@@ -158,6 +169,40 @@ describe('renderOutcome', () => {
   });
 });
 
+describe('no free tier: every check is paid per call (x402)', () => {
+  const approve = decodeTransaction({ from: USER, to: USDC, data: calldata('095ea7b3', DRAINER, MAX_UINT256) });
+
+  it('a 402 explains that the Snap cannot pay, and is never an all-clear', () => {
+    for (const kind of ['transaction', 'signature'] as const) {
+      const result = renderOutcome(approve, { kind: 'payment_required' }, kind, 'app.example.com');
+      expect(RootJSXElementStruct.is(result.content)).toBe(true);
+      const text = textOf(result.content);
+      expect(text).toContain('x402check · payment required — NOT verified');
+      expect(text).toContain(`x402check checks are paid per call (x402) and this Snap cannot pay yet — the ${kind} was NOT checked.`);
+      expect(text).toContain('This is not an all-clear');
+      expect(text).not.toContain('No significant risk');
+      expect(text).not.toMatch(/free|daily|quota|used up/iu);
+      expect(result.severity).toBeUndefined();
+    }
+    expect(paymentRequiredText('transaction')).toBe(
+      'x402check checks are paid per call (x402) and this Snap cannot pay yet — the transaction was NOT checked.',
+    );
+  });
+
+  it('locally proven danger still makes a 402 critical', () => {
+    const dangerous = { ...approve, danger: ['the offerer receives NOTHING in return for the offered items'] };
+    const result = renderOutcome(dangerous, { kind: 'payment_required' }, 'signature');
+    expect(result.severity).toBe('critical');
+    expect(textOf(result.content)).toContain('The offerer receives NOTHING in return for the offered items.');
+  });
+
+  it('neither disclosure mentions an install id count or a free allowance', () => {
+    for (const paid of [false, true]) {
+      expect(textOf(disclosureContent(paid))).not.toMatch(/free|daily|quota|random install|reset if you reinstall/iu);
+    }
+  });
+});
+
 describe('other content', () => {
   it('local-only content for requests with no counterparty', () => {
     const deployment = decodeTransaction({ from: USER, data: '0x6080' });
@@ -167,8 +212,8 @@ describe('other content', () => {
     expect(textOf(content)).toContain('Nothing was sent to x402check');
   });
 
-  it('the disclosure lists what is sent, where, why, and what never leaves the wallet', () => {
-    const content = disclosureContent();
+  it('the paid-mode disclosure lists what is sent, where, why, and what never leaves the wallet', () => {
+    const content = disclosureContent(true);
     expect(RootJSXElementStruct.is(content)).toBe(true);
     const text = textOf(content);
     for (const expected of [
@@ -178,13 +223,36 @@ describe('other content', () => {
       'the requesting site',
       'human-readable summary',
       'Purpose:',
-      'random install ID',
-      'not derived from your Secret Recovery Phrase',
-      'reset if you reinstall',
+      'No install ID is added to these requests. x402check checks are paid per call (x402).',
       'Your private keys and Secret Recovery Phrase never leave your wallet.',
     ]) {
       expect(text).toContain(expected);
     }
+  });
+
+  it('the disclosure of this version (paid checks off) says nothing is sent, decoding is local, paid checks are planned', () => {
+    const content = disclosureContent(false);
+    expect(RootJSXElementStruct.is(content)).toBe(true);
+    const text = textOf(content);
+    for (const expected of [
+      'x402check: nothing leaves your wallet',
+      'This version of x402check sends nothing',
+      'not to x402check.xyz and not anywhere else. It has no network access.',
+      'decodes the request inside your wallet and shows who really receives your funds or permissions',
+      'those checks are paid per call (x402), and this version cannot pay yet',
+      'Every request is therefore shown as NOT verified by x402check, never as an all-clear.',
+      'Paid checks are planned for a later version, which will show you an updated notice listing what it sends.',
+      'The only thing it stores is which version of this notice you have seen.',
+      'Your private keys and Secret Recovery Phrase never leave your wallet.',
+    ]) {
+      expect(text).toContain(expected);
+    }
+    for (const unsent of ['sends a risk-check request', 'the chain ID', 'the full transaction', 'install ID']) {
+      expect(text).not.toContain(unsent);
+    }
+    // The default follows the Snap's switch, and so does the version.
+    expect(textOf(disclosureContent())).toBe(textOf(disclosureContent(PAID_CHECKS_SUPPORTED)));
+    expect(DISCLOSURE_VERSION).toBe(PAID_CHECKS_SUPPORTED ? 4 : 3);
   });
 
   it('labels', () => {

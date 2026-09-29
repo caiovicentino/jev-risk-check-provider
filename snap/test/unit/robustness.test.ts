@@ -31,7 +31,7 @@ const OUTCOMES: CheckOutcome[] = [
   },
   { kind: 'batch', items: [{ status: 'ok', verdict: { checked: true, categories: [], score: 50, tier: 'high' } }, { status: 'unverified' }, { status: 'invalid' }] },
   { kind: 'network_error', timedOut: true },
-  { kind: 'quota' },
+  { kind: 'payment_required' },
   { kind: 'unverified' },
 ];
 
