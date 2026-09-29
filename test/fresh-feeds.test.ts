@@ -22,7 +22,7 @@ function published(opts: { mmAsOf?: string; mmHosts?: string[]; ofacDate?: strin
     format: 1,
     generated_at: "2099-01-01T00:00:00Z",
     metamask: { as_of: opts.mmAsOf ?? "2026-01-02", entries: bin.byteLength / 8, bin_sha256: sha(bin), json_sha256: sha(mmJson) },
-    ofac: { publish_date: opts.ofacDate ?? "2026-09-28", addresses: rows.length, json_sha256: opts.corrupt === "ofac" ? "0".repeat(64) : sha(ofacJson) },
+    ofac: { publish_date: opts.ofacDate ?? OFAC_NEXT, addresses: rows.length, json_sha256: opts.corrupt === "ofac" ? "0".repeat(64) : sha(ofacJson) },
   };
   const manifestText = JSON.stringify(manifest);
   const signature = sign(null, Buffer.from(opts.badSig ? `${manifestText} ` : manifestText), privateKey).toString("base64url");
@@ -41,6 +41,8 @@ function published(opts: { mmAsOf?: string; mmHosts?: string[]; ofacDate?: strin
 }
 
 const embedded = { metamaskAsOf: "2026-01-01", metamaskEntries: 150, ofacRows: OFAC_SDN_META.addresses };
+// A publication one day newer than the embedded OFAC snapshot (whatever `npm run ofac:update` produced).
+const OFAC_NEXT = new Date(Date.parse(`${OFAC_SDN_META.publish_date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
 const refresh = (fetchImpl: typeof fetch, base = embedded) => refreshFeeds(BASE, base, fetchImpl, PUB);
 
 test("a corrupted MetaMask blob is rejected; the embedded list stays in use", async () => {
@@ -73,7 +75,7 @@ test("OFAC: a corrupted snapshot is rejected; a newer verified one is screened i
   await refresh(published());
   const r = screenSubject(subject);
   assert.equal(r.status, "listed");
-  assert.equal(r.as_of, "2026-09-28");
+  assert.equal(r.as_of, OFAC_NEXT);
   assert.equal(sanctionsListMeta().origin, "refreshed");
 });
 
