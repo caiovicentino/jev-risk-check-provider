@@ -7,6 +7,7 @@ import { validateBatch, validateRequest } from "../src/validate.js";
 import { createOnchainLookup } from "../src/onchain.js";
 import { createSimulator } from "../src/simulation.js";
 import { createContractIntel } from "../src/contract-intel.js";
+import { kitWatchLookup } from "./kit-watch.js";
 import { normalizeChain, SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import { parseSubject } from "../src/address.js";
 import { SIMULATION_ENDPOINTS } from "../src/rpc.js";
@@ -202,7 +203,8 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   const simulator = env.SIMULATION === "off" ? null : createSimulator({ rpc: simRpc, timeoutMs: 2500, contractIntel });
   const accepts = buildAccepts(env);
   const pricing: PricingInfo = { unitUsd: UNIT_PRICE_EVM.toFixed(3), ...(env.SIMULATION !== "off" ? { simulationUsd: SIMULATION_PRICE.toFixed(3) } : {}), networks: accepts.map((a) => String(a.network)) };
-  const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds, simulator, contractIntel }), pricing };
+  const kitWatch = kitWatchLookup(env);
+  const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds, simulator, contractIntel, kitWatch }), pricing };
 
   const facilitators: FacilitatorClient[] = [
     ...mainnetFacilitators(env).map((f) => f.client),

@@ -30,6 +30,14 @@ export type CodeFacts = {
   linked?: string[];
   /** Logic-code fingerprints of `linked` addresses (used for drainer matching only, never for verification). */
   linked_fingerprints?: string[];
+  /**
+   * Template fingerprint of logic code: sha256 with every PUSH20/PUSH32 immediate zeroed,
+   * so redeployments of one kit that differ only in immutables or hard-coded addresses
+   * (the operator's wallet) share it. Used for kit families (src/kit-watch.ts).
+   */
+  skeleton?: string;
+  /** Template fingerprint of the delegate's or implementation's logic code. */
+  implementation_skeleton?: string;
 };
 
 /** EIP-1967 implementation slot: keccak256("eip1967.proxy.implementation") - 1. */
@@ -56,6 +64,20 @@ export function stripMetadata(code: Uint8Array): Uint8Array {
   if (n === 0 || start <= 0) return code;
   const first = code[start] as number;
   return first >= 0xa1 && first <= 0xb7 ? code.subarray(0, start) : code;
+}
+
+/** The code with PUSH20/PUSH32 immediates zeroed (a copy): invariant to immutables and hard-coded addresses. */
+export function skeletonBytes(code: Uint8Array): Uint8Array {
+  const out = Uint8Array.from(code);
+  for (let i = 0; i < out.length; i++) {
+    const op = out[i] as number;
+    if (op >= 0x60 && op <= 0x7f) {
+      const n = op - 0x5f;
+      if (op === 0x73 || op === 0x7f) out.fill(0, i + 1, Math.min(out.length, i + 1 + n));
+      i += n;
+    }
+  }
+  return out;
 }
 
 /** Classifies runtime code (from eth_getCode) and fingerprints logic code: sha256 of the metadata-stripped bytes. */
@@ -94,7 +116,7 @@ export function codeFacts(codeHex: string): CodeFacts {
   }
   if (TOKEN_SELECTORS.every((s) => selectors.has(s))) return { kind: "token", bytes: raw.length };
   if (NFT_SELECTORS.some((set) => set.every((s) => selectors.has(s)))) return { kind: "nft", bytes: raw.length };
-  return { kind: "logic", bytes: raw.length, fingerprint: createHash("sha256").update(code).digest("hex") };
+  return { kind: "logic", bytes: raw.length, fingerprint: createHash("sha256").update(code).digest("hex"), skeleton: createHash("sha256").update(skeletonBytes(code)).digest("hex") };
 }
 
 /** Whether the code makes the address a contract (EIP-7702 delegated accounts stay EOAs). */
@@ -102,9 +124,15 @@ export function isContractCode(facts: CodeFacts): boolean {
   return facts.kind !== "none" && facts.kind !== "delegated";
 }
 
-/** All fingerprints that identify the code an address runs: its own, and its delegate's or implementation's. */
+/**
+ * All fingerprints that identify the code an address runs: its own, its delegate's or
+ * implementation's, hard-coded links, and the template fingerprints of the first two.
+ * Exact sets (Forta, ScamSniffer) never contain a template, so querying one is harmless.
+ */
 export function fingerprintsOf(facts: CodeFacts | undefined): string[] {
-  return facts ? [facts.fingerprint, facts.implementation_fingerprint, ...(facts.linked_fingerprints ?? [])].filter((f): f is string => typeof f === "string") : [];
+  return facts
+    ? [facts.fingerprint, facts.implementation_fingerprint, ...(facts.linked_fingerprints ?? []), facts.skeleton, facts.implementation_skeleton].filter((f): f is string => typeof f === "string")
+    : [];
 }
 
 export type BatchCall = (requests: Array<{ method: string; params: unknown[] }>) => Promise<Array<unknown>>;
@@ -153,9 +181,14 @@ export async function resolveIndirection(entries: Map<string, CodeFacts>, call: 
     const targets = [...impls, ...links];
     const codes = await call(targets.map((a) => ({ method: "eth_getCode", params: [a, "latest"] })));
     targets.forEach((target, i) => {
-      const fp = typeof codes[i] === "string" ? codeFacts(codes[i] as string).fingerprint : undefined;
+      const targetFacts = typeof codes[i] === "string" ? codeFacts(codes[i] as string) : undefined;
+      const fp = targetFacts?.fingerprint;
       if (!fp) return;
-      for (const address of byImpl.get(target) ?? []) (entries.get(address) as CodeFacts).implementation_fingerprint = fp;
+      for (const address of byImpl.get(target) ?? []) {
+        const f = entries.get(address) as CodeFacts;
+        f.implementation_fingerprint = fp;
+        if (targetFacts?.skeleton) f.implementation_skeleton = targetFacts.skeleton;
+      }
       for (const address of byLinked.get(target) ?? []) {
         const f = entries.get(address) as CodeFacts;
         f.linked_fingerprints = [...new Set([...(f.linked_fingerprints ?? []), fp])];

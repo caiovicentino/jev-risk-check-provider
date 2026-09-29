@@ -178,19 +178,19 @@ const PAGE = `<!doctype html>
         <p>Approvals and permits normally go to contracts. Granting a plain wallet (EOA) control over tokens is a classic drainer pattern &mdash; detected from the chain itself, not from what the caller says.</p></div>
       <div class="item"><h3><em>Simulation</em> &middot; where the assets go</h3>
         <p>The transaction is simulated (<span class="mono" style="font-size:13px">eth_simulateV1</span>) before it is signed. Assets that leave with nothing in return and end up with a wallet the user never named, or are parked in an unverified contract, are flagged &mdash; even when the called contract itself is on no list.</p></div>
-      <div class="item"><h3><em>Drainer kits</em> &middot; code fingerprints</h3>
-        <p>Most drainer contracts are redeployments of a few kits. A contract whose logic code matches a listed drainer&rsquo;s is recognized before its own address is listed. Token, NFT and proxy code is never fingerprinted, so clones of real tokens cannot match.</p></div>
+      <div class="item"><h3><em>Drainer infrastructure</em> &middot; our own watch</h3>
+        <p>We read every Ethereum and Base block as it is produced. Look-alike wallets that delegate (EIP-7702) to an address-poisoning executor, and wallets whose delegate forwards whatever they receive (a sweeper), are recorded when it happens. So are new contracts running known drainer-kit code, matched exactly or by template. Most of them are on no public list. Token, NFT and proxy code is never fingerprinted.</p></div>
       <div class="item"><h3><em>Injected intent</em> &middot; guard bypass</h3>
         <p>When the agent passes the content it acted on (tool output, page text, skill file), a typed model flags instructions that try to redirect funds or disable the payment guard.</p></div>
     </div>
-    <p class="note"><b>Not detected:</b> an unknown drainer address that is not on a feed, when the user simply sends it funds; phishing sites not yet on a feed that do not imitate a known brand; laundering or abuse patterns (the provider has no transaction-graph data &mdash; it only sees what the chain and the feeds say). A clean verdict means &ldquo;none of these checks fired&rdquo;, not &ldquo;safe&rdquo;.</p>
+    <p class="note"><b>Not detected:</b> an unknown drainer address that is not on a feed and not in our watch, when the user simply sends it funds; phishing sites not yet on a feed that do not imitate a known brand; laundering or abuse patterns (the provider has no transaction-graph data &mdash; it only sees what the chain and the feeds say). A clean verdict means &ldquo;none of these checks fired&rdquo;, not &ldquo;safe&rdquo;.</p>
   </section>
 
   <section id="how">
     <div class="sec-head"><span class="sec-no">02</span><h2>How it works</h2></div>
     <div class="cols">
       <div class="item"><h3>Deterministic evidence first</h3>
-        <p>Sanctions, feeds, domain analysis, on-chain facts, simulation and code fingerprints are computed by code and cap the score on their own. The model (TypeSafe Jev, typed questions) can only add risk from the content; weights and caps live in open-source code.</p></div>
+        <p>Sanctions, feeds, our kit watch, domain analysis, on-chain facts, simulation and code fingerprints are computed by code and cap the score on their own. The model (TypeSafe Jev, typed questions) can only add risk from the content; weights and caps live in open-source code.</p></div>
       <div class="item"><h3>Caller claims stay claims</h3>
         <p>A caller&rsquo;s <span class="mono" style="font-size:13px">screening</span> or <span class="mono" style="font-size:13px">authorization</span> fields are recorded as <span class="mono" style="font-size:13px">asserted</span> in the attestation and can never lower the score. Prose like &ldquo;already screened&rdquo; is treated the same way.</p></div>
       <div class="item"><h3>Signed, scoped verdicts</h3>
@@ -205,13 +205,13 @@ const PAGE = `<!doctype html>
     <div class="ledger">
       <div class="ledger-row">
         <div class="ledger-cell"><b class="ok">24/24</b><span>OFAC SDN addresses (4 chains) &rarr; critical, deterministic</span></div>
+        <div class="ledger-cell"><b class="ok">6,831</b><span>addresses our kit watch flagged on Ethereum in 24&nbsp;h (poisoning look-alikes, wallets whose delegate forwards what they receive); 0 of them on ScamSniffer&rsquo;s public list</span></div>
         <div class="ledger-cell"><b class="ok">27/30</b><span>drainer permits caught with the drainer feed <i>turned off</i> (approval-to-wallet rule)</span></div>
         <div class="ledger-cell"><b class="ok">18/25</b><span>real drainer transactions flagged by simulation (hidden recipient); 0/84 on well-known contracts</span></div>
-        <div class="ledger-cell"><b class="ok">43/100</b><span>listed drainer contracts recognized by earlier kits&rsquo; code at creation; 0/9,625 legit contracts matched</span></div>
-        <div class="ledger-cell"><b class="ok">0/62</b><span>false positives on well-known contracts and top dApp domains</span></div>
-        <div class="ledger-cell"><b>0.011%</b><span>of the Tranco top 200k domains capped by deterministic rules &mdash; mostly hosts on MetaMask&rsquo;s own list</span></div>
+        <div class="ledger-cell"><b class="ok">40/82</b><span>listed drainer contracts recognized by earlier kits&rsquo; code at creation; code sets gated against legitimate code: 0 false positives on 4,672 held-out contracts</span></div>
+        <div class="ledger-cell"><b class="ok">0/62</b><span>false positives on well-known contracts and top dApp domains; 0.011% of the Tranco top 200k capped, mostly hosts on MetaMask&rsquo;s own list</span></div>
         <div class="ledger-cell"><b>0&ndash;4/60</b><span>unlisted phishing domains caught without the feed &mdash; feeds do the heavy lifting</span></div>
-        <div class="ledger-cell"><b>0/30</b><span>plain transfers to unlisted drainers &mdash; not detectable from the address alone</span></div>
+        <div class="ledger-cell"><b>0/30</b><span>plain transfers to unlisted drainers &mdash; not detectable from the address alone, unless the kit watch has seen the wallet</span></div>
       </div>
     </div>
     <p class="note">Labels come from sources this project did not author (OFAC, MetaMask and ScamSniffer lists, well-known production contracts, Tranco). Held-out numbers use samples never inspected during development. The earlier 99&ndash;100% figures were measured on corpora whose context text described the risk; with an attacker-written context the same cases are mostly not detectable &mdash; see <a href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">docs/EVIDENCE.md</a>.</p>

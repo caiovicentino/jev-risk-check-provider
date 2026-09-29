@@ -15,11 +15,12 @@
 // committed to this MIT repository or bundled into the Worker.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildHashBlob, feedHost } from "../src/threat-intel.js";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { fetchCodes } from "./code-fetch.js";
+import { creationOf, pool } from "./kit-catalog.js";
 
 const MM_REPO = "MetaMask/eth-phishing-detect";
 const MM_URL = `https://raw.githubusercontent.com/${MM_REPO}/main/src/config.json`;
@@ -61,7 +62,22 @@ export const GUARDED_IMPLEMENTATIONS: Record<string, string> = {
   "Permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
   "Multicall3": "0xcA11bde05977b3631167028862bE2a173976CA11",
   "Uniswap Universal Router v2": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
+  // Exchange deposit fleets. Lists label single deposit addresses as phishing (they received
+  // phishing proceeds), but the code is the operator's standard deposit contract, shared by
+  // every customer's deposit address (found by eval/kit-watch.ts; see docs/EVIDENCE.md).
+  "BitGo Forwarder (eth-multisig-v2, solc 0.4.16)": "0x95115419b09e8cea70a9bdbca3fee8c5e118b228",
+  "LunoDepositForwarder": "0xea21d5ac9cbd3b84e00da63e610025577b87cea1",
+  "PoloniexDeposit": "0x4700269d287699792e45026b6529f215ada9952c",
+  "Ethereum Wallet multisig (Mist, solc 0.3.2)": "0x9b6f6b23f3fa2dcaea92194033a69840f398f8c4",
 };
+
+/**
+ * Forta labels contracts from before the drainer-kit era (2017–2020) that are mostly
+ * wallets and deposit contracts that received scam proceeds: every collision measured
+ * with legitimate code came from one of them, and none of them recognized a later listed
+ * drainer. Only contracts created from this date on seed a Forta code set.
+ */
+export const FORTA_SINCE = "2021-01-01";
 
 /** Fingerprints of GUARDED_IMPLEMENTATIONS (Ethereum). */
 export async function guardedFingerprints(): Promise<Map<string, string>> {
@@ -74,6 +90,18 @@ export async function guardedFingerprints(): Promise<Map<string, string>> {
   }
   if (out.size < 5) throw new Error(`only ${out.size} guarded implementations fingerprinted — RPC problem?`);
   return out;
+}
+
+/**
+ * The collision gate (scripts/legit-corpus.ts): fingerprints of code in legitimate use.
+ * Lists name contracts whose code is shared by a legitimate fleet (Forta labels Luno and
+ * Poloniex deposit contracts as phishing), so a set is never built without it.
+ */
+export function legitFingerprints(): { set: Set<string>; names: Record<string, string> } {
+  const file = new URL("../.cache/intel/legit-corpus.json", import.meta.url);
+  if (!existsSync(file)) throw new Error("run scripts/legit-corpus.ts first: code sets are gated against legitimate code");
+  const corpus = JSON.parse(readFileSync(file, "utf8")) as { fingerprints: string[]; names: Record<string, string> };
+  return { set: new Set(corpus.fingerprints), names: corpus.names };
 }
 
 /**
@@ -99,11 +127,16 @@ export async function codeFingerprints(addresses: string[], networks: string[]):
     console.log(`  ${network}: ${codes.size}/${addresses.length} answered, ${contracts} with code, ${failedBatches} failed batches`);
   }
   const guarded = await guardedFingerprints();
+  const legit = legitFingerprints();
   for (const fp of [...fingerprints]) {
     if (guarded.has(fp)) {
       fingerprints.delete(fp);
       kinds.guarded_removed = (kinds.guarded_removed ?? 0) + 1;
       console.log(`  removed a listed fingerprint identical to ${guarded.get(fp)}`);
+    } else if (legit.set.has(fp)) {
+      fingerprints.delete(fp);
+      kinds.legit_collision_removed = (kinds.legit_collision_removed ?? 0) + 1;
+      console.log(`  removed a listed fingerprint in legitimate use (${legit.names[fp] || "unnamed"})`);
     }
   }
   return { fingerprints, kinds, chains };
@@ -176,7 +209,13 @@ async function forta(): Promise<void> {
   const res = await fetch(FORTA_PHISHING(commit.sha));
   if (!res.ok) throw new Error(`forta phishing_scams.csv: HTTP ${res.status}`);
   const rows = (await res.text()).trim().split("\n").slice(1).map((l) => l.split(","));
-  const contracts = [...new Set(rows.filter((r) => r[3] === "True" && /^0x[0-9a-fA-F]{40}$/.test(r[0] ?? "")).map((r) => (r[0] as string).toLowerCase()))];
+  const listed = [...new Set(rows.filter((r) => r[3] === "True" && /^0x[0-9a-fA-F]{40}$/.test(r[0] ?? "")).map((r) => (r[0] as string).toLowerCase()))];
+  // Creation dates (Blockscout): contracts from before FORTA_SINCE are left out (see there).
+  const created = await pool(listed, 4, async (a) => (await creationOf("eip155:1", a))?.created_at);
+  const undated = created.filter((d) => !d).length;
+  if (undated > listed.length / 10) throw new Error(`${undated} of ${listed.length} creation dates unavailable — Blockscout problem?`);
+  const contracts = listed.filter((_, i) => (created[i] ?? "9999") >= FORTA_SINCE);
+  console.log(`  Forta: ${listed.length} listed contracts, ${contracts.length} created since ${FORTA_SINCE} (${undated} undated, kept)`);
   const { fingerprints, kinds, chains } = await codeFingerprints(contracts, ["eip155:1"]);
   const blob = buildHashBlob(fingerprints);
   writeFileSync(new URL("forta-drainer-code.bin", DATA), blob);
@@ -185,7 +224,9 @@ async function forta(): Promise<void> {
     license: "MIT (Forta Foundation), attributed in THIRD_PARTY_NOTICES.md",
     commit: commit.sha,
     as_of: commit.date,
-    listed_contracts: contracts.length,
+    listed_contracts: listed.length,
+    created_since: FORTA_SINCE,
+    contracts_since: contracts.length,
     code_kinds: kinds,
     chains,
     fingerprints: blob.byteLength / 8,
@@ -247,7 +288,10 @@ async function main(): Promise<void> {
   if (process.argv.includes("--scamsniffer")) await scamsniffer(process.argv.includes("--upload"));
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Importable (the kit hunter reuses the guarded set): only runs as a script.
+if (process.argv[1]?.endsWith("update-threat-feeds.ts")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

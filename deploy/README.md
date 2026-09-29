@@ -59,6 +59,7 @@ Optional variables:
 | `SIMULATION_RPC_URLS` | JSON `{caip2: url}` overriding the simulation RPCs (they must serve `eth_simulateV1`) |
 | `CONTRACT_INTEL` | `"off"` disables contract-verification lookups (Blockscout) |
 | `FEEDS_URL` | base URL of the published feeds for runtime refresh (default: this repository's `feeds` branch); `"off"` keeps the embedded snapshot |
+| `KIT_WATCH` | `"off"` disables the kit watch: the block-scanning cron and its evaluation-time lookups |
 
 ## Threat feeds
 
@@ -80,6 +81,26 @@ npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer do
 - **To rotate the publisher key,** generate a new Ed25519 key, store the PKCS#8 PEM with `gh secret set FEEDS_SIGNING_KEY`, put the raw public key (base64url) in `FEEDS_PUBLIC_KEY`, and deploy.
 - ScamSniffer lives only in KV and is picked up within an hour. Refresh it daily; the public data already lags 7 days. The code fingerprints come from the listed addresses' runtime code on 7 EVM chains (about 2 minutes via publicnode).
 - Every attestation states the date and status of each list it consulted (`checks.sanctions`, `checks.feeds`).
+
+## Kit watch
+
+The Worker's cron (`[triggers]` in `wrangler.toml`, every minute) reads the new blocks of Ethereum and Base and keeps the watchlist in KV (`deploy/kit-watch.ts`). All keys start with `kw:`, and none of them is public.
+
+```bash
+npx tsx scripts/kit-catalog.ts                              # listed drainer contracts → .cache/intel/kit-catalog.json (~5 min)
+npx tsx scripts/kit-registry.ts --upload                    # families (drainer kits, sweepers, poisoners) → KV kw:registry
+npx tsx scripts/hunt-kits.ts --chain eip155:1 --hours 24    # backfill (same code as the cron) → .cache/intel/
+npx tsx scripts/hunt-kits.ts --chain eip155:1 --retry       # segments the backfill could not fetch
+npx tsx scripts/hunt-kits.ts --chain eip155:1 --upload-all  # watchlist, delegate verdicts, learned families, cursor → KV
+```
+
+- **Each run:**
+  - it scans from `kw:cursor:<chain>` to the head, minus a few confirmations: up to 15 Ethereum blocks and 90 Base blocks per run, in segments of 10;
+  - it writes new entries (`kw:a:<address>`, one-year TTL), the delegate verdicts and the families it learned;
+  - it takes a 30-second lease (`kw:lease`), so overlapping runs skip.
+- **Lag:** a chain more than 6 hours behind skips ahead, and the gap is recorded. `/status` → `data.kit_watch` shows the lag, the gaps and the counts per kind.
+- **RPCs:** blocks come from `SCAN_ENDPOINTS` (`src/rpc.ts`): the BlastAPI and Tenderly public gateways for Ethereum, and Base's official RPC. The endpoints that serve paid evaluations are only the last fallback, so the scan's ~20 GB a day cannot rate-limit a check.
+- **Refreshing the families:** re-run the catalog and the registry when ScamSniffer or Forta change. Families learned from behaviour (`kw:learned`) are kept.
 
 ## Deploy, validate, roll back
 

@@ -172,6 +172,8 @@ export type CategoryFacts = {
   simulationFindings?: string[];
   /** Checks that should have run but failed transiently (e.g. "onchain_unavailable"). */
   unavailableChecks?: string[];
+  /** Kit-watch categories (address_poisoning, compromised_wallet, drainer_operator, known_drainer_code). */
+  kitWatch?: string[];
 };
 
 /** Evaluated families (intent_risk, behavioral) plus the specific findings behind the verdict. */
@@ -192,6 +194,7 @@ export function categoriesFor(inputs: ScoringInputs, facts: CategoryFacts = {}):
   if (facts.unverifiedContract) categories.push("unverified_contract");
   for (const f of facts.simulationFindings ?? []) if (f !== "approval_to_eoa" && !categories.includes(f)) categories.push(f);
   for (const u of facts.unavailableChecks ?? []) if (!categories.includes(u)) categories.push(u);
+  for (const k of facts.kitWatch ?? []) if (!categories.includes(k)) categories.push(k);
   if (facts.newAddress) categories.push("new_address");
   return categories;
 }

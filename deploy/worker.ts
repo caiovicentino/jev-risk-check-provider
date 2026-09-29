@@ -8,7 +8,8 @@ import { awaitColdStart, freshFeeds, maybeRefreshFeeds, DEFAULT_FEEDS_URL } from
 import { OFAC_SDN_META } from "../src/data/ofac-sdn.js";
 import { sanctionsListMeta } from "../src/sanctions.js";
 import { PROVIDER_VERSION } from "../src/provider.js";
-import type { ExecutionContext, WorkerEnv } from "./runtime.js";
+import { KW, runKitWatch, type KitWatchStats } from "./kit-watch.js";
+import type { ExecutionContext, ScheduledController, WorkerEnv } from "./runtime.js";
 // Bundled as a Wrangler Data module (see [[rules]] in wrangler.toml).
 import metamaskPhishing from "../src/data/metamask-phishing.bin";
 import fortaDrainerCode from "../src/data/forta-drainer-code.bin";
@@ -45,6 +46,23 @@ async function status(env: WorkerEnv): Promise<Response> {
     scamsniffer = { status: "unavailable" };
   }
   const mm = fresh.metamask;
+  // The provider's own watch: coverage (cursor vs head, gaps) and what it has flagged.
+  let kitWatch: Record<string, unknown> = { status: env.KIT_WATCH === "off" ? "off" : "not_configured" };
+  try {
+    const raw = env.KIT_WATCH !== "off" && env.RATE ? await env.RATE.get(KW.stats) : null;
+    if (raw) {
+      const st = JSON.parse(raw) as KitWatchStats;
+      kitWatch = {
+        updated_at: st.updated_at,
+        chains: Object.fromEntries(
+          Object.entries(st.chains).map(([chain, c]) => [chain, { lag_blocks: Math.max(0, c.head - c.cursor), scanned_blocks: c.scanned_blocks, flagged: c.flagged, delegates_classified: c.delegates, gaps: c.gaps.length, ...(c.error ? { error: c.error } : {}) }]),
+        ),
+        note: "EIP-7702 delegations to poisoners and sweepers, and new drainer-kit deployments, observed block by block; the list itself is private",
+      };
+    }
+  } catch {
+    kitWatch = { status: "unavailable" };
+  }
   // Which facilitator settles each network, and whether our price clears its published floor.
   const payments = await Promise.race([
     paymentRouting(env).catch(() => null),
@@ -58,6 +76,7 @@ async function status(env: WorkerEnv): Promise<Response> {
       metamask_phishing: { as_of: mm?.as_of ?? METAMASK_FEED_META.as_of, age_days: ageDays(mm?.as_of ?? METAMASK_FEED_META.as_of), entries: mm?.entries ?? METAMASK_FEED_META.entries, origin: mm ? "refreshed" : "embedded" },
       scamsniffer,
       forta_drainer_code: { as_of: FORTA_CODE_META.as_of, fingerprints: FORTA_CODE_META.fingerprints, origin: "embedded", note: "static 2023 dataset" },
+      kit_watch: kitWatch,
     },
     refresh: { source: env.FEEDS_URL === "off" ? "off" : (env.FEEDS_URL ?? DEFAULT_FEEDS_URL), checked_at: fresh.checked_at ?? null, published_at: fresh.generated_at ?? null, error: fresh.error ?? null },
     checks: { onchain: env.ONCHAIN === "off" ? "off" : "on", simulation: env.SIMULATION === "off" ? "off" : "on", contract_verification: env.CONTRACT_INTEL === "off" ? "off" : "on" },
@@ -104,5 +123,10 @@ export default {
     }
     for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
     return res;
+  },
+
+  // Kit watch cron (wrangler.toml [triggers]): scans new Ethereum and Base blocks.
+  async scheduled(_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runKitWatch(env).catch(() => null));
   },
 };

@@ -106,6 +106,11 @@ export type KnownCategory =
   | "simulation_incomplete"
   | "unverified_contract"
   | "known_drainer_code"
+  // v0.4 (kit watch: the provider's own record of drainer infrastructure)
+  | "address_poisoning"
+  | "compromised_wallet"
+  | "auto_forwarding_wallet"
+  | "drainer_operator"
   // Fail-closed review floors: a check that should have run failed transiently.
   | "onchain_unavailable"
   | "simulation_unavailable";
@@ -220,6 +225,34 @@ export interface SimulationEvidence {
   limits?: string[];
 }
 
+/** v0.4: what the kit watch knows about an address in the request. */
+export interface KitWatchHit {
+  address: string;
+  role: "subject" | "called" | "recipient" | "spender";
+  /**
+   * poisoner_delegation: a look-alike delegated (EIP-7702) to an address-poisoning executor;
+   * sweeper_delegation: a wallet delegated to a labelled sweeper (its key is compromised);
+   * forwarding_delegation: a wallet whose delegate forwards what it receives (no label);
+   * sweeper_destination: where a sweeper or forwarder sends what it receives;
+   * drainer_kit_contract / drainer_kit_deployer: a contract in a drainer-kit family, and who deployed one.
+   */
+  kind: "poisoner_delegation" | "sweeper_delegation" | "forwarding_delegation" | "sweeper_destination" | "drainer_kit_contract" | "drainer_kit_deployer";
+  family: string;
+  /** Where the entry was observed (watchlist entries only). */
+  chain?: string;
+  first_seen?: string;
+  /** watchlist: observed by the provider's scan; code: the address runs a family's code now. */
+  via: "watchlist" | "code";
+}
+
+/** v0.4: the provider's own drainer-infrastructure watch (EIP-7702 poisoners and sweepers, drainer kits). */
+export interface KitWatchEvidence {
+  /** When the watch last scanned. */
+  as_of: string;
+  status: "hit" | "clear" | "unavailable";
+  hits?: KitWatchHit[];
+}
+
 /** Provider-observed facts behind a verdict (never caller claims). */
 export interface Evidence {
   sanctions: SanctionsEvidence;
@@ -227,6 +260,7 @@ export interface Evidence {
   onchain: OnchainEvidence;
   feeds?: FeedEvidence[];
   simulation?: SimulationEvidence;
+  kit_watch?: KitWatchEvidence;
   model: string;
 }
 

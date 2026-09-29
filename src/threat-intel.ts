@@ -7,7 +7,7 @@ import type { Subject } from "./address.js";
 // per lookup ≈ n / 2^64 (≈5e-15 for 100k entries).
 
 export type FeedKind = "domain" | "address" | "code";
-export type FeedSource = "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses" | "forta-phishing-code" | "scamsniffer-code";
+export type FeedSource = "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses" | "forta-phishing-code" | "scamsniffer-code" | "x402check-kit-watch";
 export type FeedStatus = "hit" | "clear" | "unavailable" | "not_applicable";
 
 export type FeedResult = { source: FeedSource; kind: FeedKind; as_of: string; status: FeedStatus };

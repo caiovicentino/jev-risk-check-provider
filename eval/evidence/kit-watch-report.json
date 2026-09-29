@@ -1,0 +1,135 @@
+{
+  "timestamp": "2026-09-29T22:05:03.593Z",
+  "registry": {
+    "families": 124,
+    "by_class": {
+      "drainer_kit": 94,
+      "sweeper": 7,
+      "poisoner": 1,
+      "forwarder": 22
+    },
+    "templates": 95,
+    "built_at": "2026-09-29T22:05:01.136Z"
+  },
+  "volume": {
+    "eip155:1": {
+      "addresses": 6831,
+      "window_hours": 24.1,
+      "kinds": {
+        "poisoner_delegation": 6232,
+        "sweeper_destination": 24,
+        "forwarding_delegation": 559,
+        "sweeper_delegation": 16
+      },
+      "families": 29,
+      "on_scamsniffer_public_list": 0
+    },
+    "eip155:8453": {
+      "addresses": 226,
+      "window_hours": 5.8,
+      "kinds": {
+        "forwarding_delegation": 204,
+        "sweeper_destination": 10,
+        "sweeper_delegation": 12
+      },
+      "families": 14,
+      "on_scamsniffer_public_list": 0
+    }
+  },
+  "code_precision": {
+    "eip155:1": {
+      "corpus": {
+        "held_out_verified": 2000,
+        "recent_callees": 5808,
+        "callee_blocks": 300,
+        "with_code": 6310,
+        "fingerprintable": 2500
+      },
+      "kit_families_gated": "1/2500 = 0.040% (95% CI 0.007–0.226%)",
+      "kit_families_before_gate": "16/2500 = 0.6% (95% CI 0.4–1.0%)",
+      "production_code_sets": "1/2500 = 0.040% (95% CI 0.007–0.226%)",
+      "delegate_family_matches": {
+        "forwarder:exact": 17
+      }
+    },
+    "eip155:8453": {
+      "corpus": {
+        "held_out_verified": 2000,
+        "recent_callees": 5311,
+        "callee_blocks": 1800,
+        "with_code": 6984,
+        "fingerprintable": 2957
+      },
+      "kit_families_gated": "0/2957 = 0.000% (95% CI 0.000–0.130%)",
+      "kit_families_before_gate": "0/2957 = 0.000% (95% CI 0.000–0.130%)",
+      "production_code_sets": "0/2957 = 0.000% (95% CI 0.000–0.130%)",
+      "delegate_family_matches": {}
+    }
+  },
+  "template_recall": {
+    "scope": "ScamSniffer-listed contracts with logic code (Ethereum, Base), each vs listed contracts (Forta or ScamSniffer) created before it",
+    "contracts": 82,
+    "exact": "40/82 = 48.8% (95% CI 38.3–59.4%)",
+    "exact_or_template": "40/82 = 48.8% (95% CI 38.3–59.4%)"
+  },
+  "poisoner_precision": {
+    "authorities": 6232,
+    "sampled": 40,
+    "no_activity_yet": 3,
+    "confirmed_lookalike": "27/37 = 73.0% (95% CI 57.0–84.6%)",
+    "method": "among the latest 50 token transfers and 50 transactions of up to 8 counterparties of the authority, one is with a different address sharing the authority's first 3 and last 4 hex digits (the real payee it imitates); chance per pair ≈ 4e-9",
+    "by_construction": "the delegate obeys only its operator (tx.origin check in the verified source): while delegated, the operator controls the wallet whether or not it is a look-alike"
+  },
+  "forwarders": {
+    "eip155:1": {
+      "forwarding_delegations": 559,
+      "sweeper_delegations": 16,
+      "destinations": 24,
+      "destinations_flagged_scam_by_explorer": 1,
+      "destinations_labelled": 0,
+      "destination_labels": [],
+      "destinations_are_contracts": 4,
+      "destinations_on_scamsniffer_list": 0
+    },
+    "eip155:8453": {
+      "forwarding_delegations": 204,
+      "sweeper_delegations": 12,
+      "destinations": 10,
+      "destinations_flagged_scam_by_explorer": 0,
+      "destinations_labelled": 0,
+      "destination_labels": [],
+      "destinations_are_contracts": 1,
+      "destinations_on_scamsniffer_list": 0
+    }
+  },
+  "code_precision_second_holdout": {
+    "timestamp": "2026-09-29T22:48:50.197Z",
+    "scope": "verified contracts of pages 81–120 and fresh callees, after the rules derived from the first held-out run (pre-2021 Forta families, guarded fleets)",
+    "eip155:1": {
+      "corpus": {
+        "held_out_verified": 2000,
+        "recent_callees": 6359,
+        "callee_blocks": 300,
+        "with_code": 6135,
+        "fingerprintable": 1737
+      },
+      "kit_families_gated": "1/1737 = 0.058% (95% CI 0.010–0.325%)",
+      "production_code_sets": "1/1737 = 0.058% (95% CI 0.010–0.325%)",
+      "delegate_family_matches": {
+        "forwarder:exact": 6
+      }
+    },
+    "eip155:8453": {
+      "corpus": {
+        "held_out_verified": 2000,
+        "recent_callees": 5109,
+        "callee_blocks": 1800,
+        "with_code": 6832,
+        "fingerprintable": 2935
+      },
+      "kit_families_gated": "0/2935 = 0.000% (95% CI 0.000–0.131%)",
+      "production_code_sets": "0/2935 = 0.000% (95% CI 0.000–0.131%)",
+      "delegate_family_matches": {}
+    }
+  }
+}

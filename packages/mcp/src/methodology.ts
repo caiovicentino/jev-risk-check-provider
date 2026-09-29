@@ -1,8 +1,8 @@
 export const EVIDENCE_URL: string = "https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md";
 export const METHODOLOGY_URL: string = "https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/METHODOLOGY.md";
 
-/** Static summary served by the `x402check_methodology` tool. Numbers mirror docs/EVIDENCE.md (v0.3.0). */
-export const METHODOLOGY: string = `x402check: what is checked, and the published limits (API v0.3)
+/** Static summary served by the `x402check_methodology` tool. Numbers mirror docs/EVIDENCE.md (v0.4.0). */
+export const METHODOLOGY: string = `x402check: what is checked, and the published limits (API v0.4)
 
 Provider-verified evidence (deterministic, independent of the model):
 - Sanctions: OFAC SDN digital-currency addresses, refreshed daily, including the same key in another encoding. A listed address scores 0 (critical) with no model call. Direct listing only.
@@ -14,7 +14,8 @@ Provider-verified evidence (deterministic, independent of the model):
   - exceeds-declared: a named payee receives a different asset, or more, than the declared payment or transfer (outflow_exceeds_declared);
   - unverified sinks: assets end up in a contract whose source is not verified (outflow_to_unverified_contract);
   - approvals to EOAs, unlimited approvals, and reverts.
-- Drainer-kit code fingerprints: the logic code of the subject and of the contracts a simulated transaction touches (called contract, recipients, spenders), following one level of EIP-7702 delegation or proxy, is compared with fingerprints of listed drainer contracts (Forta, ScamSniffer). A match caps the score at 30 (known_drainer_code).
+- Drainer-kit code fingerprints: the logic code of the subject and of the contracts a simulated transaction touches (called contract, recipients, spenders), following one level of EIP-7702 delegation or proxy, is compared with fingerprints of listed drainer contracts (Forta since 2021, ScamSniffer), gated against code in legitimate use. A match caps the score at 30 (known_drainer_code).
+- Kit watch (x402check's own intelligence): every Ethereum and Base block is read as it is produced. Wallets that delegate (EIP-7702) to an address-poisoning executor are look-alikes their operator controls (address_poisoning, capped at 20). Wallets that delegate to a labelled sweeper are compromised (compromised_wallet, 20). A wallet whose delegate forwards whatever it receives is auto_forwarding_wallet (40). Deployers of drainer-kit code and the wallets collecting what sweepers forward are drainer_operator (30; 40 when the forwarder has no label). The subject and the counterparties of a simulated transaction are looked up; the list itself is private.
 Model: TypeSafe Jev typed questions over "context" (the content the agent acted on), for injected or manipulated instructions.
 
 Fail-closed review floors: a check that should have run but failed transiently raises the verdict to at least review (medium), never to clear. This covers the on-chain lookup for an approval (onchain_unavailable), the simulation of a sent transaction (simulation_unavailable), and an incomplete simulation whose recipients or spenders could not be classified or whose logs were truncated (simulation_incomplete). An unsupported chain is a stated coverage gap.
@@ -22,14 +23,14 @@ Fail-closed review floors: a check that should have run but failed transiently r
 Every verdict is an ES256 attestation signed by did:web:x402check.xyz. It lists what the provider verified ("checks") separately from what the caller asserted ("asserted"). Caller assertions are never evidence and can never lower risk. It also signs request_hash: a SHA-256 over the RFC 8785 canonical request exactly as sent. This server recomputes it on every check, so a request altered or stripped in transit (context included) is rejected as not_verified.
 
 Published limits (measured):
-- Unknown drainers receiving a plain transfer are NOT detectable from the address alone (0/30 held-out drainer addresses with the feed off). Simulating the transaction is what catches a drain in flight.
+- Unknown drainers receiving a plain transfer are NOT detectable from the address alone (0/30 held-out drainer addresses with the feed off), unless the kit watch has seen the wallet as a poisoning look-alike or a compromised wallet. Simulating the transaction is what catches a drain in flight.
 - Unlisted phishing domains are mostly NOT caught without a feed (0 to 4 of 60).
 - The simulation replays at the latest block and is measured on Ethereum only. A drainer that returns any asset to the victim defeats the hidden-recipient rule.
 - Sanctions screening is direct OFAC listing only: funds received from listed addresses are not detected, and it is not a compliance program.
 - Laundering and other transaction-graph behaviour are not analyzed.
 - A clean verdict means "none of these checks fired", not "safe".
 
-Measured results (v0.3.0, externally labelled): OFAC addresses 24/24 critical; feed-listed phishing domains 40/40 and drainer addresses 30/30; drainer permits with the drainer feed switched off 27/30; real drainer transactions on Ethereum 18/25 flagged when assets move (72%), against 0/84 legitimate transactions to 19 well-known contracts; drainer-kit fingerprints recognize 43/100 listed contracts at creation from earlier deployments (15/100 cross-source from Forta 2023), with 0 collisions among 9,625 legitimate contracts (following 7702 delegations and proxies); 0 high or critical on 22 well-known contracts and 40 top dApp domains.
+Measured results (v0.4.0, externally labelled): OFAC addresses 24/24 critical; feed-listed phishing domains 40/40 and drainer addresses 30/30; drainer permits with the drainer feed switched off 27/30; real drainer transactions on Ethereum 18/25 flagged when assets move (72%), against 0/84 legitimate transactions to 19 well-known contracts; drainer-kit fingerprints recognize 40/82 listed contracts at creation from earlier deployments; on held-out legitimate code the gated code sets have 0 false positives among 1,737 fingerprintable contracts on Ethereum and 2,935 on Base (their one match was a real, unlisted drainer; v0.3's sets had matched the deposit contracts of Luno, Poloniex and BitGo, which a list labels as phishing: fixed); the kit watch flagged 6,831 addresses on Ethereum in 24 hours, none of them on ScamSniffer's public list, and 27 of 37 sampled poisoning look-alikes were confirmed by a victim's history; 0 high or critical on 22 well-known contracts and 40 top dApp domains.
 
 Policy for agents: call x402check_check BEFORE sending funds, signing approvals, permits or orders, or paying an x402 invoice. Pass the transaction when you have it.
 - allow: proceed (still not a guarantee of safety)

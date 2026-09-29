@@ -8,12 +8,13 @@ import type { Declared, SimulationEvidence, Simulator } from "./simulation.js";
 import { parseSubject, type Subject } from "./address.js";
 import type { ContractIntel } from "./contract-intel.js";
 import { fingerprintsOf } from "./code-fingerprint.js";
+import { familyOf, kindForCode, kindForDelegate, runningFamily, type FamilyIndex, type KitWatchHit, type KitWatchLookup, type WatchKind } from "./kit-watch.js";
 import { createHash } from "node:crypto";
-import { GRANTING_INTERACTIONS, type Answer, type Evidence, type RiskCheckDiscovery, type RiskCheckRequest, type RiskCheckResult, type RiskTier } from "./types.js";
+import { GRANTING_INTERACTIONS, type Answer, type Evidence, type KitWatchEvidence, type RiskCheckDiscovery, type RiskCheckRequest, type RiskCheckResult, type RiskTier } from "./types.js";
 
 export const PROVIDER_DID_PREFIX = "did:web:";
 export const ATTESTATION_TTL_MS = 60 * 60 * 1000;
-export const PROVIDER_VERSION = "0.3.2";
+export const PROVIDER_VERSION = "0.4.0";
 
 export type ProviderConfig = {
   host: string;
@@ -27,6 +28,8 @@ export type ProviderConfig = {
   simulator?: Simulator | null | undefined;
   /** Contract source-verification lookups (block explorers); null/undefined disables them. */
   contractIntel?: ContractIntel | null | undefined;
+  /** The provider's own drainer-infrastructure watch (src/kit-watch.ts); null/undefined disables it. */
+  kitWatch?: KitWatchLookup | null | undefined;
 };
 
 // Transaction simulation and contract reputation caps.
@@ -54,6 +57,31 @@ export const FEED_CAPS: Record<string, number> = {
   "forta-phishing-code": DRAINER_CODE_CAP,
   "scamsniffer-code": DRAINER_CODE_CAP,
 };
+
+// Kit watch (src/kit-watch.ts): what the provider itself observed about an address.
+// Paying a look-alike the poisoner controls, or a wallet whose key a sweeper holds, pays
+// the thief: the same cap as a listed scam address. Behaviour without a label (every wei
+// received is forwarded) reads like an undisclosed recipient.
+export const KIT_WATCH_CAPS: Record<WatchKind, number> = {
+  poisoner_delegation: 20,
+  sweeper_delegation: 20,
+  forwarding_delegation: HIDDEN_RECIPIENT_CAP,
+  sweeper_destination: DRAINER_CODE_CAP,
+  drainer_kit_contract: DRAINER_CODE_CAP,
+  drainer_kit_deployer: DRAINER_CODE_CAP,
+};
+export const KIT_WATCH_CATEGORIES: Record<WatchKind, string> = {
+  poisoner_delegation: "address_poisoning",
+  sweeper_delegation: "compromised_wallet",
+  forwarding_delegation: "auto_forwarding_wallet",
+  sweeper_destination: "drainer_operator",
+  drainer_kit_contract: "known_drainer_code",
+  drainer_kit_deployer: "drainer_operator",
+};
+/** A destination learned from behaviour alone (family "fwd-…") caps like its forwarder. */
+export function kitWatchCap(hit: Pick<KitWatchHit, "kind" | "family">): number {
+  return hit.kind === "sweeper_destination" && hit.family.startsWith("fwd-") ? HIDDEN_RECIPIENT_CAP : KIT_WATCH_CAPS[hit.kind];
+}
 
 // Approvals/permits normally go to contracts (routers, protocols, marketplaces);
 // granting an EOA control over assets is a classic drainer pattern.
@@ -94,7 +122,7 @@ export function discoveryDocument(host: string, pricing?: PricingInfo): RiskChec
           },
         }
       : {}),
-    signals: ["ofac_sdn_address", "threat_feeds", "domain_impersonation", "onchain_activity", "transaction_simulation", "contract_verification", "drainer_code_fingerprint", "operation_context_intent"],
+    signals: ["ofac_sdn_address", "threat_feeds", "domain_impersonation", "onchain_activity", "transaction_simulation", "contract_verification", "drainer_code_fingerprint", "kit_watch", "operation_context_intent"],
     chains_supported: Object.keys(DEFAULT_RPC),
     response_time_ms: "<3000",
     attestation: {
@@ -111,6 +139,7 @@ export function discoveryDocument(host: string, pricing?: PricingInfo): RiskChec
       simulation: "eth_simulateV1 with traceTransfers on public RPCs with fallbacks (Ethereum, Base, Polygon, Arbitrum, Optimism, BSC)",
       contract_verification: "Blockscout API v2 (source verification status)",
       drainer_code_fingerprints: "sha256 of metadata-stripped logic code of contracts listed by Forta labelled-datasets (MIT) and ScamSniffer; token, NFT, proxy and tiny code is never fingerprinted",
+      kit_watch: "x402check's own scan of every Ethereum and Base block: EIP-7702 delegations to address-poisoning executors and to sweepers that forward what a wallet receives, and new contracts in drainer-kit families (exact or template fingerprint). Families are seeded from Forta, ScamSniffer and public exposures and grow by observed behaviour; the watchlist is private",
       model: `TypeSafe Jev System One, question set ${QUESTION_SET_VERSION}`,
     },
   };
@@ -162,6 +191,68 @@ export function answersComplete(answers: unknown, questions: JevQuestions): answ
     if (ans.type === "score" && !(typeof ans.score === "number" && Number.isFinite(ans.score) && ans.score >= 0 && ans.score <= 4)) return false;
   }
   return true;
+}
+
+/** Code-fingerprint lookups for the simulator: listed drainer code, and labelled kit-watch families. */
+function codeMatcher(feeds: ThreatIntelFeeds, families: FamilyIndex | null): ((fingerprint: string) => string[]) | undefined {
+  const listed = hasCodeFeeds(feeds);
+  if (!listed && !families) return undefined;
+  return (fp) => {
+    const sources = listed ? matchCode(feeds, fp) : [];
+    // fingerprintsOf() also yields template fingerprints: look them up as either.
+    const family = families ? (familyOf(families, { fingerprint: fp }) ?? families.skeleton.get(fp)) : undefined;
+    // A behaviour-learned delegate family describes delegated wallets, not the contracts in a transaction.
+    if (family && family.class !== "forwarder") sources.push("x402check-kit-watch");
+    return sources;
+  };
+}
+
+/**
+ * What the kit watch knows about the subject and a simulated transaction's counterparties:
+ * watchlist entries (observed by the scan) and the family of the code the subject runs now.
+ * "unavailable" when a lookup failed and nothing was found.
+ */
+async function kitWatchEvidence(
+  kw: KitWatchLookup,
+  families: FamilyIndex | null,
+  subjectEntries: Map<string, import("./kit-watch.js").WatchEntry> | null,
+  subject: string,
+  network: string,
+  onchain: OnchainEvidence,
+  simulation: SimulationEvidence | undefined,
+  called: string | undefined,
+): Promise<KitWatchEvidence> {
+  const hits: KitWatchHit[] = [];
+  let failed = subjectEntries === null || families === null;
+  const iso = (t: number) => new Date(t * 1000).toISOString();
+  for (const [address, e] of subjectEntries ?? []) hits.push({ address, role: "subject", kind: e.k, family: e.f, chain: e.c, first_seen: iso(e.t), via: "watchlist" });
+  // The code the subject runs right now: its own, or its delegate's (EIP-7702) or implementation's.
+  const family = families && onchain.code ? runningFamily(families, onchain.code) : undefined;
+  const kind = family && onchain.code ? kindForCode(family, onchain.code) : null;
+  if (family && kind && !hits.some((h) => h.kind === kind)) hits.push({ address: subject, role: "subject", kind, family: family.id, via: "code" });
+  // A delegate the scan classified by behaviour or address (no logic fingerprint to match).
+  if (!family && onchain.code?.kind === "delegated" && onchain.code.delegate && kw.delegate) {
+    const verdict = await kw.delegate(network, onchain.code.delegate.toLowerCase()).catch(() => {
+      failed = true;
+      return undefined;
+    });
+    const byDelegate = kindForDelegate(verdict);
+    if (byDelegate && !hits.some((h) => h.kind === byDelegate)) hits.push({ address: subject, role: "subject", kind: byDelegate, family: verdict?.family ?? "", via: "code" });
+  }
+  if (simulation && (simulation.status === "ok" || simulation.status === "reverted")) {
+    const roles = new Map<string, KitWatchHit["role"]>();
+    for (const o of simulation.outflows ?? []) if (o.counterparty) roles.set(o.counterparty.toLowerCase(), "recipient");
+    for (const a of simulation.approvals ?? []) roles.set(a.spender.toLowerCase(), "spender");
+    if (called) roles.set(called.toLowerCase(), "called");
+    roles.delete(subject);
+    if (roles.size) {
+      const entries = await kw.addresses([...roles.keys()], network).catch(() => null);
+      if (entries === null) failed = true;
+      for (const [address, e] of entries ?? []) hits.push({ address, role: roles.get(address) ?? "recipient", kind: e.k, family: e.f, chain: e.c, first_seen: iso(e.t), via: "watchlist" });
+    }
+  }
+  const asOf = await kw.asOf().catch(() => "");
+  return { as_of: asOf, status: hits.length ? "hit" : failed ? "unavailable" : "clear", ...(hits.length ? { hits: hits.slice(0, 10) } : {}) };
 }
 
 type Verdict = { score: number; tier: RiskTier; categories: string[]; model: string };
@@ -223,11 +314,17 @@ export class Provider {
     if (!jev) return fail("jev_unconfigured");
 
     const granting = req.interaction !== undefined && GRANTING_INTERACTIONS.has(req.interaction.type);
+    // Kit watch: families first (the simulator matches the code it meets against them),
+    // then the subject's watchlist entry, in parallel with the model call.
+    const kw = this.config.kitWatch && checks.subject.format === "evm" && network?.startsWith("eip155:") ? this.config.kitWatch : null;
+    const kwFamilies: FamilyIndex | null = kw ? await kw.families().catch(() => null) : null;
+    const kwSubjectP = kw && network ? kw.addresses([checks.subject.canonical], network).catch(() => null) : Promise.resolve(null);
+    const codeMatch = codeMatcher(feeds, kwFamilies);
     const simulationP: Promise<SimulationEvidence | undefined> =
       req.transaction && this.config.simulator
         ? this.config.simulator(req.transaction, network, {
             declared: declaredScope(req, checks.subject),
-            ...(hasCodeFeeds(feeds) ? { codeMatch: (fp: string) => matchCode(feeds, fp) } : {}),
+            ...(codeMatch ? { codeMatch } : {}),
           }).catch(() => ({ status: "unavailable" as const, ...(network ? { network } : {}) }))
         : Promise.resolve(undefined);
     // Started early: the subject's verification status only matters when the user
@@ -264,6 +361,12 @@ export class Provider {
     if (subjectVerified !== undefined) onchain = { ...onchain, verified: subjectVerified };
     if (!answersComplete(answers, questions)) return fail("jev_malformed_answers", usage);
 
+    let kitWatch: KitWatchEvidence | undefined;
+    if (kw && network) {
+      kitWatch = await kitWatchEvidence(kw, kwFamilies, await kwSubjectP, checks.subject.canonical, network, onchain, simulation, req.transaction?.to);
+      feedResults = [...feedResults, { source: "x402check-kit-watch", kind: "address", as_of: kitWatch.as_of, status: kitWatch.status }];
+    }
+
     // Drainer-kit code fingerprints: the subject's own code, plus the called contract,
     // recipients and spenders of a simulated transaction.
     if (hasCodeFeeds(feeds)) {
@@ -297,6 +400,7 @@ export class Provider {
     if (simFindings.includes("simulation_incomplete")) caps.push(INCOMPLETE_SIMULATION_CAP);
     if (simFindings.includes("outflow_to_unverified_contract")) caps.push(UNVERIFIED_SINK_CAP);
     if (simFindings.includes("known_drainer_code")) caps.push(DRAINER_CODE_CAP);
+    for (const h of kitWatch?.hits ?? []) caps.push(kitWatchCap(h));
     const unverifiedContract = (granting && onchain.is_contract === true && subjectVerified === false) || simSpenderUnverified;
     if (unverifiedContract) caps.push(UNVERIFIED_SPENDER_CAP);
     // Fail-closed: a check that should have run but failed transiently is never read as clear.
@@ -327,10 +431,11 @@ export class Provider {
         unverifiedContract,
         simulationFindings: simFindings,
         unavailableChecks: unavailable,
+        kitWatch: [...new Set((kitWatch?.hits ?? []).map((h) => KIT_WATCH_CATEGORIES[h.kind]))],
       }),
       model: QUESTION_SET_VERSION,
     };
-    return this.attest(req, checks, onchain, feedResults, verdict, Object.keys(questions), answers, usage, started, simulation);
+    return this.attest(req, checks, onchain, feedResults, verdict, Object.keys(questions), answers, usage, started, simulation, kitWatch);
   }
 
   private attest(
@@ -344,6 +449,7 @@ export class Provider {
     usage: Usage | null,
     started: number,
     simulation?: SimulationEvidence,
+    kitWatch?: KitWatchEvidence,
   ): ScoredEvaluation {
     const sanctions = checks.sanctions as NonNullable<typeof checks.sanctions>;
     const now = Date.now();
@@ -383,7 +489,7 @@ export class Provider {
           signals: checks.domain.signals,
         }
       : undefined;
-    const evidence: Evidence = { sanctions, ...(domain ? { domain } : {}), onchain, ...(feeds.length ? { feeds } : {}), ...(simulation ? { simulation } : {}), model: verdict.model };
+    const evidence: Evidence = { sanctions, ...(domain ? { domain } : {}), onchain, ...(feeds.length ? { feeds } : {}), ...(simulation ? { simulation } : {}), ...(kitWatch ? { kit_watch: kitWatch } : {}), model: verdict.model };
     const signedChecks: AttestationChecks = {
       sanctions: { list: sanctions.list, as_of: sanctions.as_of, status: sanctions.status },
       ...(domain ? { domain: { host: domain.host, impersonation: domain.impersonation } } : {}),

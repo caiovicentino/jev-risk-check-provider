@@ -1,0 +1,84 @@
+{
+  "timestamp": "2026-09-29T22:52:59.210Z",
+  "base": "https://x402check.xyz",
+  "paid_via": "eip155:8453",
+  "summary": {
+    "pass": 7,
+    "fail": 0,
+    "skip": 0
+  },
+  "outcomes": [
+    {
+      "id": "discovery_v04",
+      "status": "PASS",
+      "detail": "version=0.4.0 kit_watch=true"
+    },
+    {
+      "id": "status_kit_watch",
+      "status": "PASS",
+      "detail": "updated=2026-09-29T22:51:28.808Z lag={\"eip155:1\":102,\"eip155:8453\":382} addresses_in_status=false"
+    },
+    {
+      "id": "kit_watch_poisoner",
+      "status": "PASS",
+      "detail": "sha256:79d50ea150c11faa → HTTP 200 score=20 tier=critical hits=[\"poisoner_delegation/watchlist\"] signed=x402check-kit-watch@2026-09-29T22:51:28.808Z:hit"
+    },
+    {
+      "id": "kit_watch_compromised_wallet",
+      "status": "PASS",
+      "detail": "sha256:13aa1b4526b2785b → HTTP 200 score=20 hits=[\"sweeper_delegation/watchlist\",\"forwarding_delegation/code\"]"
+    },
+    {
+      "id": "gate_luno_deposit_not_drainer",
+      "status": "PASS",
+      "detail": "HTTP 200 score=84 tier=low code_feeds=forta-phishing-code:clear,scamsniffer-code:clear"
+    },
+    {
+      "id": "gate_bitgo_forwarder_not_drainer",
+      "status": "PASS",
+      "detail": "HTTP 200 score=85 tier=low code_feeds=forta-phishing-code:clear,scamsniffer-code:clear"
+    },
+    {
+      "id": "kit_watch_clear",
+      "status": "PASS",
+      "detail": "HTTP 200 score=92 kit_watch=clear@2026-09-29T22:51:28.808Z"
+    }
+  ],
+  "settlements": [
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0x9cdd0870d0265292c9beddcffaad115229253fb144d403d975964c08e4d222a2",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xcc7b42e874f88917ff5d54d2ef9fa232fdda304d1df63b384fae468cf1cc1198",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xcee136a0bea72f1d9efb1499d9d6f0fb58f39342fc017f6837e64ceb2f51d7fc",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xd282b79cb561efe235215e7becb6ddec606df5e917b635c6cdb5ff132c87305c",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0x7e6f58ff59c9cd0329d9567a4e6dd1904601a5d0f6681b7771fe4283462b1351",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    }
+  ]
+}

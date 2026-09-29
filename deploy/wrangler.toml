@@ -10,6 +10,15 @@ routes = [
   { pattern = "x402check.xyz", custom_domain = true }
 ]
 
+# Kit watch (deploy/kit-watch.ts): every minute, scan the new Ethereum and Base blocks.
+# A run parses ~20 MB of block JSON (tens to hundreds of ms of CPU): Workers Paid only;
+# on the Free plan's 10 ms the runs end in exceededCpu (evaluations are unaffected).
+[triggers]
+crons = ["* * * * *"]
+
+[limits]
+cpu_ms = 30000
+
 [[kv_namespaces]]
 binding = "RATE"
 id = "47c8f208cb1e498e81b8dc2dc15a968c"

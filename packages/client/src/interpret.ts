@@ -40,7 +40,7 @@ export interface InterpretOptions {
 const ACTION_BY_TIER: Record<RiskTier, Action> = { low: "allow", medium: "warn", high: "block", critical: "block" };
 
 /** Deterministic findings (lists, code fingerprints, simulated overpayment): block whatever the tier. */
-const HARD_BLOCK = new Set(["sanctioned_address", "known_scam_address", "phishing_domain", "known_drainer_code", "outflow_exceeds_declared"]);
+const HARD_BLOCK = new Set(["sanctioned_address", "known_scam_address", "phishing_domain", "known_drainer_code", "outflow_exceeds_declared", "address_poisoning", "compromised_wallet", "drainer_operator"]);
 
 /**
  * Checks that did not fully run, or evidence that needs a human: never an unremarked allow. The
@@ -54,6 +54,10 @@ const CATEGORY_TEXT: ReadonlyArray<readonly [string, string]> = [
   ["outflow_to_undisclosed_eoa", "Drainer pattern: assets leave the sender, nothing comes back, and a plain wallet (EOA) the sender did not name ends up with them"],
   ["outflow_exceeds_declared", "A named payee receives a different asset, or more, than the declared payment or transfer"],
   ["approval_to_eoa", "Drainer pattern: an approval or permit grants a plain wallet (EOA) control over the user's assets"],
+  ["address_poisoning", "Address poisoning: a look-alike address controlled by a poisoning operator (it delegates to a poisoning executor)"],
+  ["compromised_wallet", "Compromised wallet: it delegates to a known sweeper, so whatever it receives is taken"],
+  ["drainer_operator", "Drainer operator: the address deployed drainer-kit code or collects what a sweeper forwards"],
+  ["auto_forwarding_wallet", "The wallet forwards everything it receives to another address (EIP-7702 delegate): the payee is not the final recipient"],
   ["known_drainer_code", "Known drainer code: a contract involved runs the same logic code as a listed drainer"],
   ["known_scam_address", "Known scam or drainer address (threat feed)"],
   ["phishing_domain", "Known phishing domain (threat feed)"],
@@ -164,6 +168,24 @@ function detailFor(category: string, evidence: SafeEvidence | undefined): string
       if (matches.length > 0) return matches.slice(0, 3).map((m) => `${shortAddress(m.address)} (${m.role}) matches ${m.sources.join(", ")}`).join("; ");
       const hits = (evidence.feeds ?? []).filter((f) => f.status === "hit" && f.kind === "code");
       return hits.length > 0 ? `listed by ${hits.map((f) => `${f.source}${f.as_of ? ` (as of ${f.as_of})` : ""}`).join(", ")}` : undefined;
+    }
+    case "address_poisoning":
+    case "compromised_wallet":
+    case "auto_forwarding_wallet":
+    case "drainer_operator": {
+      const kinds: Record<string, readonly string[]> = {
+        address_poisoning: ["poisoner_delegation"],
+        compromised_wallet: ["sweeper_delegation"],
+        auto_forwarding_wallet: ["forwarding_delegation"],
+        drainer_operator: ["sweeper_destination", "drainer_kit_deployer"],
+      };
+      const hits = (evidence.kit_watch?.hits ?? []).filter((h) => kinds[category]?.includes(h.kind));
+      return hits.length > 0
+        ? hits
+            .slice(0, 3)
+            .map((h) => `${shortAddress(h.address)} (${h.role}${h.via === "watchlist" && h.first_seen ? `, seen ${h.first_seen.slice(0, 10)}` : h.via === "code" ? ", by its current code" : ""})`)
+            .join("; ")
+        : undefined;
     }
     case "known_scam_address":
     case "phishing_domain":

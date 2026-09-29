@@ -46,10 +46,18 @@ export type OnchainEvidenceOut = {
 export type { SimulationEvidence, AssetMovement, ApprovalGrant, TransactionInput } from "./simulation.js";
 
 export type FeedEvidence = {
-  source: "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses" | "forta-phishing-code" | "scamsniffer-code";
+  source: "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses" | "forta-phishing-code" | "scamsniffer-code" | "x402check-kit-watch";
   kind: "domain" | "address" | "code";
   as_of: string;
   status: "hit" | "clear" | "unavailable" | "not_applicable";
+};
+
+/** The provider's own drainer-infrastructure watch (src/kit-watch.ts): what it knows about these addresses. */
+export type KitWatchEvidence = {
+  /** When the watch last scanned. */
+  as_of: string;
+  status: "hit" | "clear" | "unavailable";
+  hits?: import("./kit-watch.js").KitWatchHit[];
 };
 
 /** Provider-observed facts behind a verdict (not caller claims). */
@@ -59,6 +67,7 @@ export type Evidence = {
   onchain: OnchainEvidenceOut;
   feeds?: FeedEvidence[];
   simulation?: import("./simulation.js").SimulationEvidence;
+  kit_watch?: KitWatchEvidence;
   model: string;
 };
 

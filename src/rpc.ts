@@ -27,6 +27,17 @@ export const SIMULATION_ENDPOINTS: Record<string, readonly string[]> = {
   "eip155:56": ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"],
 };
 
+/**
+ * Block scanning for the kit watch (src/kit-watch-rpc.ts): full blocks in batches of 10,
+ * about 20 GB a day for both chains. It runs on endpoints other than the ones that serve
+ * evaluations, so the scan's volume can never rate-limit a paid check; the evaluation
+ * primaries are the last fallback.
+ */
+export const SCAN_ENDPOINTS: Record<string, readonly string[]> = {
+  "eip155:1": ["https://eth-mainnet.public.blastapi.io", "https://mainnet.gateway.tenderly.co", "https://ethereum-rpc.publicnode.com"],
+  "eip155:8453": ["https://mainnet.base.org", "https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com"],
+};
+
 /** An operator override (one URL) takes the primary slot; the defaults remain as fallbacks. */
 export function endpointsFor(network: string, defaults: Record<string, readonly string[]>, override?: Record<string, string>): string[] {
   const list = [...(defaults[network] ?? [])];

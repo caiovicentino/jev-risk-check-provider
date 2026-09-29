@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-09-29T21:15:31.502Z",
+  "facilitator": "https://facilitator.payai.network",
+  "network": "eip155:8453",
+  "window_days": 7,
+  "method": "settlement transactions sent by the facilitator's published signers (x402 v2 /supported), read from Blockscout; payments are their ERC-20 Transfer logs; checks are x402check's deterministic layers only (no model calls)",
+  "signers": {
+    "published": 15,
+    "active_on_base": 2
+  },
+  "settlement_transactions": 3487,
+  "receipts_unavailable": 0,
+  "payments": 3132,
+  "usdc_payments": 3132,
+  "usdc_volume": 709.48,
+  "usdc_amount_quantiles": {
+    "p10": 0.001,
+    "p50": 0.01,
+    "p90": 0.1,
+    "p99": 3.767528
+  },
+  "payees": {
+    "distinct": 207,
+    "code": {
+      "eoa": 169,
+      "contract:delegating": 5,
+      "eip7702_delegated": 24,
+      "contract:logic": 1,
+      "contract:tiny": 8
+    },
+    "top10_share_of_payments": 0.59
+  },
+  "payers": {
+    "distinct": 226,
+    "code": {
+      "eoa": 196,
+      "eip7702_delegated": 20,
+      "contract:delegating": 4,
+      "contract:logic": 1,
+      "contract:tiny": 5
+    }
+  },
+  "flags": {
+    "payees_flagged": 0,
+    "payee_flags": {},
+    "payers_flagged": 0,
+    "payer_flags": {},
+    "payments_to_flagged_payees": 0,
+    "payments_from_flagged_payers": 0,
+    "delegated_payees_probed": 24
+  },
+  "cost_if_every_payment_were_checked_usd": 3.13
+}

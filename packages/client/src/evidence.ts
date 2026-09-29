@@ -13,6 +13,8 @@ import type {
   CodeMatch,
   DomainEvidence,
   FeedEvidence,
+  KitWatchEvidence,
+  KitWatchHit,
   OnchainEvidence,
   SanctionsEvidence,
   SimulationEvidence,
@@ -193,6 +195,25 @@ function simulation(v: unknown): SimulationEvidence | undefined {
   });
 }
 
+const WATCH_KINDS = ["poisoner_delegation", "sweeper_delegation", "forwarding_delegation", "sweeper_destination", "drainer_kit_contract", "drainer_kit_deployer"] as const;
+
+function kitWatchHit(v: unknown): KitWatchHit | undefined {
+  if (!isRecord(v)) return undefined;
+  const addr = str(v.address, EVM_ADDRESS);
+  const role = pick(v.role, ["subject", "called", "recipient", "spender"] as const);
+  const kind = pick(v.kind, WATCH_KINDS);
+  const via = pick(v.via, ["watchlist", "code"] as const);
+  if (!addr || !role || !kind || !via) return undefined;
+  return defined({ address: addr, role, kind, family: str(v.family, IDENT) ?? "", chain: str(v.chain, CAIP2), first_seen: str(v.first_seen, DATE), via });
+}
+
+function kitWatch(v: unknown): KitWatchEvidence | undefined {
+  if (!isRecord(v)) return undefined;
+  const status = pick(v.status, ["hit", "clear", "unavailable"] as const);
+  if (!status) return undefined;
+  return defined({ as_of: str(v.as_of, DATE) ?? "", status, hits: list(v.hits, kitWatchHit, 10) });
+}
+
 /** Evidence with every value checked against its expected format; malformed parts are omitted. */
 export interface SafeEvidence {
   sanctions?: SanctionsEvidence;
@@ -200,6 +221,7 @@ export interface SafeEvidence {
   onchain?: OnchainEvidence;
   feeds?: FeedEvidence[];
   simulation?: SimulationEvidence;
+  kit_watch?: KitWatchEvidence;
   model?: string;
 }
 
@@ -216,6 +238,7 @@ export function normalizeEvidence(evidence: unknown): SafeEvidence | undefined {
     onchain: onchain(evidence.onchain),
     feeds: list(evidence.feeds, feed, 16),
     simulation: simulation(evidence.simulation),
+    kit_watch: kitWatch(evidence.kit_watch),
     model: str(evidence.model, MODEL),
   });
 }

@@ -2,11 +2,16 @@
 // code type-checks alongside the Node sources without @cloudflare/workers-types).
 export interface KVNamespace {
   get(key: string): Promise<string | null>;
+  get(key: string, opts: { type: "text"; cacheTtl?: number }): Promise<string | null>;
   get(key: string, opts: { type: "arrayBuffer"; cacheTtl?: number }): Promise<ArrayBuffer | null>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
 }
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
+}
+export interface ScheduledController {
+  scheduledTime: number;
+  cron: string;
 }
 
 export type WorkerEnv = {
@@ -36,6 +41,8 @@ export type WorkerEnv = {
   CONTRACT_INTEL?: string;
   /** Base URL of the published feeds (MetaMask, OFAC) for runtime refresh; "off" keeps the embedded snapshot. */
   FEEDS_URL?: string;
+  /** "off" disables the kit watch (the block-scanning cron and its evaluation-time lookups). */
+  KIT_WATCH?: string;
   RATE?: KVNamespace;
 };
 

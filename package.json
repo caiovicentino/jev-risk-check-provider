@@ -1,6 +1,6 @@
 {
   "name": "x402check",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -33,6 +33,8 @@
     "ofac:update": "tsx scripts/update-ofac.ts",
     "dev:worker": "cd deploy && wrangler dev --local",
     "security:v3": "tsx eval/security-v3.ts",
+    "security:v4": "tsx eval/security-v4.ts",
+    "eval:kit-watch": "tsx eval/kit-watch.ts",
     "eval:simulation": "tsx eval/simulation.ts",
     "eval:code": "tsx eval/code-fingerprint.ts"
   },
