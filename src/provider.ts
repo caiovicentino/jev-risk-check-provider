@@ -13,7 +13,7 @@ import { GRANTING_INTERACTIONS, type Answer, type Evidence, type RiskCheckDiscov
 
 export const PROVIDER_DID_PREFIX = "did:web:";
 export const ATTESTATION_TTL_MS = 60 * 60 * 1000;
-export const PROVIDER_VERSION = "0.3.1";
+export const PROVIDER_VERSION = "0.3.2";
 
 export type ProviderConfig = {
   host: string;
