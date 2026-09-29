@@ -1,4 +1,4 @@
-# Evidence — x402check v0.3.0
+# Evidence — x402check v0.3 (v0.3.0–v0.3.2)
 
 All numbers were measured on 2026-09-29 on the v0.3.0 code:
 
@@ -140,13 +140,16 @@ Reading: the model detects risk that is **present in the content it is given**. 
 
 ## 7. Production (`https://x402check.xyz`)
 
-All results are from Worker `d230e4a5` (v0.3.0, paid-only). **Every evaluation below was paid through x402 and settled on-chain in USDC on Base**, and the transaction hashes are in the reports.
+**Every evaluation below was paid through x402 and settled on-chain in USDC on Base**, and the transaction hashes are in the reports.
+
+- `prod` ran on Worker `d230e4a5`: the paid-only v0.3 code with EVM settlement through PayAI.
+- `security:v2` and `security:v3` ran on v0.3.2 (`3045ce10`), which adds simulation pricing.
 
 | Suite | Result | Paid evaluations |
 |---|---|---|
 | `npm run prod`: 53 described cases against the live endpoint | **53/53** correct, **53/53** attestations verified (issuer pinned, `exp` checked), 0 mismatches | 53 |
-| `npm run security:v2`: v0.2 fixes, plus "no free evaluations" | **11/11 PASS** | 6 |
-| `npm run security:v3`: v0.3 features | **8/8 PASS** | 3 |
+| `npm run security:v2`: v0.2 fixes, "no free evaluations", simulation pricing (v0.3.2) | **12/12 PASS** | 6 |
+| `npm run security:v3`: v0.3 features (v0.3.2: two simulated evaluations settled at $0.005) | **8/8 PASS** | 3 |
 
 The `security:v3` probes cover:
 - a Forta-fingerprinted drainer contract, on no address list, capped at **30**;
@@ -208,7 +211,8 @@ npm run eval:suite -- --seed 200             # needs AI_GATEWAY_API_KEY or TYPES
 TRANCO_LIST=top-1m.csv npm run eval:grounded -- --seed 200 --tranco-n 200000
 npm run eval:simulation -- --drainers 400 --per-contract 3 --legit-per-contract 12 --seed 11
 npm run eval:code                            # needs .cache ScamSniffer list (eval:grounded caches it)
-PAID=1 npm run security:v3 && PAID=1 npm run security:v2   # against production: every evaluation is paid (funded payer key)
+PAY_NETWORK=eip155:8453 npm run security:v3 && PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
+# ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.07 in total)
 ```
 
 Historical meta-evaluations (`audit-report.json`, `crosslabel-report.json`, 2026-09-27) used the same model family to judge its own verdicts. They measure framing stability, not correctness, and are kept for the record.

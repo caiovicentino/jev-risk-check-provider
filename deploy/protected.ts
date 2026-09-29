@@ -321,9 +321,10 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   }
   const replay = () => new Request(request.url, { method: "POST", headers: request.headers, body: text });
 
-  // 2. Every evaluation is paid (x402 v2, PAYMENT-SIGNATURE): price = unit price × units
-  //    (a batch of n is billed n). There is no free tier. Without a payment the response
-  //    is the 402 challenge listing the accepted mainnet options.
+  // 2. Every evaluation is paid (x402 v2, PAYMENT-SIGNATURE), priced per item: $0.001
+  //    ($0.002 on Solana), or $0.005 for an item whose transaction is simulated; a batch
+  //    is the sum of its items. There is no free tier. Without a payment the response is
+  //    the 402 challenge listing the accepted mainnet options.
   const ctx: HTTPRequestContext = {
     adapter: fetchAdapter(request, parsed),
     path,

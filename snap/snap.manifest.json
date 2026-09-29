@@ -1,13 +1,13 @@
 {
   "version": "0.3.0",
-  "description": "Decodes each transaction and signature, then risk-checks the real counterparty (spender, recipient, operator) before you sign.",
+  "description": "Decodes each transaction and signature locally and shows the real counterparty and danger signs. Sends nothing; paid x402check verdicts come later.",
   "proposedName": "x402check",
   "repository": {
     "type": "git",
     "url": "https://github.com/caiovicentino/jev-risk-check-provider"
   },
   "source": {
-    "shasum": "SgTJcO9wGcIlV1cRunDjBCRGKPqzKxrFhdApZ5MNrMo=",
+    "shasum": "qj6/dtaSNReENT+ls3s66eoBQJy/B1pRxIXrkxEdUJA=",
     "location": {
       "npm": {
         "filePath": "dist/bundle.js",

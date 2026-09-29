@@ -9,13 +9,13 @@
 | `GET /.well-known/risk-check.json` | discovery: pricing networks, data sources, attestation claims |
 | `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation key (`kid jev-attest-v1`), `did:web` document |
 | `GET /healthz` | liveness and version |
-| `GET /status` | data freshness: the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. Edge-cached 60 s |
+| `GET /status` | data freshness and payments. It shows the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. It also shows each payment network's facilitator, its published floor and whether the price clears it. Edge-cached 60 s |
 
 ## Layout
 
-- `worker.ts` — entry point: routing, CORS, `/healthz`, `/status`, embedded MetaMask and Forta sets (`.bin` Data modules), `RateCounter` export
+- `worker.ts` — entry point: routing, CORS, `/healthz`, `/status`, embedded MetaMask and Forta sets (`.bin` Data modules)
 - `fresh-feeds.ts` — runtime refresh of OFAC and MetaMask from the `feeds` branch (checksums, counts, no large shrink), in the background
-- `protected.ts` — the paid flow: validate → price → verify payment → evaluate → settle → release
+- `protected.ts` — the paid flow: validate → price (per item; $0.005 when simulated) → verify payment → evaluate → settle → release; facilitator routing and `/status` payment routes
 - `feeds.ts` — ScamSniffer blobs (domains, addresses, drainer-code fingerprints) read from KV at runtime (GPL-3.0 data: never bundled or committed)
 - `runtime.ts` — minimal Workers types, so `deploy/` type-checks with the rest of the repo (`npm run typecheck`)
 
@@ -87,8 +87,9 @@ npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer do
 npm test && npm run typecheck
 X402CHECK_BASE=http://localhost:8799 npm run security:v2      # against `wrangler dev --local --port 8799`
 cd deploy && wrangler deploy
-npm run security:v2 && npm run prod                            # against production
+export PAY_NETWORK=eip155:8453                                 # pay the probes in USDC on Base
+npm run security:v3 && npm run security:v2 && npm run prod     # against production (~$0.07, every evaluation paid)
 wrangler rollback                                              # previous version, if anything regresses
 ```
 
-Add `IPV6_A=<addr> IPV6_B=<addr in the same /64>` to `npm run security:v2` to prove the /64 quota aggregation from a real IPv6 host.
+Every evaluation is paid, so the production suites need a funded payer. They read the key from `~/.config/paysol/payer-evm.key` (Base USDC; the x402 exact scheme is gasless for the payer), or `payer-sol.b58` for Solana. Each report records the settlement tx hashes. Without a payer, the probes that need a verdict are reported as SKIP, never as PASS.

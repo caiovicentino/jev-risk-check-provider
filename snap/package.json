@@ -2,7 +2,7 @@
   "name": "x402check-snap",
   "version": "0.3.0",
   "private": true,
-  "description": "x402check pre-payment gate for MetaMask: signed-intent risk checks on every transaction and signature, before the user signs.",
+  "description": "x402check for MetaMask: decodes every transaction and signature locally and shows the real counterparty, amounts and local danger findings. Paid x402check verdicts are built in behind a flag; this version sends nothing.",
   "license": "MIT",
   "main": "dist/bundle.js",
   "files": [

@@ -1,5 +1,7 @@
 # Distribution drafts — ready to post
 
+> **Superseded pricing.** Since v0.3 there is no free tier. Every evaluation is paid per call via x402: $0.001, $0.002 on Solana, and $0.005 when a transaction is simulated. Drafts that mention free checks are out of date.
+>
 > **Superseded numbers.** Drafts 1–5 below quote the v5 evaluation (2026-09-27/28). An independent review found those corpora described their own risk, so v5 accuracy does not carry over to real traffic (see docs/EVIDENCE.md). If any draft was already posted, post draft 0 as a follow-up.
 
 ## 0. Correction / update comment (for x402 issue #3597 and PR #2300 threads)

@@ -18,7 +18,7 @@ Every verdict is an **ES256 attestation**. It states which checks the provider a
 
 [![x402check demo](https://i.ytimg.com/vi/MCOWk7nh5r8/hqdefault.jpg)](https://youtu.be/MCOWk7nh5r8)
 
-<sub>The demo video predates v0.2.0: its evidence slide shows v5 corpus numbers that [EVIDENCE.md](docs/EVIDENCE.md) supersedes.</sub>
+<sub>The demo video predates v0.2.0. Its evidence slide shows v5 corpus numbers that [EVIDENCE.md](docs/EVIDENCE.md) supersedes, and it predates the v0.3 layers (simulation, code fingerprints) and pricing (every evaluation is paid; there is no free tier).</sub>
 
 ## What it checks
 
@@ -42,9 +42,34 @@ Caller-supplied `screening` and `authorization` fields are recorded as `asserted
 
 ## Quickstart
 
+Every evaluation is paid per call with x402, so the call is made through an x402 client, which pays when it gets the 402 and retries.
+
+1. **See the price.** An unpaid call returns `402` with the accepted mainnet options in the `PAYMENT-REQUIRED` header:
+
+   ```bash
+   curl -si -X POST https://x402check.xyz/v1/risk-check -H "Content-Type: application/json" -d '{"wallet":"0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f","chain":"base"}' | head -1
+   # HTTP/2 402
+   ```
+
+2. **Pay and check.** Use the TypeScript SDK with an x402-paying fetch (see [Payments](#payments)), the [MCP server](#for-agents-sdk-and-mcp-server), or any x402 client:
+
+   ```ts
+   const verdict = await x402check.check({
+     wallet: "0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f",
+     chain: "eip155:1",
+     domain: "https://app.example-dapp.org",
+     context: "Permit2 signature: unlimited USDC allowance to this spender",
+     interaction: { type: "permit_signature", unlimited: true },
+     payment: { network: "eip155:1", asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", pay_to: "0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f" },
+   });
+   ```
+
+The same request as the raw body the client sends:
+
 ```bash
 curl -X POST https://x402check.xyz/v1/risk-check \
   -H "Content-Type: application/json" \
+  -H "PAYMENT-SIGNATURE: <x402 payment payload>" \
   -d '{
     "wallet": "0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f",
     "chain": "eip155:1",
@@ -63,7 +88,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \
   "categories": ["intent_risk", "behavioral", "approval_to_eoa", "new_address"],
   "provider": "did:web:x402check.xyz",
   "evidence": {
-    "sanctions": { "list": "ofac-sdn", "as_of": "2026-09-23", "status": "not_listed" },
+    "sanctions": { "list": "ofac-sdn", "as_of": "2026-09-29", "status": "not_listed" },
     "domain": { "host": "app.example-dapp.org", "registrable": "example-dapp.org", "official": false, "impersonation": "none", "signals": [] },
     "onchain": { "status": "ok", "network": "eip155:1", "is_contract": false, "activity": "none", "tx_count": 0 },
     "feeds": [{ "source": "metamask-phishing-detect", "kind": "domain", "as_of": "2026-09-29", "status": "clear" }, "…"],
@@ -75,7 +100,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \
 }
 ```
 
-To also check **what a transaction will do**, send it as `transaction`. The provider simulates it against the latest block and reports the net asset movements, the approvals granted, and any findings:
+To also check **what a transaction will do**, send it as `transaction` ($0.005 per simulated evaluation). The provider simulates it against the latest block and reports the net asset movements, the approvals granted, and any findings:
 
 ```bash
 curl -X POST https://x402check.xyz/v1/risk-check -H "Content-Type: application/json" -d '{
@@ -112,7 +137,6 @@ A compact JWS (`alg: ES256`, `typ: risk-check+jwt`, `kid: jev-attest-v1`), TTL 1
 | `iss`, `sub`, `iat`, `exp`, `jti` | issuer `did:web:x402check.xyz`, the subject wallet, times, unique id |
 | `score`, `tier`, `categories` | the verdict and the findings behind it |
 | `checks` | **what the provider verified**: `sanctions` (list, date, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`, including code-fingerprint sets), `simulation` (status, network, findings), `model` (question set, or `skipped`) |
-| `interaction` | the interaction type the verdict covers |
 | `asserted` | what the caller **claimed** (screening / pre-authorization): not verified |
 | `payment`, `interaction`, `aud` | what the verdict was issued for |
 | `input_hash` | SHA-256 over the canonical normalized inputs, sources and question set |
@@ -128,10 +152,12 @@ The verifier resolves the key from the issuer's `did:web` document and checks `a
 
 ## Wallet integration
 
-Check the **real counterparty**. For `approve`, a Permit2 signature or a Seaport order, that is the spender, operator or recipient decoded from the calldata or typed data, not the token contract. Send the interaction type too. The MetaMask Snap in `snap/` is a complete reference decoder.
+Check the **real counterparty**. For `approve`, a Permit2 signature or a Seaport order, that is the spender, operator or recipient decoded from the calldata or typed data, not the token contract. Send the interaction type too, and the transaction when you want it simulated. The MetaMask Snap in `snap/` is a complete reference decoder.
+
+The wallet (or its backend) pays each check with x402, so `payingFetch` below is a fetch wrapped with an x402 client, as in [Payments](#payments):
 
 ```js
-const res = await fetch("https://x402check.xyz/v1/risk-check", {
+const res = await payingFetch("https://x402check.xyz/v1/risk-check", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
@@ -142,7 +168,7 @@ const res = await fetch("https://x402check.xyz/v1/risk-check", {
     interaction: { type: "permit_signature", unlimited: true },
   }),
 });
-if (res.status !== 200) return showNotVerified(res.status);   // 402 = not paid (every check is paid via x402)
+if (res.status !== 200) return showNotVerified(res.status);   // 402 = payment not settled: never an all-clear
 const v = await res.json();
 if (!v.checked) return showNotVerified();                     // fail-closed, never an all-clear
 if (v.tier === "high" || v.tier === "critical") warnOrBlock(v);
@@ -182,7 +208,7 @@ const verdict = await x402check.check({ wallet: "0x…", chain: "base" });
 ## Architecture
 
 ```
-request ─► validate (422 names the field) ─► quota / x402 (per item) ─► Provider
+request ─► validate (422 names the field) ─► x402 payment (per item) ─► Provider
                                                                          │
       deterministic, provider-side ──────────────────────────────────────┤
         OFAC SDN screen ── listed? ──► score 0 · critical (no model call)│
@@ -193,18 +219,20 @@ request ─► validate (422 names the field) ─► quota / x402 (per item) ─
       model ─ Jev typed questions over provider checks + context ────────┤
       code  ─ weights, deterministic caps, tiers (src/scoring.ts) ───────┤
                                                                          ▼
-                          ES256 attestation: checks · asserted · payment · jti
+         settle payment ─► release ES256 attestation: checks · asserted · payment · jti
 ```
 
 Source layout:
 
-- `src/`: provider, validation, enrichment, scoring and JWS.
-- `deploy/`: the Cloudflare Worker (quota Durable Object, paywall, feeds). See [deploy/README.md](deploy/README.md).
+- `src/`: provider, validation, enrichment, simulation, code fingerprints, scoring and JWS.
+- `deploy/`: the Cloudflare Worker: the x402 paywall and pricing, facilitator routing, feed refresh and `/status`. See [deploy/README.md](deploy/README.md).
+- `packages/`: the TypeScript SDK (`client`) and the MCP server (`mcp`).
 - `snap/`: the MetaMask Snap.
-- `eval/`: evaluation layers.
-- `scripts/`: data refresh and the verifier.
+- `eval/`: evaluation layers and production probes.
+- `scripts/`: data refresh, the feeds publisher and the verifier.
+- `docs/`: [METHODOLOGY](docs/METHODOLOGY.md), [EVIDENCE](docs/EVIDENCE.md), [STRATEGY](docs/STRATEGY.md).
 
-## Evidence (v0.3.0)
+## Evidence (v0.3)
 
 | What | Result |
 |---|---|
@@ -221,6 +249,7 @@ Source layout:
 | Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
+| **Production, every evaluation paid and settled in USDC on Base** | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 · `security:v3` 8/8 |
 
 Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). How each verdict is formed, with every cap: [docs/METHODOLOGY.md](docs/METHODOLOGY.md). Earlier evidence documents are kept as historical records with correction notes.
 
@@ -230,7 +259,7 @@ Full methodology, confidence intervals and what each number does *not* show: [do
 npm install
 npm test                           # provider unit tests
 npm run typecheck                  # root + deploy + scripts + snap
-AI_GATEWAY_API_KEY=... npm start   # :8787 (or TYPESAFE_API_KEY=...)
+AI_GATEWAY_API_KEY=... npm start   # :8787 local dev server, no paywall (or TYPESAFE_API_KEY=...)
 curl localhost:8787/.well-known/risk-check.json
 npm run eval:suite -- --seed 200   # full evaluation (~$0.15 of model calls)
 ```
@@ -291,8 +320,10 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). OFAC and MetaMask are refr
 ## Roadmap
 
 1. Shadow real x402 facilitator traffic, moving the evidence from curated corpora to live flows.
-2. Fresher address intelligence: real-time drainer feeds and funding-source analytics for plain transfers; EIP-7702 sweeper detection.
-3. Valuation-aware simulation rules (price data), closing the "return a dust asset" evasion.
-4. Publish the Snap and request MetaMask allowlisting.
-5. KMS/HSM custody for the attestation key; key rotation with overlapping `kid`s.
-6. Kora `decision_provider` integration (issue #682); AP2 `RiskPayload` once upstream stabilizes.
+2. Proprietary drainer intelligence: scan new contract deployments for known drainer-kit code before any public list names them.
+3. Fresher address intelligence: real-time drainer feeds and funding-source analytics for plain transfers; EIP-7702 sweeper detection.
+4. Valuation-aware simulation rules (price data), closing the "return a dust asset" evasion.
+5. Batch and `upto` payment schemes, to spread settlement gas when facilitators stop sponsoring it.
+6. Wallet-side payment for the Snap, then publish it and request MetaMask allowlisting.
+7. KMS/HSM custody for the attestation key; key rotation with overlapping `kid`s.
+8. Kora `decision_provider` integration (issue #682); AP2 `RiskPayload` once upstream stabilizes.

@@ -74,8 +74,8 @@ def render():
         ("iss", "did:web:x402check.xyz", INK),
         ("sanctions", "ofac-sdn · not_listed", INK),
         ("feeds", "phishing lists · clear", INK),
-        ("onchain", "contract · active", INK),
-        ("asserted", "— (none)", MUTED),
+        ("simulation", "no hidden recipient", INK),
+        ("code", "no drainer kit", INK),
         ("score", "94 · low", GREEN),
     ]
     ry = cy + 72
@@ -85,8 +85,8 @@ def render():
         ry += 36
 
     # facts (what the evidence supports)
-    d.text((80, 520), "OFAC SDN · phishing & drainer feeds · approvals to plain wallets · injected intent", font=mono(18), fill=MUTED)
-    d.text((80, 556), "25 free/day · $0.001/evaluation · USDC on 7 mainnets via x402 · MIT open source", font=mono(18), fill=MUTED)
+    d.text((80, 520), "OFAC SDN · phishing & drainer feeds · transaction simulation · drainer-kit code", font=mono(18), fill=MUTED)
+    d.text((80, 556), "$0.001/evaluation · $0.005 with simulation · USDC via x402 on 7 mainnets · MIT", font=mono(18), fill=MUTED)
     img.save(OUT, optimize=True)
     return OUT
 
