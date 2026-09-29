@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-29T17:34:52.201Z",
+  "timestamp": "2026-09-29T19:05:35.088Z",
   "invalid_requests": 0,
   "sources": {
     "metamask": "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json",
@@ -49,7 +49,7 @@
         "known_scam_address": 30,
         "approval_to_eoa": 27,
         "new_address": 12,
-        "known_drainer_code": 2
+        "known_drainer_code": 3
       }
     },
     "B_scamsniffer_only_domain_feed_on": {
@@ -63,8 +63,8 @@
       "categories": {
         "impersonation": 60,
         "fraud_signal": 60,
-        "community_flagged_domain": 47,
-        "phishing_domain": 13
+        "community_flagged_domain": 43,
+        "phishing_domain": 17
       }
     },
     "C_heldout_drainer_permit": {
@@ -75,9 +75,9 @@
       "rate": "90.0% (95% CI 74.4–96.5%)",
       "tier_high_or_critical": "27/30",
       "misses": [
-        "ss:b0856be00b1b0878 → 81/low",
-        "ss:86b92e53622e292b → 81/low",
-        "ss:31c79be2535a3130 → 82/low"
+        "ss:b0856be00b1b0878 → 82/low",
+        "ss:86b92e53622e292b → 82/low",
+        "ss:31c79be2535a3130 → 81/low"
       ],
       "categories": {
         "approval_to_eoa": 27,
@@ -92,14 +92,14 @@
       "rate": "0.0% (95% CI 0.0–11.4%)",
       "tier_high_or_critical": "0/30",
       "misses": [
-        "ss:b820f2e93f271c10 → 95/low",
+        "ss:b820f2e93f271c10 → 94/low",
         "ss:54a96d6d7adec21b → 94/low",
-        "ss:b0856be00b1b0878 → 94/low",
+        "ss:b0856be00b1b0878 → 95/low",
         "ss:c0d55fdcee70e68d → 94/low",
-        "ss:c8f62354e4b980c1 → 94/low",
         "ss:86b92e53622e292b → 94/low",
-        "ss:d9bfeca2032f9346 → 94/low",
-        "ss:8b84bf7dcb5f2da3 → 94/low"
+        "ss:c8f62354e4b980c1 → 94/low",
+        "ss:d9bfeca2032f9346 → 95/low",
+        "ss:5413d03cf3ca7c80 → 95/low"
       ],
       "categories": {
         "new_address": 12
@@ -109,22 +109,22 @@
       "expected": "risky",
       "n": 60,
       "unchecked": 0,
-      "detected_below_60": "0/60",
-      "rate": "0.0% (95% CI 0.0–6.0%)",
-      "tier_high_or_critical": "0/60",
+      "detected_below_60": "4/60",
+      "rate": "6.7% (95% CI 2.6–15.9%)",
+      "tier_high_or_critical": "4/60",
       "misses": [
-        "ss:b4de761b1d180874 → 92/low",
-        "ss:2a62922b9e888e94 → 93/low",
-        "ss:d18ba33f39c56f47 → 92/low",
-        "ss:a0436cb01d9c98f4 → 92/low",
-        "ss:dbd32cadb82461e4 → 93/low",
-        "ss:2f7c7adad6cc4c84 → 92/low",
-        "ss:eaff26343daab394 → 70/medium",
-        "ss:e6c4760eb1404050 → 93/low"
+        "ss:a9de7f044d9eaa8b → 91/low",
+        "ss:b539f2ad84797649 → 93/low",
+        "ss:d1f2b948b55a16df → 63/medium",
+        "ss:aa5772a6504842a7 → 92/low",
+        "ss:2183474e250bdaa4 → 93/low",
+        "ss:bb3adeb7903e8dfe → 92/low",
+        "ss:1c8b087a9cc775e1 → 73/low",
+        "ss:47f9afa276df85f5 → 91/low"
       ],
       "categories": {
-        "fraud_signal": 10,
-        "impersonation": 2
+        "fraud_signal": 13,
+        "impersonation": 3
       }
     },
     "D_legit_address": {

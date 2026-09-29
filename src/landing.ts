@@ -210,7 +210,7 @@ const PAGE = `<!doctype html>
         <div class="ledger-cell"><b class="ok">43/100</b><span>listed drainer contracts recognized by earlier kits&rsquo; code at creation; 0/9,625 legit contracts matched</span></div>
         <div class="ledger-cell"><b class="ok">0/62</b><span>false positives on well-known contracts and top dApp domains</span></div>
         <div class="ledger-cell"><b>0.011%</b><span>of the Tranco top 200k domains capped by deterministic rules &mdash; mostly hosts on MetaMask&rsquo;s own list</span></div>
-        <div class="ledger-cell"><b>0&ndash;3/60</b><span>unlisted phishing domains caught without the feed &mdash; feeds do the heavy lifting</span></div>
+        <div class="ledger-cell"><b>0&ndash;4/60</b><span>unlisted phishing domains caught without the feed &mdash; feeds do the heavy lifting</span></div>
         <div class="ledger-cell"><b>0/30</b><span>plain transfers to unlisted drainers &mdash; not detectable from the address alone</span></div>
       </div>
     </div>

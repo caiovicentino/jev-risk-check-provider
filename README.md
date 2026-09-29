@@ -215,7 +215,7 @@ Source layout:
 | **Code fingerprints:** listed drainer contracts matched by earlier kits' code, at creation time | **43/100** |
 | **Code fingerprints:** legitimate contracts (latest blocks + CoinGecko tokens), following delegations and proxies | **0/9,625** matched |
 | Plain **transfers** to unlisted drainers | **0/30**: not detectable from the address alone |
-| Unlisted phishing domains without a feed | 0–3/60: feeds do the heavy lifting |
+| Unlisted phishing domains without a feed | 0–4/60 across four samples: feeds do the heavy lifting |
 | Well-known contracts and top dApp domains | 0 false positives (0/22, 0/40) |
 | Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |

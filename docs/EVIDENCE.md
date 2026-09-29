@@ -2,7 +2,7 @@
 
 All numbers were measured on 2026-09-29 on the v0.3.0 code:
 
-- the consolidated suite (`npm run eval:suite -- --seed 200`: question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, $0.145 of model calls, 244 s);
+- the consolidated suite (`npm run eval:suite -- --seed 200`: question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, $0.145 of model calls, 260 s), at the release commit;
 - the grounded layers with the Tranco scan (`TRANCO_LIST=top-1m.csv npm run eval:grounded -- --seed 200 --tranco-n 200000`, Tranco list of 2026-09-28);
 - two new layers that make no model calls, `eval/simulation.ts` and `eval/code-fingerprint.ts`;
 - local workerd runs of the production Worker, and production probes (§7).
@@ -32,7 +32,7 @@ Positives and negatives come from third-party sources. Held-out layers use a sam
 | B · feed coverage: ScamSniffer-only domains | ScamSniffer (not in MetaMask) | 60/60 flagged | 100% (94–100%) |
 | **C · held-out: drainer permits, feed OFF** | ScamSniffer addresses, feed disabled | **27/30** | **90% (74–97%)** |
 | **C · held-out: plain transfer to drainer, feed OFF** | same addresses, `native_transfer` | **0/30** | **0% (0–11%)** |
-| **C · held-out: unlisted phishing domain** | ScamSniffer-only domains, MetaMask feed only | **0/60** (1/60 in the suite run) | **0% (0–6%)** |
+| **C · held-out: unlisted phishing domain** | ScamSniffer-only domains, MetaMask feed only | **4/60** (0/60 and 1/60 in earlier v0.3 samples) | **6.7% (2.6–15.9%)** |
 | D · legit contracts and wallets (22) | Uniswap, Permit2, 1inch, Aave, Seaport, USDC/USDT/WETH, Jupiter, Raydium… | 22/22 passed, 0 high/critical | 100% (85–100%) |
 | D · top dApp domains (40) | curated list (app.uniswap.org, jup.ag, wallet.coinbase.com…) | 40/40 passed, 0 high/critical | 100% (91–100%) |
 | D · Tranco top 200k (deterministic only) | popularity list, no model calls | 22 capped / 199,996 | 0.011% (0.007–0.017%) |
@@ -42,7 +42,8 @@ What this supports:
 - **Feeds and the OFAC screen do the detection of known bad actors.** The deterministic caps are independent of model sampling.
 - **The approval-to-EOA rule generalizes.** 27/30 drainer spenders are plain wallets; the 3 misses are drainer *contracts*.
 - **Unknown drainers receiving a plain transfer are not detectable** from the address alone (0/30).
-- **Look-alike analysis plus the model does not replace a phishing feed.** Across three fresh samples of 60 unlisted phishing domains it caught 0–3; those domains mostly do not imitate a known brand.
+- **Look-alike analysis plus the model does not replace a phishing feed.** Across four fresh samples of 60 unlisted phishing domains it caught 0–4; those domains mostly do not imitate a known brand.
+- **Labels drift within a day.** MetaMask removed about 200 entries on 2026-09-29. A label cache from that morning scored one "miss" against the refreshed embedded list: a host MetaMask itself had delisted. With refreshed labels the layer is 40/40. Label snapshots are now refreshed before a canonical run.
 - **False-positive pressure is low.** The Tranco figure rose from 5 (v0.2, older Tranco snapshot) to 22 capped hosts:
   - 20 are on MetaMask's own list, which is refreshed daily now: `temporary.site`, `happymod.net`, `vanced.to` and other APK-mod, casino and DNS-tool sites;
   - 2 are strong look-alikes of crypto brands: `layerzro.ru` and `bitget.com.vn`.
@@ -119,13 +120,14 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | synthetic (mock model) | 53 | 100% (93–100%) | 0 | 0 | plumbing only |
 | shadow, production regime → gate | 53 | 100% (93–100%) | 0 | 0 | no caller screening; review share **0.0%**; gate **READY** |
 | shadow, legacy label-derived screening | 53 | 100% | 0 | 0 | comparison only (label leaked into input); review 9.4% |
-| scale (7 categories × 60) | 420 | 100% (99.1–100%) | 0 | 0 | stability 96% unanimous tier (24×5) |
-| red-team v6 corpus | 1,440 | 99.1% (98.5–99.5%) | 1 | 12 | 60 prose-only clearance claims held in the block band |
-| benchmark: provider | 225 | 99.1% (96.8–99.8%) | 0 | 2 | same described-scenario sample |
-| benchmark: gpt-4.1-mini chat judge | 225 | 99.6% (97.5–99.9%) | 0 | 1 | one-line prompt; **within noise of the provider** |
+| scale (7 categories × 60) | 420 | 100% (99.1–100%) | 0 | 0 | 1 unchecked; stability 91% unanimous tier (24×5) |
+| red-team v6 corpus | 1,440 | 99.2% (98.6–99.6%) | 3 | 8 | 60 prose-only clearance claims held in the block band |
+| benchmark: provider | 225 | 98.2% (95.5–99.3%) | 0 | 4 | same described-scenario sample |
+| benchmark: gpt-4.1-mini chat judge | 225 | 99.1% (96.8–99.8%) | 0 | 2 | one-line prompt; **within noise of the provider** |
 
 - The switch-over gate runs in the production regime: no caller `screening`, and the provider's own OFAC screen and feeds in the state.
 - The 53 "human-verified" labels were applied by the project owner to cases the project authored. They confirm that the authored intent was captured. They are not an independent ground truth.
+- **These rows are from the final run at the release commit.** An earlier run the same day gave 99.1%/FP 12 (red-team), 99.1% vs 99.6% (benchmark) and 96% stability. The model layer varies by about one point run to run, and the deterministic layers do not.
 - On described scenarios, a one-line chat judge performs as well as the provider ($0.0135 vs $0.0152 on this sample). The provider's differentiators are the layers a prompt cannot reproduce: provider-verified evidence (lists, simulation, code), typed and signed outputs, and deterministic caps.
 
 ## 6. What each number does NOT show

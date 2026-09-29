@@ -114,7 +114,7 @@ Anyone can verify it with the published JWKS (`scripts/verify-attest.ts` is a re
 ## 7. Known limits and negative results
 
 - **A plain transfer to an unknown drainer wallet is not detectable** from the address alone: 0/30 on held-out drainer addresses with feeds off. Only feeds catch these, and they lag.
-- **Unlisted phishing domains that imitate no brand** are mostly missed: 0–3 of 60 held out. A feed is required.
+- **Unlisted phishing domains that imitate no brand** are mostly missed: 0–4 of 60 held out across four samples. A feed is required.
 - **Code fingerprints generalize across kits, not across sources.** Fingerprints from Forta's 2023 labels match 15% of the contracts ScamSniffer lists today. A continuously updated set matches 43% of contracts at creation time. See `EVIDENCE.md`.
 - **Simulation runs against the latest block.** A replay that reverts or moves nothing today (spent approvals, drained balances) says nothing about the past. Historical replays need archive state, which the free public RPCs refuse.
 - **Simulation cannot see intent.** A drainer contract that keeps the funds itself and is source-verified is only caught by the code-fingerprint layer or by a feed.
