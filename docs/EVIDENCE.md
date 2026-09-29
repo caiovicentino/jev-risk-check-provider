@@ -3,7 +3,7 @@
 All numbers come from commit `1e27dff`:
 
 - the consolidated suite (`npm run eval:suite -- --seed 200`, 2026-09-29, question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, ~$0.15 of model calls, 265 s);
-- the production deployment `https://x402check.xyz`. `security:v2` ran on Worker `76bc1051`, and the other production suites on `2c3937fa`, which differs only in the Solana on-chain RPC default and the 2 s lookup ceiling. The current Worker is `161c912e` (§6): its fixes were verified in production with zero-cost probes, and locally on workerd and in unit tests for paths that need evaluations.
+- the production deployment `https://x402check.xyz`. `security:v2` ran on Worker `76bc1051`, and the other production suites on `2c3937fa`, which differs only in the Solana on-chain RPC default and the 2 s lookup ceiling. The review fixes (§6) shipped in `161c912e`, verified in production with zero-cost probes and locally on workerd and in unit tests for paths that need evaluations. The current Worker `e1b8da98` changes only landing copy on top of it.
 
 Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not. Every rate carries a Wilson 95% interval.
 

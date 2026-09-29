@@ -4,7 +4,7 @@
 - **Data:** 2026-09-29
 - **Base:** `7eaec6a`
 - **Resultado:** branch `independent-eval-fixes`, commits `fd0a14f` → `6caf5a4` + docs
-- **Produção:** Worker `2c3937fa` em `x402check.xyz`, com deploy feito e validado
+- **Produção:** Worker `e1b8da98` em `x402check.xyz`, com deploy feito e validado (correções da 2ª revisão desde `161c912e`)
 
 ## 1. O que a primeira revisão (`ANALYSIS-OPUS.md`) não pegou
 
