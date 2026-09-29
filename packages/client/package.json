@@ -1,0 +1,62 @@
+{
+  "name": "@x402check/client",
+  "version": "0.1.0",
+  "description": "Typed client and WebCrypto attestation verifier for x402check pre-payment risk checks (AI agents, wallets, x402).",
+  "license": "MIT",
+  "author": "Caio Vicentino",
+  "homepage": "https://x402check.xyz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caiovicentino/jev-risk-check-provider.git",
+    "directory": "packages/client"
+  },
+  "bugs": {
+    "url": "https://github.com/caiovicentino/jev-risk-check-provider/issues"
+  },
+  "keywords": [
+    "x402",
+    "x402check",
+    "risk-check",
+    "ai-agents",
+    "wallet",
+    "payments",
+    "sanctions",
+    "phishing",
+    "drainer",
+    "attestation",
+    "jws",
+    "did-web"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "tsx --test test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "name": "@x402check/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for x402check: pre-payment risk checks and verifiable attestations for AI agents, before they send funds, sign approvals/permits/orders, or pay an x402 invoice.",
+  "license": "MIT",
+  "author": "Caio Vicentino",
+  "homepage": "https://x402check.xyz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caiovicentino/jev-risk-check-provider.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/caiovicentino/jev-risk-check-provider/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "x402",
+    "x402check",
+    "risk-check",
+    "ai-agents",
+    "wallet",
+    "payments",
+    "sanctions",
+    "phishing",
+    "drainer",
+    "attestation"
+  ],
+  "type": "module",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "x402check-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build:client": "npm --prefix ../client run build",
+    "build": "npm run build:client && npm run clean && tsc -p tsconfig.json",
+    "pretypecheck": "npm run build:client",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "pretest": "npm run build",
+    "test": "tsx --test test/*.test.ts",
+    "start": "node dist/index.js",
+    "prepack": "npm run build",
+    "prepublishOnly": "node scripts/check-publish.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@x402check/client": "file:../client",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.3"
+  }
+}
