@@ -34,6 +34,8 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
     "@x402/evm": "^2.27.0",
     "@x402/fetch": "^2.27.0",
     "@x402/svm": "^2.27.0",
