@@ -14,7 +14,8 @@ export function genPayerKey(): { privatePem: string; publicPem: string; payerId:
   const priv = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
   const pub = publicKey.export({ format: "pem", type: "spki" }).toString();
   const raw = publicKey.export({ format: "der", type: "spki" });
-  const payerId = raw.subarray(-32).toString("hex").slice(0, 40);
+  // EVM-shaped payer id (0x + 20 bytes) so it passes the provider's address validation.
+  const payerId = `0x${raw.subarray(-32).toString("hex").slice(0, 40)}`;
   return { privatePem: priv, publicPem: pub, payerId };
 }
 

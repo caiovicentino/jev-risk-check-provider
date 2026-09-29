@@ -31,7 +31,7 @@ const server = createServer((req, res) => {
       JSON.stringify({
         x402Version: 2,
         error: "Payment required",
-        resource: { url: "http://localhost:8789/data", description: "market data feed", mimeType: "application/json" },
+        resource: { url: `http://localhost:${PORT}/data`, description: "market data feed", mimeType: "application/json" },
         accepts: [
           {
             scheme: "voucher-demo",
