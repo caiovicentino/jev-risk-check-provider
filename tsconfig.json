@@ -3,8 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -12,5 +16,17 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "eval/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "eval/**/*.ts",
+    "scripts/**/*.ts",
+    "deploy/**/*.ts",
+    "demo/**/*.ts"
+  ],
+  "exclude": [
+    "deploy/.wrangler",
+    "snap",
+    "node_modules"
+  ]
 }

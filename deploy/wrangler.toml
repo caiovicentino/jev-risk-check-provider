@@ -2,6 +2,12 @@ name = "x402check"
 main = "worker.ts"
 compatibility_date = "2026-09-01"
 
+# Embedded threat-feed hash sets (src/data/*.bin) are bundled as ArrayBuffer Data modules.
+[[rules]]
+type = "Data"
+globs = ["**/*.bin"]
+fallthrough = false
+
 routes = [
   { pattern = "x402check.xyz", custom_domain = true }
 ]

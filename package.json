@@ -1,6 +1,6 @@
 {
-  "name": "jev-risk-check-provider",
-  "version": "0.1.0",
+  "name": "x402check",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm --prefix snap run typecheck --silent",
     "test": "tsx --test test/*.test.ts",
     "shadow": "tsx eval/shadow.ts",
     "eval:synthetic": "tsx eval/run.ts",
@@ -25,7 +25,13 @@
     "board": "tsx eval/scoreboard.ts",
     "verify": "tsx eval/verify.ts",
     "security": "tsx eval/security.ts",
-    "security:full": "tsx eval/security-full.ts"
+    "security:full": "tsx eval/security-full.ts",
+    "eval:realistic": "tsx eval/realistic.ts",
+    "eval:grounded": "tsx eval/grounded.ts",
+    "security:v2": "tsx eval/security-v2.ts",
+    "feeds:update": "tsx scripts/update-threat-feeds.ts",
+    "ofac:update": "tsx scripts/update-ofac.ts",
+    "dev:worker": "cd deploy && wrangler dev --local"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -41,6 +47,7 @@
     "@x402/fetch": "^2.27.0",
     "@x402/svm": "^2.27.0",
     "ai": "^7.0.118",
+    "tldts": "^7.4.16",
     "viem": "^2.56.9"
   }
 }

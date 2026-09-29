@@ -67,23 +67,33 @@ export function extractInputs(req: RiskCheckRequest, answers: Record<string, Ans
   };
 }
 
-export const SCREENING_TRUST_MULTIPLIER = 0.2;
+export type ScoreOptions = {
+  /** Caller-asserted structured pre-authorization (recorded in the attestation as asserted). */
+  preAuthorized?: boolean;
+  /** Caller-asserted screening result "flagged" — can only raise risk. */
+  callerFlagged?: boolean;
+  /** Provider-side domain analysis verdict. */
+  impersonation?: "none" | "weak" | "strong";
+  /** Lowest cap imposed by deterministic provider evidence (feed hits, approval to an EOA). */
+  evidenceCap?: number;
+};
 
-export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DEFAULT_WEIGHTS, screeningClean = false, preAuthorized = false): ScoreBreakdown {
+// Caller-asserted "clean" screening deliberately has no effect on the score: a
+// self-reported mitigation must never lower risk (it previously scaled the sanctions
+// penalty by 0.2, which let any caller mint a low-risk attestation for a context
+// that described a sanctions listing).
+export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DEFAULT_WEIGHTS, opts: ScoreOptions = {}): ScoreBreakdown {
   const riskClassPenalty = weights.riskClass[inputs.riskClass] ?? weights.riskClass["unclassifiable"] ?? 10;
   const riskClassScaled = riskClassPenalty * inputs.riskClassProbability;
-  const sanctionsPenalty = screeningClean
-    ? weights.sanctionsConcern * inputs.sanctionsConcern * SCREENING_TRUST_MULTIPLIER
-    : weights.sanctionsConcern * inputs.sanctionsConcern;
 
   let penalty =
     weights.knownThreat * inputs.knownThreat +
-    sanctionsPenalty +
+    weights.sanctionsConcern * inputs.sanctionsConcern +
     weights.launderingPattern * inputs.launderingPattern +
     weights.riskyDomain * inputs.riskyDomain +
     weights.guardBypassAttempt * inputs.guardBypassAttempt +
     riskClassScaled;
-  const trust = preAuthorized ? Math.max(inputs.trust, 3) : inputs.trust;
+  const trust = opts.preAuthorized ? Math.max(inputs.trust, 3) : inputs.trust;
   penalty -= (trust - 2) * weights.trustPerLevel;
 
   let score = Math.round(100 - penalty);
@@ -99,6 +109,10 @@ export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DE
   if (inputs.guardBypassAttempt >= 0.8) score = Math.min(score, 30);
   if (inputs.riskClass === "automated_abuse" && inputs.riskClassProbability >= 0.8) score = Math.min(score, 55);
   if (inputs.riskClass === "fraud_signal" && inputs.riskClassProbability >= 0.8) score = Math.min(score, 40);
+  // Deterministic provider/integrator evidence, independent of model sampling.
+  if (opts.callerFlagged) score = Math.min(score, 30);
+  if (opts.impersonation === "strong") score = Math.min(score, 40);
+  if (opts.evidenceCap !== undefined) score = Math.min(score, opts.evidenceCap);
 
   score = Math.max(0, Math.min(100, score));
   return { score, tier: tierFor(score, inputs), cappedByLowConfidence, signals: inputs };
@@ -132,8 +146,30 @@ export function tierFor(score: number, inputs?: ScoringInputs): RiskTier {
   return "critical";
 }
 
-export function categoriesFor(inputs: ScoringInputs): string[] {
+export type CategoryFacts = {
+  callerFlagged?: boolean;
+  impersonation?: "none" | "weak" | "strong";
+  newAddress?: boolean;
+  phishingDomain?: boolean;
+  communityFlaggedDomain?: boolean;
+  knownScamAddress?: boolean;
+  approvalToEoa?: boolean;
+};
+
+/** Evaluated families (intent_risk, behavioral) plus the specific findings behind the verdict. */
+export function categoriesFor(inputs: ScoringInputs, facts: CategoryFacts = {}): string[] {
   const categories = ["intent_risk", "behavioral"];
-  if (inputs.sanctionsConcern > 0.3) categories.push("compliance_risk");
+  if (inputs.sanctionsConcern > 0.3 || facts.callerFlagged) categories.push("compliance_risk");
+  if (facts.impersonation === "strong" || inputs.riskyDomain >= 0.5) categories.push("impersonation");
+  if (inputs.guardBypassAttempt >= 0.5) categories.push("guard_bypass");
+  if (inputs.launderingPattern >= 0.5) categories.push("laundering_pattern");
+  if (inputs.knownThreat >= 0.5) categories.push("known_threat");
+  if (inputs.riskClass === "automated_abuse" && inputs.riskClassProbability >= 0.5) categories.push("automated_abuse");
+  if (inputs.riskClass === "fraud_signal" && inputs.riskClassProbability >= 0.5) categories.push("fraud_signal");
+  if (facts.phishingDomain) categories.push("phishing_domain");
+  if (facts.communityFlaggedDomain) categories.push("community_flagged_domain");
+  if (facts.knownScamAddress) categories.push("known_scam_address");
+  if (facts.approvalToEoa) categories.push("approval_to_eoa");
+  if (facts.newAddress) categories.push("new_address");
   return categories;
 }

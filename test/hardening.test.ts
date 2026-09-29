@@ -56,7 +56,7 @@ test("batch with any invalid item is rejected wholesale with its index", async (
   const { handle } = handlerWith(stub(FULL));
   const res = await handle(post("/v1/risk-check/batch", { requests: [{ wallet: WALLET }, { wallet: 123 }, { wallet: WALLET }] }));
   assert.equal(res.status, 422);
-  assert.deepEqual(await res.json(), { error: "invalid_request", index: 1 });
+  assert.deepEqual(await res.json(), { error: "invalid_request", field: "wallet", index: 1 });
   const big = await handle(post("/v1/risk-check/batch", { requests: Array.from({ length: 26 }, () => ({ wallet: 1 })) }));
   assert.equal(big.status, 413);
 });

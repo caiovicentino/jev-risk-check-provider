@@ -50,7 +50,9 @@ test("serves discovery document", async () => {
     assert.equal(doc.endpoint, "/v1/risk-check");
     assert.equal(doc.batch_endpoint, "/v1/risk-check/batch");
     assert.equal(doc.attestation?.algorithm, "ES256");
-    assert.ok(doc.chains_supported?.includes("solana"));
+    assert.ok(doc.chains_supported?.includes("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"));
+    assert.equal(doc.name, "x402check");
+    assert.ok(doc.data_sources?.ofac_sdn?.includes("SDN"));
   } finally {
     await srv.close();
   }

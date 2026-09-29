@@ -1,50 +1,81 @@
-# Deploy — public provider with did:web identity
+# Deploy — Cloudflare Worker with did:web identity
 
-## Status
+**Live:** `https://x402check.xyz` — `did:web:x402check.xyz`
 
-**LIVE** (2026-09-28): `https://x402check.xyz` — `did:web:x402check.xyz`
+| Route | What |
+|---|---|
+| `POST /v1/risk-check` | single evaluation. Free tier, then x402 |
+| `POST /v1/risk-check/batch` | up to 25 evaluations. Billed and counted per item |
+| `GET /.well-known/risk-check.json` | discovery: pricing networks, data sources, attestation claims |
+| `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation key (`kid jev-attest-v1`), `did:web` document |
+| `GET /healthz` | liveness + `freeEvalsToday`. Edge-cached 60 s so it cannot hammer the quota Durable Object |
 
-- `POST /v1/risk-check` — x402-protected (see below), free tier via `X-Risk-Check-Free`
-- `POST /v1/risk-check/batch` — batch endpoint, same pricing
-- `GET /.well-known/jwks.json` — stable EC P-256 key (kid `jev-attest-v1`)
-- `GET /.well-known/did.json` — DID document (`did:web:x402check.xyz`, QUORUM-resolvable)
-- `GET /.well-known/risk-check.json` — discovery document
-- Paywall: `@x402/core` v2 SDK. **Mainnet live**: Base USDC (`eip155:8453`) + Solana USDC (`solana:5eykt4Us...`) via the PayAI facilitator (keyless; CDP is the key-based upgrade — same slot via `X402_FACILITATOR_URL_MAINNET`). Testnets (Base Sepolia, Solana Devnet) via x402.org fallback. One facilitator covers all four networks; `initialize()` validates routes against facilitator kinds at deploy.
+## Layout
 
-## Steps to go live (once authenticated)
+- `worker.ts` — entry point: routing, CORS, `/healthz`, embedded MetaMask feed (a `.bin` Data module), `RateCounter` export
+- `protected.ts` — paid and free-tier flow: validate → quota → pay → evaluate → settle → release
+- `counter.ts` — `RateCounter` Durable Object (SQLite). Atomic per-key daily counters with a cost per request; admission budgets for new client ids
+- `feeds.ts` — ScamSniffer blobs read from KV at runtime (GPL-3.0 data: never bundled or committed)
+- `runtime.ts` — minimal Workers types, so `deploy/` type-checks with the rest of the repo (`npm run typecheck`)
+
+## Request flow (protected routes)
+
+1. **Validate first.** Read the body (≤ 64 KiB), parse it, validate it (`src/validate.ts`). Invalid input gets `422 {error, field[, index]}` or `413` and costs no free slot and no payment.
+2. **Free tier.** Units = 1 per evaluation, so a batch of *n* costs *n*.
+   - With `X-Risk-Check-Client`, the id is charged against its own daily allowance. The first sighting of an id must also fit the per-/64 (10/day) and global (1000/day) new-client budgets.
+   - If the id is refused or exhausted, the IP allowance is used instead, so draining the global budget cannot lock real users out.
+   - IP keys use the full IPv4 address. IPv6 keys use the **/64**.
+   - Response headers: `X-Risk-Check-Free: true` and `X-Risk-Check-Free-Remaining`.
+3. **Paid.** The x402 price is unit × units (`adapter.getBody()` exposes the validated body to the SDK's dynamic price). Flow: verify → evaluate → **settle** → release. If settlement fails the response is `402 payment_settlement_failed` and no attestation is returned.
+4. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
+
+## Secrets and variables
 
 ```bash
-npm i -g wrangler
-wrangler login            # or: export CLOUDFLARE_API_TOKEN=...
-
-# secrets (never committed)
+cd deploy
 wrangler secret put AI_GATEWAY_API_KEY          # or TYPESAFE_API_KEY
-wrangler secret put JEV_ATTEST_PRIVATE_KEY      # PEM (sec1 EC P-256) — reuse the SAME key across deploys so JWKS stays stable
-wrangler secret put JEV_ATTEST_PUBLIC_JWK       # the matching public JWK (kty/crv/x/y/kid/alg/use) — MUST match the private PEM
-
-NOTE: the public JWK must be derived from the private PEM at key-creation time:
-
-    openssl ec -in jev-attest.pem -pubout  # then export the JWK via node:crypto
-    # NEVER publish a generated-at-runtime publicJwk next to a stored private PEM:
-    # the published key and the signing key must be the same key pair.
-
-wrangler deploy --config deploy/wrangler.toml
+wrangler secret put JEV_ATTEST_PRIVATE_KEY      # PEM: SEC1 "EC PRIVATE KEY" or PKCS#8 — keep it stable
+wrangler secret put JEV_ATTEST_PUBLIC_JWK       # the matching public JWK (kty/crv/x/y/kid/alg/use)
 ```
 
-Then:
+The public JWK must be derived from the private PEM:
 
-1. Point `PROVIDER_HOST` (in `deploy/wrangler.toml` `[vars]`) at your real domain.
-2. Route `/.well-known/jwks.json` on that domain (worker route or reverse proxy).
-3. The provider DID becomes `did:web:<your-domain>` — anyone can verify attestations against the published JWKS.
-4. Publish the discovery URL in `PaymentRequired.extensions["risk-check"].info.risk_check_url` of any x402 resource server.
+```bash
+node -e 'const c=require("crypto");const k=c.createPublicKey(require("fs").readFileSync("jev-attest.pem","utf8")).export({format:"jwk"});console.log(JSON.stringify({kty:"EC",crv:"P-256",x:k.x,y:k.y,kid:"jev-attest-v1",alg:"ES256",use:"sig"}))'
+```
 
-## Key management note (important)
+Keep the PEM outside the repository with `chmod 600`. Without the secret, the Worker falls back to an ephemeral key, which is demo-only: attestations stop verifying across isolates.
 
-`loadKeyPair` in `deploy/worker.ts` imports `JEV_ATTEST_PRIVATE_KEY` from the Worker secret when present; without it, it generates an ephemeral key (demo-only — attestations become unverifiable across isolate restarts). For production:
+Optional variables:
 
-- generate once: `openssl ecparam -genkey -name prime256v1 -noout -out jev-attest.pem`
-- store as a Worker secret; the JWKS is then stable and `did:web` verification works from anywhere.
+| Variable | Effect |
+|---|---|
+| `ENABLE_TESTNETS` | `"true"` adds testnet payments (staging only) |
+| `ONCHAIN` | `"off"` disables provider-side JSON-RPC lookups |
+| `RPC_URLS` | JSON `{caip2: url}` overriding the public RPCs in `src/onchain.ts` |
+| `SOL_RPC_URL_MAINNET` | Solana RPC for on-chain facts and x402 Solana settlement |
+| `FREE_TIER_DAILY` | free evaluations per caller per day (default 25) |
 
-## Alternative hosts
+## Threat feeds
 
-The same handler runs anywhere with a fetch handler (Deno Deploy, Bun, Node behind a reverse proxy). No framework, no dependencies beyond the `ai` SDK.
+```bash
+npm run ofac:update                                  # OFAC SDN → src/data/ofac-sdn.ts (commit it)
+npm run feeds:update                                 # MetaMask list → src/data/*.bin + threat-feeds.ts (commit it)
+npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer → KV (binding RATE), 3 writes
+```
+
+- OFAC and MetaMask are embedded, so a data refresh ships with a deploy.
+- ScamSniffer lives only in KV and is picked up within an hour. Refresh it daily; the public data already lags 7 days.
+- Every attestation states the date and status of each list it consulted (`checks.sanctions`, `checks.feeds`).
+
+## Deploy, validate, roll back
+
+```bash
+npm test && npm run typecheck
+X402CHECK_BASE=http://localhost:8799 npm run security:v2      # against `wrangler dev --local --port 8799`
+cd deploy && wrangler deploy
+npm run security:v2 && npm run prod                            # against production
+wrangler rollback                                              # previous version, if anything regresses
+```
+
+Add `IPV6_A=<addr> IPV6_B=<addr in the same /64>` to `npm run security:v2` to prove the /64 quota aggregation from a real IPv6 host.

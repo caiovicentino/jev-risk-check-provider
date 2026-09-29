@@ -3,6 +3,8 @@ import { GatewayJevClient } from "./backends/gateway.js";
 import { Provider } from "./provider.js";
 import { generateKeyPair } from "./jws.js";
 import { startServer } from "./server.js";
+import { createOnchainLookup } from "./onchain.js";
+import { loadFeedsFromDisk } from "./feeds-node.js";
 
 const typesafeKey = process.env.TYPESAFE_API_KEY;
 const gatewayKey = process.env.AI_GATEWAY_API_KEY;
@@ -22,7 +24,11 @@ if (!jev) {
   console.log(`JEV backend: ${typesafeKey ? "typesafe-direct" : "vercel-ai-gateway"}`);
 }
 
-const provider = new Provider({ host, keyPair: generateKeyPair("jev-attest-v1"), jev });
+// On-chain facts are on by default; ONCHAIN=off disables them (e.g. offline runs).
+const onchain = process.env.ONCHAIN === "off" ? null : createOnchainLookup({ timeoutMs: Number(process.env.ONCHAIN_TIMEOUT_MS ?? 1500) });
+
+const feeds = loadFeedsFromDisk();
+const provider = new Provider({ host, keyPair: generateKeyPair("jev-attest-v1"), jev, onchain, feeds: () => feeds });
 
 startServer({ provider, port });
-console.log(`jev-risk-check-provider listening on :${port} (host=${host}, jev=${jev ? "enabled" : "disabled"})`);
+console.log(`x402check provider listening on :${port} (host=${host}, jev=${jev ? "enabled" : "disabled"}, onchain=${onchain ? "on" : "off"})`);

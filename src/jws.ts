@@ -32,7 +32,8 @@ export function generateKeyPair(kid: string): KeyPair {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
   const jwk = publicKey.export({ format: "jwk" }) as { kty: string; crv: string; x: string; y: string };
   return {
-    privatePem: privateKey.export({ format: "pem", type: "sec1" }).toString(),
+    // PKCS#8 is the most portable PEM (workerd rejects an ephemeral SEC1 export).
+    privatePem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
     publicJwk: {
       kty: "EC",
       crv: "P-256",
@@ -49,6 +50,15 @@ export function jwksDocument(kid: string, jwk: Jwk): { keys: Jwk[] } {
   return { keys: [{ ...jwk, kid }] };
 }
 
+export type AttestationChecks = {
+  sanctions: { list: string; as_of: string; status: string };
+  domain?: { host: string; impersonation: string } | undefined;
+  onchain: { status: string; network?: string | undefined; activity?: string | undefined };
+  /** Threat feeds consulted, as "source@as_of:status". */
+  feeds?: string[] | undefined;
+  model: string;
+};
+
 export type JwsClaims = {
   iss: string;
   sub: string;
@@ -56,19 +66,29 @@ export type JwsClaims = {
   tier: string;
   iat: number;
   exp: number;
+  jti?: string | undefined;
   aud?: string | undefined;
   categories?: string[] | undefined;
   input_hash?: string | undefined;
+  /** What the provider itself verified for this verdict. */
+  checks?: AttestationChecks | undefined;
+  /** Self-reported by the caller; NOT verified by the provider. */
   asserted?: { screening?: string; pre_authorized?: boolean } | undefined;
+  /** The concrete payment this verdict was issued for, when the caller bound one. */
+  payment?: Record<string, string> | undefined;
+  /** Interaction type the verdict was issued for (wallet integrations). */
+  interaction?: string | undefined;
 };
 
 export function signJws(claims: JwsClaims, kid: string, privatePem: string): string {
   const header = { alg: "ES256", typ: "risk-check+jwt", kid };
   const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claims))}`;
+  // Pass the PEM string (workerd's node:crypto does not accept KeyObjects here) with the
+  // encoding taken from its header: SEC1 "EC PRIVATE KEY" (production secret) or PKCS#8.
   const signature = nodeSign("SHA256", Buffer.from(signingInput), {
     key: privatePem,
     format: "pem",
-    type: "sec1",
+    type: privatePem.includes("BEGIN EC PRIVATE KEY") ? "sec1" : "pkcs8",
     dsaEncoding: "ieee-p1363",
   });
   return `${signingInput}.${base64url(signature)}`;
@@ -106,7 +126,15 @@ export function verifyJws(jws: string, jwk: Jwk): JwsClaims | null {
   }
 }
 
+/** Deterministic JSON: object keys sorted at every depth, undefined members dropped. */
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? "null" : canonicalJson(v))).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
+}
+
 export function inputHash(input: Record<string, unknown>): string {
-  const canonical = JSON.stringify(input, Object.keys(input).sort());
-  return createHash("sha256").update(canonical).digest("hex");
+  return createHash("sha256").update(canonicalJson(input)).digest("hex");
 }

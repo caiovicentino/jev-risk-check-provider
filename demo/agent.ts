@@ -4,6 +4,9 @@ import type { Jwk } from "../src/jws.js";
 const RESOURCE = process.env.RESOURCE_URL ?? "http://localhost:8789/data";
 const FACILITATOR = process.env.FACILITATOR_URL ?? "http://localhost:8788/verify";
 const PROVIDER_CHECK = process.env.PROVIDER_CHECK_URL ?? "http://localhost:8787/v1/risk-check";
+// Trust anchor pinned to the provider the agent chose — never the jwks_url a facilitator
+// (or any other intermediary) hands back alongside the attestation.
+const PINNED_JWKS = process.env.PROVIDER_JWKS_URL ?? new URL("/.well-known/jwks.json", PROVIDER_CHECK).toString();
 
 export type AgentKey = { privatePem: string; publicPem: string; payerId: string };
 
@@ -80,10 +83,16 @@ export async function runAgent(key: AgentKey, scenario: AgentScenario): Promise<
   if (rc) console.log(`[facilitator] risk-check: score=${rc.score} tier=${rc.tier}`);
 
   if (verification.isValid && rc?.jws) {
-    const jwksRes = await fetch(rc.jwks_url as string);
+    const jwksRes = await fetch(PINNED_JWKS);
     const jwks = (await jwksRes.json()) as { keys: Jwk[] };
-    const claims = verifyJws(rc.jws, jwks.keys[0] as Jwk);
-    console.log(`[agent] attestation JWS verified independently against JWKS: score=${claims?.score} tier=${claims?.tier} iss=${claims?.iss}`);
+    const kid = JSON.parse(Buffer.from(rc.jws.split(".")[0] ?? "", "base64url").toString("utf8")).kid as string | undefined;
+    const key = jwks.keys.find((k) => k.kid === kid);
+    const claims = key ? verifyJws(rc.jws, key) : null;
+    if (!claims || claims.exp <= Math.floor(Date.now() / 1000)) {
+      console.log("[agent] attestation failed verification against the pinned provider key — refusing to proceed");
+      return;
+    }
+    console.log(`[agent] attestation verified against the pinned provider JWKS (${PINNED_JWKS}): score=${claims.score} tier=${claims.tier} iss=${claims.iss}`);
     const dataRes = await fetch(RESOURCE, { headers: { "X-Payment-Verified": "1" } });
     console.log(`[agent] resource response: ${dataRes.status} — ${await dataRes.text()}`);
   } else {

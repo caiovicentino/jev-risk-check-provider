@@ -32,9 +32,11 @@ export function startServer(deps: ServerDeps): { close: () => Promise<void> } {
         res.end(Buffer.from(body));
       })
       .catch((err) => {
+        // Log server-side only; never echo internal errors to the caller.
+        console.error("internal_error", err);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ error: "internal_error", detail: String(err) }));
+        res.end(JSON.stringify({ error: "internal_error" }));
       });
   });
   server.listen(deps.port);

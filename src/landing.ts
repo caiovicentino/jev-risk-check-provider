@@ -4,7 +4,7 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>x402check — payer-intent risk checks for x402 agent commerce</title>
-<meta name="description" content="One question before you settle an agent's payment: is the payer's intent legitimate? Signed, typed risk checks with fail-closed defaults — $0.001 per evaluation, 25 free per day.">
+<meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, approval-to-wallet detection and injected-instruction analysis — as signed, verifiable attestations. $0.001 per evaluation, 25 free per day.">
 <link rel="canonical" href="https://x402check.xyz/">
 <meta name="theme-color" content="#fcfcfa">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%239945ff'/%3E%3Cstop offset='1' stop-color='%2314f195'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='monospace' font-size='34' font-weight='bold' text-anchor='middle' fill='%230a0b10'%3Ex%3C/text%3E%3C/svg%3E">
@@ -12,7 +12,7 @@ const PAGE = `<!doctype html>
 <meta property="og:site_name" content="x402check">
 <meta property="og:url" content="https://x402check.xyz/">
 <meta property="og:title" content="x402check — payer-intent risk checks for x402 agent commerce">
-<meta property="og:description" content="One question before you settle an agent's payment: is the payer's intent legitimate? Signed, typed risk checks with fail-closed defaults — $0.001 per evaluation, 25 free per day.">
+<meta property="og:description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, approval-to-wallet detection and injected-instruction analysis — signed, verifiable, fail-closed.">
 <meta property="og:image" content="https://x402check.xyz/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -142,8 +142,8 @@ const PAGE = `<!doctype html>
   <div class="hero">
     <div>
       <div class="kicker">x402 trust-provider &middot; risk-check extension &middot; reference implementation</div>
-      <h1>One question before you settle an agent's payment: is the payer's intent legitimate?</h1>
-      <p class="lede">x402check answers it with a <b>typed decision</b> from a calibrated decision model, scored by deterministic code, and returned as a <b>signed attestation</b> anyone can verify. ~400&nbsp;ms, $0.001, fail-closed.</p>
+      <h1>Check the counterparty before an agent or a wallet pays.</h1>
+      <p class="lede">x402check screens the address against the <b>OFAC SDN list</b> and curated <b>phishing / drainer feeds</b>, flags look-alike domains and <b>approvals granted to plain wallets</b>, and reads the content the agent acted on for <b>injected instructions</b>. Every verdict is a <b>signed attestation</b> that states which checks actually ran. ~0.5&nbsp;s, $0.001, fail-closed.</p>
       <div class="cta-row">
         <a class="cta solid" href="#integrate">Integrate in 5 minutes</a>
         <a class="cta line" href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">Read the evidence</a>
@@ -165,125 +165,106 @@ const PAGE = `<!doctype html>
   </div>
 
   <section id="what">
-    <div class="sec-head"><span class="sec-no">01</span><h2>What it answers</h2></div>
+    <div class="sec-head"><span class="sec-no">01</span><h2>What it checks &mdash; and what it cannot</h2></div>
     <div class="cols">
-      <div class="item"><h3><em>Injection</em> &middot; guard bypass</h3>
-        <p>Injected instructions in context, tool outputs asking the agent to sign unknown spends, skill-file payloads routed through trusted channels, and direct attempts to disable the payment guard.</p></div>
-      <div class="item"><h3><em>Impersonation</em> &middot; social engineering</h3>
-        <p>Homoglyph domains (coinbase-wa11et, jup1ter-audit), purchased audit certificates, wallet-restore helper scams, deadline pressure on treasury movements.</p></div>
-      <div class="item"><h3><em>Laundering</em> &middot; sanctions</h3>
-        <p>Peel chains, mixer hops, structuring under reporting thresholds, counterparties on screening lists, no-KYC exchange clusters.</p></div>
-      <div class="item"><h3><em>Abuse</em> &middot; scale patterns</h3>
-        <p>Fresh wallets issuing thousands of identical sub-cent payments, coupon-farming wallet rotation, sybil campaigns — the failure modes specific to micropayment commerce.</p></div>
+      <div class="item"><h3><em>Sanctions</em> &middot; OFAC SDN</h3>
+        <p>Deterministic screen of the address against the official OFAC SDN digital-currency list (EVM, Solana, Tron, Bitcoin&hellip;). A listed address gets a signed critical verdict without any model call. Direct listing only &mdash; not a compliance control.</p></div>
+      <div class="item"><h3><em>Phishing</em> &middot; drainers</h3>
+        <p>MetaMask&rsquo;s eth-phishing-detect list (embedded) and ScamSniffer&rsquo;s drainer addresses, plus our own look-alike analysis: leet and IDN homoglyphs, typosquats, brand&nbsp;+&nbsp;lure names, official domains reused as subdomains.</p></div>
+      <div class="item"><h3><em>Approvals</em> &middot; on-chain facts</h3>
+        <p>Approvals and permits normally go to contracts. Granting a plain wallet (EOA) control over tokens is a classic drainer pattern &mdash; detected from the chain itself, not from what the caller says.</p></div>
+      <div class="item"><h3><em>Injected intent</em> &middot; guard bypass</h3>
+        <p>When the agent passes the content it acted on (tool output, page text, skill file), a typed model flags instructions that try to redirect funds or disable the payment guard.</p></div>
     </div>
+    <p class="note"><b>Not detected:</b> an unknown drainer address that is not on a feed, when the user simply sends it funds; phishing sites not yet on a feed that do not imitate a known brand; laundering or abuse patterns (the provider has no transaction-graph data &mdash; it only sees what the chain and the feeds say). A clean verdict means &ldquo;none of these checks fired&rdquo;, not &ldquo;safe&rdquo;.</p>
   </section>
 
   <section id="how">
     <div class="sec-head"><span class="sec-no">02</span><h2>How it works</h2></div>
     <div class="cols">
-      <div class="item"><h3>Typed decisions, not prose</h3>
-        <p>A decision model (TypeSafe Jev, System One) answers typed questions — probabilities, choices, calibrated scores. Deterministic code composes them into one number. The model never re-interprets its own policy.</p></div>
-      <div class="item"><h3>Structured evidence over claims</h3>
-        <p>"Already screened, proceeding" is scored as an unverified claim — which is what an attacker would say. Only structured <span class="mono" style="font-size:13px">screening</span> and <span class="mono" style="font-size:13px">authorization</span> fields move policy; prose never does.</p></div>
-      <div class="item"><h3>Signed, verifiable verdicts</h3>
-        <p>Every decision ships as an ES256 JWS from <span class="mono" style="font-size:13px">did:web:x402check.xyz</span>. Any resource server — or QUORUM aggregator — can verify it against the public JWKS without trusting us.</p></div>
+      <div class="item"><h3>Deterministic evidence first</h3>
+        <p>Sanctions, feeds, domain analysis and on-chain facts are computed by code and cap the score on their own. The model (TypeSafe Jev, typed questions) can only add risk from the content; weights and caps live in open-source code.</p></div>
+      <div class="item"><h3>Caller claims stay claims</h3>
+        <p>A caller&rsquo;s <span class="mono" style="font-size:13px">screening</span> or <span class="mono" style="font-size:13px">authorization</span> fields are recorded as <span class="mono" style="font-size:13px">asserted</span> in the attestation and can never lower the score. Prose like &ldquo;already screened&rdquo; is treated the same way.</p></div>
+      <div class="item"><h3>Signed, scoped verdicts</h3>
+        <p>ES256 JWS from <span class="mono" style="font-size:13px">did:web:x402check.xyz</span> with <span class="mono" style="font-size:13px">checks</span> (what the provider verified), optional <span class="mono" style="font-size:13px">payment</span> and <span class="mono" style="font-size:13px">aud</span> binding, and a unique <span class="mono" style="font-size:13px">jti</span>. Pin the issuer&rsquo;s key &mdash; never a key URL carried in a response.</p></div>
       <div class="item"><h3>Fail-closed by construction</h3>
-        <p>Model unreachable → <span class="mono" style="font-size:13px">checked: false</span>, settlement does not proceed. Low-confidence answers are capped, uncertainty routes to review — never to a silent allow.</p></div>
+        <p>Model or feed unavailable &rarr; stated in the evidence; model unreachable &rarr; <span class="mono" style="font-size:13px">checked: false</span>, never a fabricated score. Settlement happens before a paid result is released.</p></div>
     </div>
   </section>
 
   <section id="evidence">
-    <div class="sec-head"><span class="sec-no">03</span><h2>Evidence, not claims</h2></div>
+    <div class="sec-head"><span class="sec-no">03</span><h2>Evidence with external labels</h2></div>
     <div class="ledger">
       <div class="ledger-row">
-        <div class="ledger-cell"><b class="ok">53/53</b><span>human-verified checks, 100% agreement with authored labels</span></div>
-        <div class="ledger-cell"><b class="ok">99.8%</b><span>accuracy on 540 live calls, threshold sweep 65–75</span></div>
-        <div class="ledger-cell"><b class="ok">0</b><span>false negatives over 7,500+ adversarial cases</span></div>
-        <div class="ledger-cell"><b>98.8%</b><span>inter-rater reliability, blind vs anchored framing</span></div>
-        <div class="ledger-cell"><b>~400ms</b><span>p50 latency, gateway backend</span></div>
-        <div class="ledger-cell"><b>$0.001</b><span>per evaluation, settled in x402 USDC</span></div>
+        <div class="ledger-cell"><b class="ok">24/24</b><span>OFAC SDN addresses (4 chains) &rarr; critical, deterministic</span></div>
+        <div class="ledger-cell"><b class="ok">29/30</b><span>drainer permits caught with the drainer feed <i>turned off</i> (approval-to-wallet rule)</span></div>
+        <div class="ledger-cell"><b class="ok">0/62</b><span>false positives on well-known contracts and top dApp domains</span></div>
+        <div class="ledger-cell"><b>0.003%</b><span>of the Tranco top 200k domains capped by deterministic rules</span></div>
+        <div class="ledger-cell"><b>3/60</b><span>unlisted phishing domains caught without the feed &mdash; feeds do the heavy lifting</span></div>
+        <div class="ledger-cell"><b>0/30</b><span>plain transfers to unlisted drainers &mdash; not detectable from the address alone</span></div>
       </div>
     </div>
-    <p class="note">Methodology is public and reproducible: 5-iteration red-team loop (1,500 adversarial cases per iteration), benchmark against a chat-judge baseline, meta-eval with probability gating, and a human-verified switch-over gate. <a href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">docs/EVIDENCE.md</a></p>
+    <p class="note">Labels come from sources this project did not author (OFAC, MetaMask and ScamSniffer lists, well-known production contracts, Tranco). Held-out numbers use samples never inspected during development. The earlier 99&ndash;100% figures were measured on corpora whose context text described the risk; with an attacker-written context the same cases are mostly not detectable &mdash; see <a href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">docs/EVIDENCE.md</a>.</p>
   </section>
 
   <section id="integrate">
     <div class="sec-head"><span class="sec-no">04</span><h2>Integration</h2></div>
     <pre>
-<span class="cm"># Evaluate — the first 100 calls per day are free, no payment needed</span>
+<span class="cm"># 25 free evaluations per day per caller (a batch of n costs n), then x402</span>
 curl -X POST https://x402check.xyz/v1/risk-check \\
   -H <span class="g">"Content-Type: application/json"</span> \\
   -d '{
-    "wallet": "7Xf2...pvFh",
-    "chain": "solana",
-    "domain": "api.merchant-labs.com",
-    "context": "agent pays $0.05 voucher for a pricing API call",
-    "screening":     { "sanctions": "clean" },
-    "authorization": { "pre_authorized": true, "source": "user-dashboard" }
+    "wallet": "0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f",   <span class="cm">// counterparty (spender / recipient)</span>
+    "chain": "eip155:1",
+    "domain": "https://app.example-dapp.org",
+    "context": "Permit2 signature: unlimited USDC allowance to this spender",
+    "interaction": { "type": "permit_signature", "unlimited": true },
+    "payment": { "network": "eip155:1", "asset": "0xA0b8...eB48", "pay_to": "0x7a3e...6e7f" }
   }'
 
-<span class="cm"># Response — the decision plus its signed attestation</span>
+<span class="cm"># Response — verdict, provider-observed evidence, signed attestation</span>
 {
-  "checked": true,
-  "score": 99,                <span class="cm">// 0–100 · block below your min_score (we suggest 65)</span>
-  "tier": "low",              <span class="cm">// low · medium (review) · high · critical</span>
-  "provider": "did:web:x402check.xyz",
-  "jws": "eyJhbGciOiJFUzI1Ni...", <span class="cm">// ES256 attestation, TTL 1h</span>
+  "checked": true, "score": 40, "tier": "high",
+  "categories": ["intent_risk", "behavioral", "approval_to_eoa", "new_address"],
+  "evidence": { "sanctions": { "status": "not_listed", "as_of": "..." },
+                "onchain": { "is_contract": false, "activity": "none" }, "feeds": [ ... ] },
+  "jws": "eyJhbGciOiJFUzI1Ni...",   <span class="cm">// ES256, TTL 1h — verify against did:web:x402check.xyz</span>
   "checked_at": "...", "expires_at": "..."
 }
 
-<span class="cm"># Verify the attestation with any JWS library — signature is r||s (ieee-p1363)</span>
-curl https://x402check.xyz/.well-known/jwks.json
-
-<span class="cm"># Past the free tier, the endpoint speaks x402: a 402 response carries the</span>
-<span class="cm"># payment options (Base USDC, Solana USDC). Pay with any x402 client.</span>
+<span class="cm"># Verify: npx tsx scripts/verify-attest.ts &lt;jws&gt; --issuer did:web:x402check.xyz</span>
+<span class="cm"># Past the free tier the endpoint speaks x402: the 402 carries mainnet USDC options.</span>
     </pre>
   </section>
 
   <section id="wallets">
     <div class="sec-head"><span class="sec-no">05</span><h2>Wallets: check before signing</h2></div>
     <div class="cols">
-      <div class="item"><h3>One call before the signature</h3>
-        <p>Wallets, extensions and dApps gate every outgoing payment: score the counterparty wallet (and domain, if any) with one CORS-open fetch. No signup, no API keys.</p></div>
+      <div class="item"><h3>Decode, then check the real counterparty</h3>
+        <p>For an <span class="mono" style="font-size:13px">approve</span>, a Permit2 signature or a Seaport order, the counterparty is the spender, operator or recipient inside the calldata or typed data &mdash; not the token contract. Send that address and the interaction type.</p></div>
       <div class="item"><h3>Fail-closed UX, tiered copy</h3>
-        <p>Check unavailable &rarr; hold the transaction. Tiered warnings out of the box: badge, amber caution, red warning, hard block with user override. Batch endpoint scans up to 25 counterparties in one call.</p></div>
-      <div class="item"><h3>Free for end users</h3>
-        <p>The 25/day free tier per caller covers wallet traffic. Heavy integrations pay per check over x402 in the same wallets they already manage.</p></div>
+        <p>Check unavailable or quota used up &rarr; say &ldquo;not verified&rdquo;, never all-clear. Tiers map to badge, amber caution, red warning and hard block with override. <span class="mono" style="font-size:13px">X-Risk-Check-Free-Remaining</span> reports the daily allowance.</p></div>
+      <div class="item"><h3>MetaMask Snap (preview)</h3>
+        <p>Open-source Snap with <span class="mono" style="font-size:13px">onTransaction</span> / <span class="mono" style="font-size:13px">onSignature</span> insights and a privacy notice on install. Not yet published to npm nor allowlisted by MetaMask: build it from source and load it in MetaMask Flask.</p></div>
       <div class="item"><h3>Verifiable, not vibes</h3>
-        <p>Every warning ships as an ES256 attestation. Users and auditors verify it against did:web:x402check.xyz without trusting the wallet &mdash; or us.</p></div>
+        <p>Every warning ships as an ES256 attestation listing the checks behind it. Users and auditors verify it against did:web:x402check.xyz without trusting the wallet &mdash; or us.</p></div>
     </div>
     <div class="cta-row" style="margin-top: 10px;">
-      <a class="cta solid" id="snap-install" href="#">Add x402check to MetaMask</a>
-      <span class="video-cap" style="margin: 0;">Snaps: onTransaction + onSignature &middot; fail-closed &middot; free tier per install</span>
+      <a class="cta line" href="https://github.com/caiovicentino/jev-risk-check-provider#metamask-snap-preview">Build the Snap from source</a>
     </div>
-    <script>
-      (function () {
-        var btn = document.getElementById("snap-install");
-        if (!btn) return;
-        btn.addEventListener("click", function (e) {
-          e.preventDefault();
-          var eth = window.ethereum;
-          if (!eth || !eth.request) { btn.textContent = "MetaMask not detected"; return; }
-          btn.textContent = "Requesting install…";
-          eth.request({ method: "wallet_requestSnaps", params: { "npm:x402check-snap": {} } })
-            .then(function () { btn.textContent = "Installed — your next transaction gets a signed verdict"; })
-            .catch(function (err) { btn.textContent = "Install failed: " + String(err && err.message ? err.message : err).slice(0, 60); });
-        });
-      })();
-    </script>
   </section>
 
   <section id="pricing">
     <div class="sec-head"><span class="sec-no">06</span><h2>Pricing &amp; identity</h2></div>
     <table>
       <tr><th></th><th></th></tr>
-      <tr><td>Free tier</td><td>25 evaluations per day, per caller — enough for an integration build-out</td></tr>
-      <tr><td>Paid</td><td>$0.001 per evaluation, settled with x402 — <b>Base USDC and Solana USDC on mainnet</b> (gas sponsored, zero facilitator fee), plus testnets</td></tr>
-      <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> — <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
-      <tr><td>Engine</td><td>TypeSafe Jev System One for intent; deterministic scoring in open-source code (MIT)</td></tr>
-<tr><td>Networks</td><td>Accepts USDC settlement across the x402 networks: EVM chains (Base, Polygon, Arbitrum, Avalanche, Monad, Sei) and Solana, mainnet + testnet</td></tr>
+      <tr><td>Free tier</td><td>25 evaluations per day per caller (IPv6 counted per /64); a batch of n uses n</td></tr>
+      <tr><td>Paid</td><td>$0.001 per evaluation ($0.002 on Solana), batch billed per item, USDC via x402 on mainnet &mdash; Base, Polygon, Arbitrum, Avalanche, Monad, Sei, Solana</td></tr>
+      <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> &mdash; <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
+      <tr><td>Data</td><td>OFAC SDN (U.S. Treasury), MetaMask eth-phishing-detect, ScamSniffer (runtime), public JSON-RPC &mdash; see THIRD_PARTY_NOTICES.md</td></tr>
+      <tr><td>Engine</td><td>Deterministic checks and scoring in open-source code (MIT); TypeSafe Jev System One for content intent</td></tr>
     </table>
-<p class="note"><b>Payment networks live:</b> Base, Solana, Polygon, Arbitrum, Avalanche, Monad and Sei on mainnet — plus Base Sepolia, Arbitrum Sepolia and Solana Devnet testnets — all settling USDC via x402 with any client (agent wallets, SDKs). The facilitator verifies the buyer's signed authorization and submits the transfer onchain; buyer funds move directly to the provider wallet, and the facilitator never holds them.</p>
   </section>
 
   <section id="demo">

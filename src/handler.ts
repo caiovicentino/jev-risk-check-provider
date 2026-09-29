@@ -1,58 +1,12 @@
-import { discoveryDocument, Provider } from "./provider.js";
+import { discoveryDocument, Provider, type PricingInfo } from "./provider.js";
 import { jwksDocument } from "./jws.js";
 import { landingPage, OG_PNG_B64 } from "./landing.js";
-import type { RiskCheckRequest } from "./types.js";
-
-const MAX_BATCH = 25;
-// Every string field is forwarded into the model state; cap each one so a single
-// paid/free call cannot amplify model cost or smuggle a long injection payload.
-const MAX_FIELD_LEN = { chain: 64, domain: 253, context: 4096, aud: 256, source: 128 } as const;
+import { validateBatch, validateRequest } from "./validate.js";
 
 export type HandlerDeps = {
   provider: Provider;
+  pricing?: PricingInfo | undefined;
 };
-
-function validateRequest(body: unknown): RiskCheckRequest | null {
-  if (!body || typeof body !== "object") return null;
-  const obj = body as Record<string, unknown>;
-  if (typeof obj.wallet !== "string" || obj.wallet.trim().length === 0) return null;
-  const trimmed = obj.wallet.trim();
-  if (trimmed.length > 96) return null;
-  if (obj.wallet !== trimmed) return null;
-  if (/[\u0000-\u001f\u007f\u200b-\u200f\u2060\u202a-\u202e]/.test(trimmed)) return null;
-  // The wallet is copied into the model state, so restrict it to address-shaped
-  // characters only: 0x-hex (EVM/aptos), base58 (Solana), CAIP ids, no prose.
-  if (!/^[A-Za-z0-9:+_-]{20,96}$/.test(trimmed)) return null;
-  for (const field of ["chain", "domain", "context", "aud"] as const) {
-    if (obj[field] === undefined) continue;
-    if (typeof obj[field] !== "string") return null;
-    if ((obj[field] as string).length > MAX_FIELD_LEN[field]) return null;
-  }
-  let screening: RiskCheckRequest["screening"];
-  if (obj.screening && typeof obj.screening === "object") {
-    const s = obj.screening as Record<string, unknown>;
-    if (s.sanctions === "clean" || s.sanctions === "flagged" || s.sanctions === "unknown") {
-      screening = { sanctions: s.sanctions };
-    }
-  }
-  let authorization: RiskCheckRequest["authorization"];
-  if (obj.authorization && typeof obj.authorization === "object") {
-    const a = obj.authorization as Record<string, unknown>;
-    if (typeof a.pre_authorized === "boolean") {
-      if (typeof a.source === "string" && a.source.length > MAX_FIELD_LEN.source) return null;
-      authorization = { pre_authorized: a.pre_authorized, source: typeof a.source === "string" ? a.source : undefined };
-    }
-  }
-  return {
-    wallet: trimmed,
-    chain: obj.chain as string | undefined,
-    domain: obj.domain as string | undefined,
-    context: obj.context as string | undefined,
-    aud: obj.aud as string | undefined,
-    screening,
-    authorization,
-  };
-}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -108,7 +62,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     const path = url.pathname;
 
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/risk-check.json") {
-      return json(200, discoveryDocument(deps.provider.host));
+      return json(200, discoveryDocument(deps.provider.host, deps.pricing));
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/jwks.json") {
       return json(200, jwksDocument(deps.provider.keyPair.publicJwk.kid, deps.provider.keyPair.publicJwk));
@@ -117,28 +71,15 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       return json(200, didDocument(deps.provider.host, deps.provider.keyPair.publicJwk as unknown as Record<string, unknown>));
     }
     if (req.method === "POST" && path === "/v1/risk-check") {
-      const parsed = validateRequest(await readJson(req));
-      if (!parsed) return json(422, { error: "invalid_request" });
-      const evaluation = await deps.provider.evaluate(parsed);
+      const v = validateRequest(await readJson(req));
+      if (!v.ok) return json(422, { error: "invalid_request", field: v.field });
+      const evaluation = await deps.provider.evaluate(v.value);
       return json(200, evaluation.result);
     }
     if (req.method === "POST" && path === "/v1/risk-check/batch") {
-      const body = await readJson(req);
-      if (!body || typeof body !== "object" || !Array.isArray((body as { requests?: unknown }).requests)) {
-        return json(422, { error: "invalid_request" });
-      }
-      const raw = (body as { requests: unknown[] }).requests;
-      if (raw.length === 0) return json(422, { error: "invalid_request" });
-      if (raw.length > MAX_BATCH) return json(413, { error: "batch_too_large", max: MAX_BATCH });
-      // All-or-nothing: results carry no wallet field, so silently dropping an invalid
-      // item would shift results[i] onto the wrong request.
-      const requests: RiskCheckRequest[] = [];
-      for (let i = 0; i < raw.length; i++) {
-        const r = validateRequest(raw[i]);
-        if (!r) return json(422, { error: "invalid_request", index: i });
-        requests.push(r);
-      }
-      const results = await Promise.all(requests.map((r) => deps.provider.evaluate(r)));
+      const v = validateBatch(await readJson(req));
+      if (!v.ok) return json(v.status, v.body);
+      const results = await Promise.all(v.value.map((r) => deps.provider.evaluate(r)));
       return json(200, { results: results.map((e) => e.result) });
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/" ) {
@@ -146,7 +87,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       if (accept.includes("text/html")) {
         return new Response(landingPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
-      return json(200, discoveryDocument(deps.provider.host));
+      return json(200, discoveryDocument(deps.provider.host, deps.pricing));
     }
     if (req.method === "GET" && path === "/og.png") {
       return new Response(Uint8Array.from(atob(OG_PNG_B64), (ch) => ch.charCodeAt(0)), {

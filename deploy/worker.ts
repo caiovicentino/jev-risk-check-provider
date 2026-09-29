@@ -1,385 +1,68 @@
-import { generateKeyPair, type KeyPair } from "../src/jws.js";
-import { Provider } from "../src/provider.js";
-import { GatewayJevClient } from "../src/backends/gateway.js";
-import { JevClient } from "../src/jev.js";
-import { createHandler, type HandlerDeps } from "../src/handler.js";
-import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
-import { x402HTTPResourceServer, type HTTPAdapter, type HTTPRequestContext, type HTTPProcessResult, type HTTPResponseInstructions, type PaymentOption } from "@x402/core/http";
-import { ExactEvmScheme } from "@x402/evm/exact/server";
-import { ExactSvmScheme } from "@x402/svm/exact/server";
+import { handleProtected, ensureStack, doTotal, json, PROTECTED } from "./protected.js";
+import { createHandler } from "../src/handler.js";
+import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
+import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
+import { loadScamSniffer } from "./feeds.js";
+import type { ExecutionContext, WorkerEnv } from "./runtime.js";
+// Bundled as a Wrangler Data module (see [[rules]] in wrangler.toml).
+import metamaskPhishing from "../src/data/metamask-phishing.bin";
 
-interface KVNamespace {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
-}
+export { RateCounter } from "./counter.js";
 
-export type WorkerEnv = {
-  PROVIDER_HOST?: string;
-  TYPESAFE_API_KEY?: string;
-  AI_GATEWAY_API_KEY?: string;
-  JEV_ATTEST_PRIVATE_KEY?: string;
-  JEV_ATTEST_PUBLIC_JWK?: string;
-  PAY_TO_EVM?: string;
-  PAY_TO_SOL?: string;
-  X402_FACILITATOR_URL?: string;
-  FREE_TIER_DAILY?: string;
-  SOL_RPC_URL?: string;
-  SOL_RPC_URL_MAINNET?: string;
-  X402_FACILITATOR_URL_MAINNET?: string;
-  X402_FACILITATOR_URL_PAYAI?: string;
-  RATE?: KVNamespace;
-  COUNTER?: DurableObjectNamespace;
-};
+declare const caches: { default: { match(req: Request): Promise<Response | undefined>; put(req: Request, res: Response): Promise<void> } } | undefined;
 
-export class RateCounter {
-  private state: DurableObjectState;
-  private ready = false;
-  constructor(state: DurableObjectState, _env: WorkerEnv) {
-    this.state = state;
-  }
-  private init(day: string): void {
-    const sql = (this.state.storage as unknown as { sql: { exec: (q: string, ...p: unknown[]) => { toArray: () => unknown[] } } }).sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS counters (k TEXT PRIMARY KEY, used INTEGER NOT NULL, day TEXT NOT NULL)`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS totals (day TEXT PRIMARY KEY, total INTEGER NOT NULL)`);
-    sql.exec(`DELETE FROM counters WHERE day != ?`, day);
-    sql.exec(`DELETE FROM totals WHERE day != ?`, day);
-    this.ready = true;
-  }
-  async fetch(request: Request): Promise<Response> {
-    const body = (await request.json()) as {
-      op: "consume" | "total";
-      key?: string;
-      day: string;
-      daily?: number;
-      countTotal?: boolean;
-      admit?: { key: string; daily: number }[];
-    };
-    const day = body.day;
-    this.init(day);
-    const sql = (this.state.storage as unknown as { sql: { exec: (q: string, ...p: unknown[]) => { toArray: () => unknown[] } } }).sql;
-    if (body.op === "total") {
-      const rows = sql.exec(`SELECT total FROM totals WHERE day = ?`, day).toArray();
-      const total = rows.length ? Number((rows[0] as { total: number }).total) : 0;
-      return Response.json({ total });
-    }
-    const key = String(body.key ?? "unknown");
-    const daily = Number(body.daily ?? 25);
-    // First sighting of `key` today must also fit every admission budget (e.g. the
-    // global new-client budget). DO requests run serially, so check-then-charge is atomic.
-    if (body.admit?.length && sql.exec(`SELECT 1 FROM counters WHERE k = ?`, key).toArray().length === 0) {
-      for (const b of body.admit) {
-        const rows = sql.exec(`SELECT used FROM counters WHERE k = ?`, b.key).toArray();
-        if (rows.length && Number((rows[0] as { used: number }).used) >= b.daily) {
-          return Response.json({ allowed: false, remaining: 0, total: 0 });
-        }
-      }
-      for (const b of body.admit) {
-        sql.exec(`INSERT INTO counters (k, used, day) VALUES (?, 1, ?) ON CONFLICT(k) DO UPDATE SET used = counters.used + 1`, b.key, day);
-      }
-    }
-    const upd = sql.exec(
-      `INSERT INTO counters (k, used, day) VALUES (?, 1, ?)
-       ON CONFLICT(k) DO UPDATE SET used = counters.used + 1
-       WHERE counters.used < ?
-       RETURNING used`,
-      key, day, daily,
-    ).toArray();
-    const allowed = upd.length > 0;
-    const usedRow = sql.exec(`SELECT used FROM counters WHERE k = ?`, key).toArray();
-    const used = usedRow.length ? Number((usedRow[0] as { used: number }).used) : 0;
-    const countTotal = body.countTotal !== false;
-    let total = 0;
-    if (allowed && countTotal) {
-      const t = sql.exec(
-        `INSERT INTO totals (day, total) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET total = totals.total + 1 RETURNING total`,
-        day,
-      ).toArray();
-      total = t.length ? Number((t[0] as { total: number }).total) : 1;
-    } else {
-      const t = sql.exec(`SELECT total FROM totals WHERE day = ?`, day).toArray();
-      total = t.length ? Number((t[0] as { total: number }).total) : 0;
-    }
-    return Response.json({ allowed, remaining: Math.max(0, daily - used), total });
-  }
-}
+const METAMASK = { set: hashSetFromBytes(metamaskPhishing), as_of: METAMASK_FEED_META.as_of };
+const METAMASK_ALLOW = new Set(METAMASK_ALLOWLIST);
 
-const PROTECTED = new Set(["/v1/risk-check", "/v1/risk-check/batch"]);
-const DEFAULT_FACILITATOR = "https://x402.org/facilitator";
-const DEFAULT_MAINNET_FACILITATOR = "https://x402.dexter.cash";
-const DEFAULT_PAYAI_FACILITATOR = "https://facilitator.payai.network";
-const BASE_MAINNET = "eip155:8453";
-const BASE_SEPOLIA = "eip155:84532";
-const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
-const SOLANA_DEVNET = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
-
-type Stack = {
-  deps: HandlerDeps;
-  http: x402HTTPResourceServer;
-  envKey: string;
-  initError?: string;
-};
-
-let cached: Stack | null = null;
-let cachedPromise: Promise<Stack> | null = null;
-
-function loadKeyPair(env: WorkerEnv): KeyPair {
-  if (env.JEV_ATTEST_PRIVATE_KEY && env.JEV_ATTEST_PUBLIC_JWK) {
-    const jwk = JSON.parse(env.JEV_ATTEST_PUBLIC_JWK) as KeyPair["publicJwk"];
-    if (jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string") {
-      return { privatePem: env.JEV_ATTEST_PRIVATE_KEY, publicJwk: jwk };
-    }
-  }
-  return generateKeyPair("jev-attest-v1");
-}
-
-function buildStack(env: WorkerEnv): Stack {
-  const host = env.PROVIDER_HOST ?? "x402check.xyz";
-  const jev = env.TYPESAFE_API_KEY
-    ? new JevClient({ apiKey: env.TYPESAFE_API_KEY })
-    : env.AI_GATEWAY_API_KEY
-      ? new GatewayJevClient()
-      : null;
-  const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev }) };
-
-  const payToEvm = env.PAY_TO_EVM ?? "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178";
-  const payToSol = env.PAY_TO_SOL ?? "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X";
-  const facilitators = [
-    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR }),
-    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_PAYAI ?? DEFAULT_PAYAI_FACILITATOR }),
-    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL ?? DEFAULT_FACILITATOR }),
-  ];
-  const resourceServer = new x402ResourceServer(facilitators);
-  resourceServer.register("eip155:*", new ExactEvmScheme());
-  resourceServer.register(SOLANA_MAINNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL_MAINNET ?? "https://api.mainnet-beta.solana.com" }));
-  resourceServer.register(SOLANA_DEVNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL ?? "https://api.devnet.solana.com" }));
-
-  // Dynamic pricing (SDK v2 DynamicPrice): single = unit price; batch = per item,
-  // so 25 checks cannot be bought for the price of one.
-  const makePrice = (unit: number) => (ctx: HTTPRequestContext): string => {
-    if (!ctx.path.endsWith("/batch")) return `$${unit.toFixed(3)}`;
-    let n = 1;
-    try {
-      const body = ctx.adapter.getBody?.() as { requests?: unknown } | undefined;
-      if (body && Array.isArray(body.requests)) n = body.requests.length;
-    } catch {
-      n = 1;
-    }
-    const count = Math.min(25, Math.max(1, n));
-    return `$${(unit * count).toFixed(3)}`;
-  };
-  const accepts: PaymentOption[] = [
-    { scheme: "exact", network: BASE_MAINNET, payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: "eip155:137", payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: "eip155:42161", payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: "eip155:43114", payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: "eip155:143", payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: "eip155:1329", payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: makePrice(0.002) },
-    { scheme: "exact", network: BASE_SEPOLIA, payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: "eip155:421614", payTo: payToEvm, price: makePrice(0.001) },
-    { scheme: "exact", network: SOLANA_DEVNET, payTo: payToSol, price: makePrice(0.001) },
-  ];
-  const routes = {
-    "POST /v1/risk-check": {
-      accepts,
-      description: "JEV payer-intent risk check with signed attestation",
-      mimeType: "application/json",
-    },
-    "POST /v1/risk-check/batch": {
-      accepts,
-      description: "Batch risk check (up to 25 requests per call, priced per item)",
-      mimeType: "application/json",
-    },
-  };
-  const http = new x402HTTPResourceServer(resourceServer, routes);
-  return { deps, http, envKey: JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI]) };
-}
-
-async function ensureStack(env: WorkerEnv): Promise<Stack> {
-  const envKey = buildStackCacheKey(env);
-  if (cached && cached.envKey === envKey) return cached;
-  if (!cachedPromise || cachedPromise.envKey !== envKey) {
-    const p = buildStack(env);
-    cachedPromise = Object.assign((async () => {
-      try {
-        await p.http.initialize();
-      } catch (err) {
-        p.initError = String(err);
-      }
-      return p;
-    })(), { envKey });
-  }
-  const stack = await cachedPromise;
-  if (stack.envKey === envKey) cached = stack;
-  return stack;
-}
-
-function buildStackCacheKey(env: WorkerEnv): string {
-  return JSON.stringify([env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI]);
-}
-
-function fetchAdapter(request: Request): HTTPAdapter {
-  return {
-    getHeader: (name) => request.headers.get(name) ?? undefined,
-    getMethod: () => request.method,
-    getPath: () => new URL(request.url).pathname,
-    getUrl: () => request.url,
-    getAcceptHeader: () => request.headers.get("accept") ?? "*/*",
-    getUserAgent: () => request.headers.get("user-agent") ?? "",
-  };
-}
-
-function instructionsToResponse(instr: HTTPResponseInstructions): Response {
-  return new Response(typeof instr.body === "string" ? instr.body : JSON.stringify(instr.body), {
-    status: instr.status,
-    headers: instr.headers,
-  });
-}
-
-const NEW_CLIENT_BUDGET_DAILY = 1000;
-// Caps how many fresh client ids one IP can mint per day, so a single caller cannot
-// rotate X-Risk-Check-Client to drain the global new-client budget.
-const NEW_CLIENTS_PER_IP_DAILY = 10;
-
-type ConsumeResult = { allowed: boolean; remaining: number };
-
-async function doConsume(env: WorkerEnv, key: string, daily: number, countTotal = true, admit?: { key: string; daily: number }[]): Promise<ConsumeResult | null> {
-  if (!env.COUNTER) return null;
-  const day = new Date().toISOString().slice(0, 10);
-  try {
-    const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
-    const res = await stub.fetch("https://counter/consume", {
-      method: "POST",
-      body: JSON.stringify({ op: "consume", key, day, daily, countTotal, ...(admit ? { admit } : {}) }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { allowed: boolean; remaining: number };
-    return { allowed: data.allowed, remaining: data.remaining };
-  } catch {
-    return null;
-  }
-}
-
-async function doTotal(env: WorkerEnv): Promise<number | null> {
-  if (!env.COUNTER) return null;
-  const day = new Date().toISOString().slice(0, 10);
-  try {
-    const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
-    const res = await stub.fetch("https://counter/total", {
-      method: "POST",
-      body: JSON.stringify({ op: "total", day }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { total: number };
-    return data.total;
-  } catch {
-    return null;
-  }
-}
-
-async function freeQuota(env: WorkerEnv, ip: string): Promise<number> {
-  const daily = Number(env.FREE_TIER_DAILY ?? "25");
-  if (!Number.isFinite(daily) || daily <= 0) return 0;
-  const viaDo = await doConsume(env, `ip:${ip}`, daily);
-  if (viaDo) return viaDo.allowed ? viaDo.remaining : 0;
-  return 0;
-}
-
-async function clientQuota(env: WorkerEnv, clientId: string, ip: string): Promise<number> {
-  const daily = Number(env.FREE_TIER_DAILY ?? "25");
-  if (!Number.isFinite(daily) || daily <= 0) return 0;
-  const viaDo = await doConsume(env, `client:${clientId}`, daily, true, [
-    { key: "client-new:global", daily: NEW_CLIENT_BUDGET_DAILY },
-    { key: `client-new-ip:${ip}`, daily: NEW_CLIENTS_PER_IP_DAILY },
-  ]);
-  if (viaDo) return viaDo.allowed ? viaDo.remaining : 0;
-  return 0;
-}
-
-async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
-  const paymentHeader = request.headers.get("PAYMENT-SIGNATURE") ?? request.headers.get("X-PAYMENT");
-  const forcePaid = (request.headers.get("X-Risk-Check-Paid") ?? "").trim().length > 0;
-  if (!paymentHeader && !forcePaid) {
-    const clientId = (request.headers.get("X-Risk-Check-Client") ?? "").trim();
-    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-    const remaining = clientId
-      ? await clientQuota(env, clientId.slice(0, 64), ip)
-      : await freeQuota(env, ip);
-    if (remaining > 0) {
-      const res = await serve(request);
-      res.headers.set("X-Risk-Check-Free", "true");
-      return res;
-    }
-  }
-  const ctx: HTTPRequestContext = {
-    adapter: fetchAdapter(request),
-    path: new URL(request.url).pathname,
-    method: request.method,
-    paymentHeader: paymentHeader ?? undefined,
-  };
-  let result: HTTPProcessResult;
-  try {
-    result = await stack.http.processHTTPRequest(ctx);
-  } catch {
-    return Response.json({ error: "payment_processing_failed" }, { status: 500 });
-  }
-  if (result.type === "payment-error") return instructionsToResponse(result.response);
-  if (result.type === "no-payment-required") {
-    return Response.json({ error: "payment_required" }, { status: 402 });
-  }
-  const res = await serve(request);
-  if (res.status !== 200) return res;
-  // Settle before releasing the result: a payload that verifies but cannot settle
-  // (replayed authorization, funds moved between verify and settle) must not
-  // receive a signed attestation.
-  let reason = "settlement_failed";
-  try {
-    const settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
-    if (settle.success) {
-      for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
-      return res;
-    }
-    reason = settle.errorReason ?? reason;
-  } catch {
-    // fall through to 402
-  }
-  return Response.json({ error: "payment_settlement_failed" }, { status: 402, headers: { "X-Payment-Error": reason } });
+function feedsFor(env: WorkerEnv): () => Promise<ThreatIntelFeeds> {
+  return async () => ({ metamaskDomains: METAMASK, metamaskAllow: METAMASK_ALLOW, ...(await loadScamSniffer(env)) });
 }
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Accept, PAYMENT-SIGNATURE, X-PAYMENT, X-Risk-Check-Paid, X-Risk-Check-Client",
-  "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, PAYMENT-REQUIRED, X-Risk-Check-Free, X-Payment-Error",
+  "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, PAYMENT-REQUIRED, X-Risk-Check-Free, X-Risk-Check-Free-Remaining, X-Payment-Error",
   "Access-Control-Max-Age": "86400",
 };
 
+const HEALTH_CACHE_KEY = "https://x402check.internal/healthz";
+
+// Public and unauthenticated: served from the edge cache (60s) so it cannot be used
+// to hammer the single quota Durable Object that every free request depends on.
+async function healthz(env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const key = new Request(HEALTH_CACHE_KEY);
+  const hit = cache ? await cache.match(key) : undefined;
+  if (hit) return new Response(hit.body, hit);
+  const total = await doTotal(env);
+  const res = json(200, total === null ? { ok: true } : { ok: true, freeEvalsToday: total }, { "Cache-Control": "public, max-age=60" });
+  if (cache) {
+    const put = cache.put(key, res.clone());
+    if (ctx) ctx.waitUntil(put);
+    else await put;
+  }
+  return res;
+}
+
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
-    const stack = await ensureStack(env);
     const path = new URL(request.url).pathname;
     let res: Response;
     if (request.method === "GET" && path === "/healthz") {
-      const viaDo = await doTotal(env);
-      if (viaDo !== null) return Response.json({ ok: true, freeEvalsToday: viaDo });
-      if (env.RATE) {
-        const day = new Date().toISOString().slice(0, 10);
-        const freeEvalsToday = Number((await env.RATE.get(`free-total:${day}`)) ?? "0");
-        return Response.json({ ok: true, freeEvalsToday });
-      }
-      return Response.json({ ok: true });
-    }
-    if (PROTECTED.has(path)) {
-      if (request.method !== "POST") {
-        res = Response.json({ error: "method_not_allowed" }, { status: 405 });
-      } else {
-        res = await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
-      }
+      res = await healthz(env, ctx);
     } else {
-      res = await createHandler(stack.deps)(request);
+      const stack = await ensureStack(env, feedsFor(env));
+      if (PROTECTED.has(path)) {
+        res = request.method !== "POST"
+          ? json(405, { error: "method_not_allowed" })
+          : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
+      } else {
+        res = await createHandler(stack.deps)(request);
+      }
     }
     for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
     return res;

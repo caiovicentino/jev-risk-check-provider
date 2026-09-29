@@ -2,16 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert";
 import { DatabaseSync } from "node:sqlite";
 
-// deploy/ is outside the node tsconfig (Workers globals); load it untyped.
+import { RateCounter } from "../deploy/counter.js";
+
 type Counter = { fetch(req: Request): Promise<Response> };
-const WORKER = "../deploy/worker.js";
-const { RateCounter } = (await import(WORKER)) as { RateCounter: new (state: unknown, env: unknown) => Counter };
 
 function counter(): Counter {
   const db = new DatabaseSync(":memory:");
   // Cloudflare's sql.exec runs eagerly; toArray() just returns the rows.
   const sql = { exec: (q: string, ...p: unknown[]) => { const rows = db.prepare(q).all(...(p as never[])); return { toArray: () => rows }; } };
-  return new RateCounter({ storage: { sql } } as unknown, {});
+  return new RateCounter({ storage: { sql } }, {});
 }
 
 async function consume(c: Counter, key: string, daily: number, admit?: { key: string; daily: number }[]) {

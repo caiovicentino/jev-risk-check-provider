@@ -58,3 +58,15 @@ test("input hash is deterministic and key order insensitive", () => {
   assert.equal(a, b);
   assert.equal(a.length, 64);
 });
+
+test("signing accepts both SEC1 (production secret format) and PKCS#8 PEM keys", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const jwk = publicKey.export({ format: "jwk" }) as { x: string; y: string };
+  const pub = { kty: "EC" as const, crv: "P-256" as const, x: jwk.x, y: jwk.y, kid: "k", alg: "ES256" as const, use: "sig" as const };
+  for (const type of ["sec1", "pkcs8"] as const) {
+    const pem = privateKey.export({ format: "pem", type }).toString();
+    const jws = signJws({ iss: "did:web:x", sub: "w", score: 1, tier: "low", iat: 1, exp: 2 }, "k", pem);
+    assert.ok(verifyJws(jws, pub), type);
+  }
+});

@@ -15,7 +15,7 @@ const fakeEvaluate: EvaluateFn = async ({ questions }) => ({
 
 test("gateway maps boolean to noul and marks score uncalibrated", async () => {
   const client = new GatewayJevClient({ evaluateImpl: fakeEvaluate });
-  const { answers } = await client.systemOne(buildState({ wallet: "w" }), buildQuestions());
+  const { answers } = await client.systemOne(buildState({ wallet: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" }), buildQuestions());
   assert.equal(answers["known_threat"]?.type, "noul");
   if (answers["known_threat"]?.type === "noul") assert.equal(answers["known_threat"].noul, 0.9);
   const risk = answers["risk_class"];
@@ -37,12 +37,19 @@ test("gateway passes normalized state with domain analysis", async () => {
   };
   const client = new GatewayJevClient({ evaluateImpl: capturing });
   await client.systemOne(
-    buildState({ wallet: "w", domain: "jup1ter-audit-attest.click", chain: "solana" }),
+    buildState({ wallet: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", domain: "jup1ter-audit-attest.click", chain: "solana" }),
     buildQuestions(),
   );
-  const analysis = (capturedState as unknown as { domain_analysis?: { leet_substitution: boolean; brand_tokens: string[]; suspicious_tld: boolean } }).domain_analysis;
-  assert.ok(analysis);
-  assert.equal(analysis.leet_substitution, true);
-  assert.deepEqual(analysis.brand_tokens, ["jupiter"]);
-  assert.equal(analysis.suspicious_tld, true);
+  const state = capturedState as unknown as {
+    provider_checks: { sanctions: { status: string }; domain: { impersonation: string; brand: string; signals: string[] } };
+    caller_asserted: unknown;
+    audience?: unknown;
+  };
+  assert.equal(state.provider_checks.sanctions.status, "not_listed");
+  assert.equal(state.provider_checks.domain.impersonation, "strong");
+  assert.equal(state.provider_checks.domain.brand, "jupiter");
+  assert.ok(state.provider_checks.domain.signals.includes("leet_substitution"));
+  assert.ok(state.provider_checks.domain.signals.includes("suspicious_tld"));
+  // aud never reaches the model state (not needed for the judgment; one less injection surface)
+  assert.equal(state.audience, undefined);
 });
