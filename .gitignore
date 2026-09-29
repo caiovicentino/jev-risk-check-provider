@@ -6,3 +6,4 @@ eval/evidence/
 *.log
 .DS_Store
 !eval/evidence/*-report.json
+deploy/.wrangler/
