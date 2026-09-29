@@ -1,0 +1,32 @@
+{
+  "version": "0.1.0",
+  "description": "x402check: signed-intent risk checks on every transaction and signature, before you sign.",
+  "proposedName": "x402check",
+  "source": {
+    "shasum": "lqF/WsF1ajG2+lAGnaARq/O3E34eLdvxddBOoVAI0zU=",
+    "location": {
+      "npm": {
+        "filePath": "dist/bundle.js",
+        "iconPath": "icon.svg",
+        "packageName": "x402check-snap",
+        "registry": "https://registry.npmjs.org"
+      }
+    }
+  },
+  "initialPermissions": {
+    "endowment:transaction-insight": {
+      "allowTransactionOrigin": true,
+      "maxRequestTime": 10000
+    },
+    "endowment:signature-insight": {
+      "allowSignatureOrigin": true,
+      "maxRequestTime": 10000
+    },
+    "endowment:network-access": {},
+    "snap_manageState": {},
+    "snap_getEntropy": {},
+    "endowment:lifecycle-hooks": {}
+  },
+  "platformVersion": "8.1.0",
+  "manifestVersion": "0.1"
+}

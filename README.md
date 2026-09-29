@@ -184,3 +184,13 @@ Next:
 8. AP2 `RiskPayload` implementation once upstream stabilizes.
 
 See `docs/EVIDENCE.md` (consolidated master) and `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md`, `docs/EVIDENCE-SECURITY.md` for the full evidence trail.
+
+## MetaMask Snap
+
+The pre-payment gate runs inside MetaMask itself: `onTransaction` and `onSignature` hooks call x402check before the user signs and render the signed verdict (score, tier, categories) in the confirmation screen. Install in one click from the landing page (`wallet_requestSnaps`), or locally:
+
+```bash
+cd snap && npm install && ./build-via-tmp.sh && npx mm-snap serve
+```
+
+Then in any dApp with MetaMask: `wallet_requestSnaps` with `local:http://localhost:8062` (requires "Allow local Snaps" in MetaMask settings). Fail-closed: unreachable provider shows "NOT verified", never a false all-clear. Free tier is per install (client id via `snap_getEntropy`, 25/day) with a global daily budget for new installs; production volume settles over x402.

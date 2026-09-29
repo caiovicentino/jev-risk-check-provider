@@ -140,11 +140,34 @@ function instructionsToResponse(instr: HTTPResponseInstructions): Response {
   });
 }
 
+const NEW_CLIENT_BUDGET_DAILY = 1000;
+
 async function freeQuota(env: WorkerEnv, ip: string): Promise<number> {
-  const daily = Number(env.FREE_TIER_DAILY ?? "100");
+  const daily = Number(env.FREE_TIER_DAILY ?? "25");
   if (!env.RATE || !Number.isFinite(daily) || daily <= 0) return 0;
   const day = new Date().toISOString().slice(0, 10);
   const key = `free:${ip}:${day}`;
+  const used = Number((await env.RATE.get(key)) ?? "0");
+  if (used >= daily) return 0;
+  await env.RATE.put(key, String(used + 1), { expirationTtl: 172800 });
+  const totalKey = `free-total:${day}`;
+  const total = Number((await env.RATE.get(totalKey)) ?? "0");
+  await env.RATE.put(totalKey, String(total + 1), { expirationTtl: 172800 });
+  return daily - used;
+}
+
+async function clientQuota(env: WorkerEnv, clientId: string): Promise<number> {
+  const daily = Number(env.FREE_TIER_DAILY ?? "25");
+  if (!env.RATE || !Number.isFinite(daily) || daily <= 0) return 0;
+  const day = new Date().toISOString().slice(0, 10);
+  const newClients = Number((await env.RATE.get(`new-clients:${day}`)) ?? "0");
+  const known = (await env.RATE.get(`client-known:${clientId}`)) === "1";
+  if (!known) {
+    if (newClients >= NEW_CLIENT_BUDGET_DAILY) return 0;
+    await env.RATE.put(`client-known:${clientId}`, "1", { expirationTtl: 172800 });
+    await env.RATE.put(`new-clients:${day}`, String(newClients + 1), { expirationTtl: 172800 });
+  }
+  const key = `client:${clientId}:${day}`;
   const used = Number((await env.RATE.get(key)) ?? "0");
   if (used >= daily) return 0;
   await env.RATE.put(key, String(used + 1), { expirationTtl: 172800 });
@@ -158,7 +181,10 @@ async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, s
   const paymentHeader = request.headers.get("PAYMENT-SIGNATURE") ?? request.headers.get("X-PAYMENT");
   const forcePaid = (request.headers.get("X-Risk-Check-Paid") ?? "").trim().length > 0;
   if (!paymentHeader && !forcePaid) {
-    const remaining = await freeQuota(env, request.headers.get("CF-Connecting-IP") ?? "unknown");
+    const clientId = (request.headers.get("X-Risk-Check-Client") ?? "").trim();
+    const remaining = clientId
+      ? await clientQuota(env, clientId.slice(0, 64))
+      : await freeQuota(env, request.headers.get("CF-Connecting-IP") ?? "unknown");
     if (remaining > 0) {
       const res = await serve(request);
       res.headers.set("X-Risk-Check-Free", "true");
@@ -200,7 +226,7 @@ async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, s
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, PAYMENT-SIGNATURE, X-PAYMENT, X-Risk-Check-Paid",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, PAYMENT-SIGNATURE, X-PAYMENT, X-Risk-Check-Paid, X-Risk-Check-Client",
   "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, PAYMENT-REQUIRED, X-Risk-Check-Free, X-Payment-Error",
   "Access-Control-Max-Age": "86400",
 };

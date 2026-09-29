@@ -252,6 +252,25 @@ curl https://x402check.xyz/.well-known/jwks.json
       <div class="item"><h3>Verifiable, not vibes</h3>
         <p>Every warning ships as an ES256 attestation. Users and auditors verify it against did:web:x402check.xyz without trusting the wallet &mdash; or us.</p></div>
     </div>
+    <div class="cta-row" style="margin-top: 10px;">
+      <a class="cta solid" id="snap-install" href="#">Add x402check to MetaMask</a>
+      <span class="video-cap" style="margin: 0;">Snaps: onTransaction + onSignature &middot; fail-closed &middot; free tier per install</span>
+    </div>
+    <script>
+      (function () {
+        var btn = document.getElementById("snap-install");
+        if (!btn) return;
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          var eth = window.ethereum;
+          if (!eth || !eth.request) { btn.textContent = "MetaMask not detected"; return; }
+          btn.textContent = "Requesting install…";
+          eth.request({ method: "wallet_requestSnaps", params: { "npm:x402check-snap": {} } })
+            .then(function () { btn.textContent = "Installed — your next transaction gets a signed verdict"; })
+            .catch(function (err) { btn.textContent = "Install failed: " + String(err && err.message ? err.message : err).slice(0, 60); });
+        });
+      })();
+    </script>
   </section>
 
   <section id="pricing">
