@@ -38,7 +38,7 @@ async function main() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const settle = res.headers.get("X-PAYMENT-RESPONSE");
+  const settle = res.headers.get("PAYMENT-RESPONSE") ?? res.headers.get("X-PAYMENT-RESPONSE");
   if (settle) {
     const s = JSON.parse(Buffer.from(settle, "base64").toString("utf8"));
     console.log("SETTLED:", JSON.stringify({ success: s.success, transaction: s.transaction, network: s.network, payer: s.payer }));
