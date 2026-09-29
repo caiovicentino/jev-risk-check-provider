@@ -9,13 +9,15 @@
 | `GET /.well-known/risk-check.json` | discovery: pricing networks, data sources, attestation claims |
 | `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation key (`kid jev-attest-v1`), `did:web` document |
 | `GET /healthz` | liveness + `freeEvalsToday`. Edge-cached 60 s so it cannot hammer the quota Durable Object |
+| `GET /status` | data freshness: the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. Edge-cached 60 s |
 
 ## Layout
 
-- `worker.ts` — entry point: routing, CORS, `/healthz`, embedded MetaMask feed (a `.bin` Data module), `RateCounter` export
+- `worker.ts` — entry point: routing, CORS, `/healthz`, `/status`, embedded MetaMask and Forta sets (`.bin` Data modules), `RateCounter` export
+- `fresh-feeds.ts` — runtime refresh of OFAC and MetaMask from the `feeds` branch (checksums, counts, no large shrink), in the background
 - `protected.ts` — paid and free-tier flow: validate → quota → pay → evaluate → settle → release
 - `counter.ts` — `RateCounter` Durable Object (SQLite). Atomic per-key daily counters with a cost per request; admission budgets for new client ids
-- `feeds.ts` — ScamSniffer blobs read from KV at runtime (GPL-3.0 data: never bundled or committed)
+- `feeds.ts` — ScamSniffer blobs (domains, addresses, drainer-code fingerprints) read from KV at runtime (GPL-3.0 data: never bundled or committed)
 - `runtime.ts` — minimal Workers types, so `deploy/` type-checks with the rest of the repo (`npm run typecheck`)
 
 ## Request flow (protected routes)
@@ -55,17 +57,30 @@ Optional variables:
 | `RPC_URLS` | JSON `{caip2: url}` overriding the public RPCs in `src/onchain.ts` |
 | `SOL_RPC_URL_MAINNET` | Solana RPC for on-chain facts and x402 Solana settlement |
 | `FREE_TIER_DAILY` | free evaluations per caller per day (default 25) |
+| `SIMULATION` | `"off"` disables transaction simulation (`eth_simulateV1`) |
+| `SIMULATION_RPC_URLS` | JSON `{caip2: url}` overriding the simulation RPCs (they must serve `eth_simulateV1`) |
+| `CONTRACT_INTEL` | `"off"` disables contract-verification lookups (Blockscout) |
+| `FEEDS_URL` | base URL of the published feeds for runtime refresh (default: this repository's `feeds` branch); `"off"` keeps the embedded snapshot |
 
 ## Threat feeds
 
 ```bash
 npm run ofac:update                                  # OFAC SDN → src/data/ofac-sdn.ts (commit it)
 npm run feeds:update                                 # MetaMask list → src/data/*.bin + threat-feeds.ts (commit it)
-npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer → KV (binding RATE), 3 writes
+npx tsx scripts/update-threat-feeds.ts --forta       # + Forta drainer-code fingerprints → src/data (static dataset)
+npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer domains, addresses and code fingerprints → KV (binding RATE), 4 writes
 ```
 
-- OFAC and MetaMask are embedded, so a data refresh ships with a deploy.
-- ScamSniffer lives only in KV and is picked up within an hour. Refresh it daily; the public data already lags 7 days.
+- OFAC and MetaMask are embedded **and** refreshed at runtime. `.github/workflows/feeds.yml` rebuilds them daily with a read-only token and no install scripts. A separate job signs the manifest with Ed25519 and publishes it to the `feeds` branch; the key is in the `FEEDS_SIGNING_KEY` repository secret.
+- The Worker pins the public key (`FEEDS_PUBLIC_KEY` in `fresh-feeds.ts`) and checks hourly, in the background. A cold isolate waits up to 400 ms. It swaps in data only if all of these hold:
+  - the signature is valid;
+  - the data is newer and dated no later than tomorrow;
+  - it matches the manifest's SHA-256 and entry counts;
+  - it has not shrunk sharply against the list in use.
+
+  Otherwise it keeps the current list. `/status` shows which version is in use.
+- **To rotate the publisher key,** generate a new Ed25519 key, store the PKCS#8 PEM with `gh secret set FEEDS_SIGNING_KEY`, put the raw public key (base64url) in `FEEDS_PUBLIC_KEY`, and deploy.
+- ScamSniffer lives only in KV and is picked up within an hour. Refresh it daily; the public data already lags 7 days. The code fingerprints come from the listed addresses' runtime code on 7 EVM chains (about 2 minutes via publicnode).
 - Every attestation states the date and status of each list it consulted (`checks.sanctions`, `checks.feeds`).
 
 ## Deploy, validate, roll back

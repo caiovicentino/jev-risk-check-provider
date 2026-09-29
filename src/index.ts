@@ -5,6 +5,8 @@ import { generateKeyPair } from "./jws.js";
 import { startServer } from "./server.js";
 import { createOnchainLookup } from "./onchain.js";
 import { loadFeedsFromDisk } from "./feeds-node.js";
+import { createSimulator } from "./simulation.js";
+import { createContractIntel } from "./contract-intel.js";
 
 const typesafeKey = process.env.TYPESAFE_API_KEY;
 const gatewayKey = process.env.AI_GATEWAY_API_KEY;
@@ -28,7 +30,9 @@ if (!jev) {
 const onchain = process.env.ONCHAIN === "off" ? null : createOnchainLookup({ timeoutMs: Number(process.env.ONCHAIN_TIMEOUT_MS ?? 1500) });
 
 const feeds = loadFeedsFromDisk();
-const provider = new Provider({ host, keyPair: generateKeyPair("jev-attest-v1"), jev, onchain, feeds: () => feeds });
+const contractIntel = process.env.CONTRACT_INTEL === "off" ? null : createContractIntel();
+const simulator = process.env.SIMULATION === "off" ? null : createSimulator({ contractIntel });
+const provider = new Provider({ host, keyPair: generateKeyPair("jev-attest-v1"), jev, onchain, feeds: () => feeds, simulator, contractIntel });
 
 startServer({ provider, port });
 console.log(`x402check provider listening on :${port} (host=${host}, jev=${jev ? "enabled" : "disabled"}, onchain=${onchain ? "on" : "off"})`);

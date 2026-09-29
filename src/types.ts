@@ -37,11 +37,17 @@ export type OnchainEvidenceOut = {
   is_contract?: boolean;
   activity?: "none" | "some";
   tx_count?: number;
+  /** Source-code verification status of a contract subject, when known. */
+  verified?: boolean;
+  /** Code classification; `fingerprint` (logic code only) is what drainer-kit matching compares. */
+  code?: import("./code-fingerprint.js").CodeFacts;
 };
 
+export type { SimulationEvidence, AssetMovement, ApprovalGrant, TransactionInput } from "./simulation.js";
+
 export type FeedEvidence = {
-  source: "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses";
-  kind: "domain" | "address";
+  source: "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses" | "forta-phishing-code" | "scamsniffer-code";
+  kind: "domain" | "address" | "code";
   as_of: string;
   status: "hit" | "clear" | "unavailable" | "not_applicable";
 };
@@ -52,11 +58,14 @@ export type Evidence = {
   domain?: DomainEvidence;
   onchain: OnchainEvidenceOut;
   feeds?: FeedEvidence[];
+  simulation?: import("./simulation.js").SimulationEvidence;
   model: string;
 };
 
 export type RiskCheckResult = {
   checked: boolean;
+  /** Why `checked` is false: invalid_subject | model_unconfigured | model_malformed_answers | model_unavailable. */
+  reason?: string;
   score?: number;
   tier?: RiskTier;
   provider?: string;
@@ -109,6 +118,10 @@ export type RiskCheckRequest = {
   payment?: PaymentBinding | undefined;
   /** What the user/agent is about to do with the subject (wallet integrations). */
   interaction?: Interaction | undefined;
+  /** An EVM transaction to simulate (requires an eip155 `chain`). */
+  transaction?: { from: string; to?: string | undefined; value?: string | undefined; data?: string | undefined } | undefined;
+  /** Set by validateRequest: requestHash() of the fields as received. Never read from the body. */
+  request_hash?: string | undefined;
 };
 
 export const INTERACTION_TYPES = [

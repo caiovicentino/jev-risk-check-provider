@@ -14,22 +14,41 @@ export type SanctionsEvidence = {
 };
 
 type Entry = { address: string; ticker: string; name: string };
+export type SanctionsRow = readonly [string, string, number, string];
+export type SanctionsListMeta = { source: string; publish_date: string; addresses: number; origin: "embedded" | "refreshed" };
 
-let exact: Map<string, Entry> | null = null;
-let byHash: Map<string, Entry> | null = null;
+type List = { meta: SanctionsListMeta; rows: ReadonlyArray<SanctionsRow>; exact?: Map<string, Entry>; byHash?: Map<string, Entry> };
 
-function indexes(): { exact: Map<string, Entry>; byHash: Map<string, Entry> } {
-  if (exact && byHash) return { exact, byHash };
-  exact = new Map();
-  byHash = new Map();
-  for (const [address, ticker, , name] of OFAC_SDN_ADDRESSES) {
+let current: List = { meta: { source: OFAC_SDN_META.source, publish_date: OFAC_SDN_META.publish_date, addresses: OFAC_SDN_META.addresses, origin: "embedded" }, rows: OFAC_SDN_ADDRESSES };
+
+function indexes(list: List): { exact: Map<string, Entry>; byHash: Map<string, Entry> } {
+  if (list.exact && list.byHash) return { exact: list.exact, byHash: list.byHash };
+  const exact = new Map<string, Entry>();
+  const byHash = new Map<string, Entry>();
+  for (const [address, ticker, , name] of list.rows) {
     const entry = { address, ticker, name };
     if (!exact.has(address)) exact.set(address, entry);
     const parsed = parseSubject(address);
     const hash = parsed ? hash20Of(parsed.format, parsed.canonical) : null;
     if (hash && !byHash.has(hash)) byHash.set(hash, entry);
   }
+  list.exact = exact;
+  list.byHash = byHash;
   return { exact, byHash };
+}
+
+/**
+ * Swaps in a newer OFAC snapshot fetched at runtime (see deploy/fresh-feeds.ts). The
+ * index is built before the swap, so a screen never sees a half-built list.
+ */
+export function setSanctionsList(rows: ReadonlyArray<SanctionsRow>, meta: Omit<SanctionsListMeta, "origin" | "addresses">): void {
+  const next: List = { meta: { ...meta, addresses: rows.length, origin: "refreshed" }, rows };
+  indexes(next);
+  current = next;
+}
+
+export function sanctionsListMeta(): SanctionsListMeta {
+  return current.meta;
 }
 
 /**
@@ -40,8 +59,9 @@ function indexes(): { exact: Map<string, Entry>; byHash: Map<string, Entry> } {
  * addresses) is NOT covered and must not be implied by "not_listed".
  */
 export function screenSubject(subject: Subject): SanctionsEvidence {
-  const { exact: ex, byHash: bh } = indexes();
-  const base = { list: "ofac-sdn" as const, as_of: OFAC_SDN_META.publish_date };
+  const list = current;
+  const { exact: ex, byHash: bh } = indexes(list);
+  const base = { list: "ofac-sdn" as const, as_of: list.meta.publish_date };
   const hit = ex.get(subject.canonical);
   if (hit) return { ...base, status: "listed", entity: hit.name, ticker: hit.ticker, match: "exact" };
   const hash = hash20Of(subject.format, subject.canonical);
@@ -50,4 +70,5 @@ export function screenSubject(subject: Subject): SanctionsEvidence {
   return { ...base, status: "not_listed" };
 }
 
+/** The embedded snapshot's metadata (the list in use may be newer: sanctionsListMeta()). */
 export const SANCTIONS_LIST_META = OFAC_SDN_META;

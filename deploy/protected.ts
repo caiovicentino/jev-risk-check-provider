@@ -5,6 +5,8 @@ import { JevClient } from "../src/jev.js";
 import type { HandlerDeps } from "../src/handler.js";
 import { validateBatch, validateRequest } from "../src/validate.js";
 import { createOnchainLookup } from "../src/onchain.js";
+import { createSimulator } from "../src/simulation.js";
+import { createContractIntel } from "../src/contract-intel.js";
 import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import type { ThreatIntelFeeds } from "../src/threat-intel.js";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
@@ -80,7 +82,7 @@ function stackKey(env: WorkerEnv): string {
   return JSON.stringify([
     env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK,
     env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI,
-    env.ENABLE_TESTNETS, env.ONCHAIN, env.RPC_URLS, env.SOL_RPC_URL_MAINNET,
+    env.ENABLE_TESTNETS, env.ONCHAIN, env.RPC_URLS, env.SOL_RPC_URL_MAINNET, env.SIMULATION, env.SIMULATION_RPC_URLS, env.CONTRACT_INTEL,
   ]);
 }
 
@@ -100,9 +102,17 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   if (env.SOL_RPC_URL_MAINNET) rpc[SOLANA_MAINNET] = env.SOL_RPC_URL_MAINNET;
   // Runs in parallel with the model call (~0.5 s), so a 2 s ceiling only matters when an RPC is slow.
   const onchain = env.ONCHAIN === "off" ? null : createOnchainLookup({ rpc, timeoutMs: 2000 });
+  let simRpc: Record<string, string> = {};
+  try {
+    simRpc = env.SIMULATION_RPC_URLS ? (JSON.parse(env.SIMULATION_RPC_URLS) as Record<string, string>) : {};
+  } catch {
+    simRpc = {};
+  }
+  const contractIntel = env.CONTRACT_INTEL === "off" ? null : createContractIntel({ timeoutMs: 1500 });
+  const simulator = env.SIMULATION === "off" ? null : createSimulator({ rpc: simRpc, timeoutMs: 2500, contractIntel });
   const accepts = buildAccepts(env);
   const pricing: PricingInfo = { unitUsd: UNIT_PRICE_EVM.toFixed(3), networks: accepts.map((a) => String(a.network)) };
-  const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds }), pricing };
+  const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds, simulator, contractIntel }), pricing };
 
   const facilitators = [
     new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR }),

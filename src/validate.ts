@@ -1,5 +1,6 @@
 import { parseSubject } from "./address.js";
 import { normalizeChain } from "./chains.js";
+import { requestHash } from "./jws.js";
 import { normalizeHost } from "./domain-analysis.js";
 import { INTERACTION_TYPES, type Interaction, type PaymentBinding, type RiskCheckRequest } from "./types.js";
 
@@ -63,6 +64,29 @@ function validateInteraction(raw: unknown): Interaction | Invalid {
   return { type: i.type as Interaction["type"], ...(i.unlimited !== undefined ? { unlimited: i.unlimited } : {}) };
 }
 
+const MAX_CALLDATA_HEX = 48 * 1024; // chars, well inside the 64 KiB body cap
+
+function validateTransaction(raw: unknown): NonNullable<RiskCheckRequest["transaction"]> | Invalid {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return invalid("transaction");
+  const t = raw as Record<string, unknown>;
+  if (Object.keys(t).some((k) => !["from", "to", "value", "data"].includes(k))) return invalid("transaction");
+  const evm = (v: unknown) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
+  if (!evm(t.from)) return invalid("transaction.from");
+  if (t.to !== undefined && !evm(t.to)) return invalid("transaction.to");
+  let value: string | undefined;
+  if (t.value !== undefined) {
+    if (typeof t.value !== "string" || !/^(0x[0-9a-fA-F]{1,64}|\d{1,78})$/.test(t.value) || BigInt(t.value) >= 2n ** 256n) return invalid("transaction.value");
+    value = t.value;
+  }
+  if (t.data !== undefined && (typeof t.data !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(t.data) || t.data.length > MAX_CALLDATA_HEX)) return invalid("transaction.data");
+  return {
+    from: t.from as string,
+    ...(t.to !== undefined ? { to: t.to as string } : {}),
+    ...(value !== undefined ? { value } : {}),
+    ...(t.data !== undefined ? { data: t.data as string } : {}),
+  };
+}
+
 /** Validates and normalizes one request. chain → CAIP-2, domain → hostname. */
 export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invalid {
   if (!body || typeof body !== "object" || Array.isArray(body)) return invalid("body");
@@ -116,6 +140,15 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
     if (isInvalid(interaction)) return interaction;
     req.interaction = interaction;
   }
+  if (obj.transaction !== undefined) {
+    const transaction = validateTransaction(obj.transaction);
+    if (isInvalid(transaction)) return transaction;
+    // Simulation needs to know which EVM chain to run on.
+    const effective = subject.caip2 ?? req.chain;
+    if (!effective || !effective.startsWith("eip155:")) return invalid("chain");
+    req.transaction = transaction;
+  }
+  req.request_hash = requestHash(obj);
   return { ok: true, value: req };
 }
 

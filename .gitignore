@@ -8,3 +8,6 @@ eval/evidence/*
 !eval/evidence/*-report.json
 deploy/.wrangler/
 .cache/
+feeds-out/
+.dev.vars
+deploy/.dev.vars

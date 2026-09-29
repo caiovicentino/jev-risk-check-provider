@@ -1,5 +1,7 @@
 import { SOLANA_MAINNET } from "./chains.js";
+import { endpointsFor, rpcWithFallback, RPC_ENDPOINTS } from "./rpc.js";
 import type { Subject } from "./address.js";
+import { codeFacts, isContractCode, resolveIndirection, type CodeFacts } from "./code-fingerprint.js";
 
 // Provider-observed on-chain facts about the subject. Facts, not verdicts: an
 // unused address is a weak risk factor (address poisoning, fresh drainer wallets),
@@ -11,19 +13,14 @@ export type OnchainEvidence = {
   activity?: "none" | "some";
   /** EVM: outgoing tx count (nonce). Solana: recent signatures, capped at SOLANA_SIG_LIMIT. */
   tx_count?: number;
+  /** Contract source verification (from a block explorer), when looked up. */
+  verified?: boolean;
+  /** EVM code classification and logic-code fingerprint (contracts and EIP-7702 delegated accounts). */
+  code?: CodeFacts;
 };
 
-export const DEFAULT_RPC: Record<string, string> = {
-  "eip155:1": "https://ethereum-rpc.publicnode.com",
-  "eip155:8453": "https://mainnet.base.org",
-  "eip155:137": "https://polygon-bor-rpc.publicnode.com",
-  "eip155:42161": "https://arb1.arbitrum.io/rpc",
-  "eip155:10": "https://mainnet.optimism.io",
-  "eip155:43114": "https://api.avax.network/ext/bc/C/rpc",
-  "eip155:56": "https://bsc-dataseed.bnbchain.org",
-  // api.mainnet-beta.solana.com refuses Cloudflare Worker egress; publicnode serves it.
-  [SOLANA_MAINNET]: "https://solana-rpc.publicnode.com",
-};
+/** Primary endpoint per supported chain (fallbacks: src/rpc.ts). */
+export const DEFAULT_RPC: Record<string, string> = Object.fromEntries(Object.entries(RPC_ENDPOINTS).map(([network, urls]) => [network, urls[0] as string]));
 
 export const SOLANA_SIG_LIMIT = 25;
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -34,42 +31,38 @@ export type OnchainLookup = (subject: Subject, network: string | undefined) => P
 type RpcResult = { id: number; result?: unknown; error?: unknown };
 
 export function createOnchainLookup(opts: { rpc?: Record<string, string>; timeoutMs?: number; fetchImpl?: typeof fetch } = {}): OnchainLookup {
-  const rpc = { ...DEFAULT_RPC, ...(opts.rpc ?? {}) };
   const timeoutMs = opts.timeoutMs ?? 1500;
   const doFetch = opts.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => fetch(input, init));
   const cache = new Map<string, { at: number; value: OnchainEvidence }>();
 
-  async function call(url: string, batch: Array<{ method: string; params: unknown[] }>): Promise<RpcResult[]> {
-    const res = await doFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(batch.map((b, i) => ({ jsonrpc: "2.0", id: i + 1, ...b }))),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res.ok) throw new Error(`rpc http ${res.status}`);
-    const body = (await res.json()) as RpcResult[] | RpcResult;
-    const arr = Array.isArray(body) ? body : [body];
-    if (arr.some((r) => r.error !== undefined)) throw new Error("rpc error");
-    return arr.sort((a, b) => a.id - b.id);
+  async function call(urls: readonly string[], batch: Array<{ method: string; params: unknown[] }>): Promise<RpcResult[]> {
+    // Every item must be answered; a per-item error (often a rate limit) moves on to the fallback.
+    const complete = (json: unknown) => Array.isArray(json) && json.length === batch.length && json.every((r: RpcResult) => r && r.error === undefined && r.result !== undefined);
+    const body = (await rpcWithFallback(urls, batch.map((b, i) => ({ jsonrpc: "2.0", id: i + 1, ...b })), timeoutMs, doFetch, complete)) as RpcResult[];
+    return [...body].sort((a, b) => a.id - b.id);
   }
 
-  async function evm(url: string, network: string, address: string): Promise<OnchainEvidence> {
-    const [code, nonce, balance] = await call(url, [
+  async function evm(urls: readonly string[], network: string, address: string): Promise<OnchainEvidence> {
+    const [code, nonce, balance] = await call(urls, [
       { method: "eth_getCode", params: [address, "latest"] },
       { method: "eth_getTransactionCount", params: [address, "latest"] },
       { method: "eth_getBalance", params: [address, "latest"] },
     ]);
-    const codeHex = String(code?.result ?? "0x");
     // EIP-7702 delegated EOAs carry 0xef0100<target> designator code: still an EOA.
-    const isContract = codeHex.length > 2 && !codeHex.toLowerCase().startsWith("0xef0100");
+    const facts = codeFacts(String(code?.result ?? "0x"));
+    const isContract = isContractCode(facts);
+    // Drainer code behind a 7702 delegation or a proxy is fingerprinted too.
+    if (facts.kind === "delegated" || facts.kind === "delegating") {
+      await resolveIndirection(new Map([[address, facts]]), async (requests) => (await call(urls, requests)).map((r) => r.result)).catch(() => undefined);
+    }
     const txCount = Number.parseInt(String(nonce?.result ?? "0x0"), 16);
     const bal = BigInt(String(balance?.result ?? "0x0"));
     if (!Number.isFinite(txCount)) throw new Error("bad nonce");
-    return { status: "ok", network, is_contract: isContract, activity: !isContract && txCount === 0 && bal === 0n ? "none" : "some", tx_count: txCount };
+    return { status: "ok", network, is_contract: isContract, activity: !isContract && txCount === 0 && bal === 0n ? "none" : "some", tx_count: txCount, ...(facts.kind !== "none" ? { code: facts } : {}) };
   }
 
-  async function solana(url: string, network: string, address: string): Promise<OnchainEvidence> {
-    const [info, sigs] = await call(url, [
+  async function solana(urls: readonly string[], network: string, address: string): Promise<OnchainEvidence> {
+    const [info, sigs] = await call(urls, [
       { method: "getAccountInfo", params: [address, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }] },
       { method: "getSignaturesForAddress", params: [address, { limit: SOLANA_SIG_LIMIT }] },
     ]);
@@ -80,16 +73,16 @@ export function createOnchainLookup(opts: { rpc?: Record<string, string>; timeou
 
   return async (subject, network) => {
     if (!network) return { status: "unsupported" };
-    const url = rpc[network];
+    const urls = endpointsFor(network, RPC_ENDPOINTS, opts.rpc);
     const isEvm = network.startsWith("eip155:") && subject.format === "evm";
     const isSol = network === SOLANA_MAINNET && subject.format === "base58" && subject.address.length >= 32 && subject.address.length <= 44;
-    if (!url || (!isEvm && !isSol)) return { status: "unsupported", network };
+    if (urls.length === 0 || (!isEvm && !isSol)) return { status: "unsupported", network };
     const key = `${network}|${subject.canonical}`;
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
     let value: OnchainEvidence;
     try {
-      value = isEvm ? await evm(url, network, subject.canonical) : await solana(url, network, subject.address);
+      value = isEvm ? await evm(urls, network, subject.canonical) : await solana(urls, network, subject.address);
     } catch {
       return { status: "unavailable", network };
     }

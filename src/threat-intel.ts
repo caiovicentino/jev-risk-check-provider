@@ -6,8 +6,8 @@ import type { Subject } from "./address.js";
 // parsing at isolate start-up, O(log n) lookups, ~8 bytes per entry. Collision odds
 // per lookup ≈ n / 2^64 (≈5e-15 for 100k entries).
 
-export type FeedKind = "domain" | "address";
-export type FeedSource = "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses";
+export type FeedKind = "domain" | "address" | "code";
+export type FeedSource = "metamask-phishing-detect" | "scamsniffer-domains" | "scamsniffer-addresses" | "forta-phishing-code" | "scamsniffer-code";
 export type FeedStatus = "hit" | "clear" | "unavailable" | "not_applicable";
 
 export type FeedResult = { source: FeedSource; kind: FeedKind; as_of: string; status: FeedStatus };
@@ -62,6 +62,9 @@ export type ThreatIntelFeeds = {
   metamaskAllow?: ReadonlySet<string>;
   scamsnifferDomains?: LoadedFeed | null;
   scamsnifferAddresses?: LoadedFeed | null;
+  /** Fingerprints of listed drainer contracts' logic code (see code-fingerprint.ts). */
+  fortaCode?: LoadedFeed | null;
+  scamsnifferCode?: LoadedFeed | null;
 };
 
 const OFFICIAL = new Set(Object.values(BRANDS).flat());
@@ -108,4 +111,35 @@ export function checkFeeds(feeds: ThreatIntelFeeds, subject: Subject, domain: { 
     else results.push({ source: "scamsniffer-addresses", kind: "address", as_of: addr.as_of, status: addr.set.has(subject.canonical) ? "hit" : "clear" });
   }
   return { results, hits: results.filter((r) => r.status === "hit") };
+}
+
+const CODE_FEEDS = [
+  ["forta-phishing-code", "fortaCode"],
+  ["scamsniffer-code", "scamsnifferCode"],
+] as const;
+
+/** The code-fingerprint feeds that list this fingerprint. */
+export function matchCode(feeds: ThreatIntelFeeds, fingerprint: string): FeedSource[] {
+  return CODE_FEEDS.filter(([, field]) => feeds[field]?.set.has(fingerprint)).map(([source]) => source);
+}
+
+/**
+ * One result per configured code feed. scope "checked" = at least one contract in
+ * scope (the subject, or the called contract, recipients and spenders of a simulated
+ * transaction) had fingerprintable logic code; `matched` = sources that listed one.
+ */
+export function codeFeedResults(feeds: ThreatIntelFeeds, scope: "checked" | "not_applicable" | "unavailable", matched: ReadonlySet<string>): FeedResult[] {
+  const results: FeedResult[] = [];
+  for (const [source, field] of CODE_FEEDS) {
+    const feed = feeds[field];
+    if (feed === undefined) continue;
+    if (!feed) results.push({ source, kind: "code", as_of: "", status: "unavailable" });
+    else results.push({ source, kind: "code", as_of: feed.as_of, status: matched.has(source) ? "hit" : scope === "checked" ? "clear" : scope });
+  }
+  return results;
+}
+
+/** Whether any code-fingerprint feed is configured (loaded or failed). */
+export function hasCodeFeeds(feeds: ThreatIntelFeeds): boolean {
+  return CODE_FEEDS.some(([, field]) => feeds[field] !== undefined);
 }

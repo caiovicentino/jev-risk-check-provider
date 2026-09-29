@@ -1,6 +1,6 @@
 {
   "name": "x402check",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -31,7 +31,10 @@
     "security:v2": "tsx eval/security-v2.ts",
     "feeds:update": "tsx scripts/update-threat-feeds.ts",
     "ofac:update": "tsx scripts/update-ofac.ts",
-    "dev:worker": "cd deploy && wrangler dev --local"
+    "dev:worker": "cd deploy && wrangler dev --local",
+    "security:v3": "tsx eval/security-v3.ts",
+    "eval:simulation": "tsx eval/simulation.ts",
+    "eval:code": "tsx eval/code-fingerprint.ts"
   },
   "devDependencies": {
     "@solana/spl-token": "^0.4.15",

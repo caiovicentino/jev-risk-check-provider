@@ -34,3 +34,24 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+  packages:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pkg: [client, mcp]
+    defaults:
+      run:
+        working-directory: packages/${{ matrix.pkg }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/${{ matrix.pkg }}/package-lock.json
+      - name: install the client first (the MCP server builds and links it)
+        if: matrix.pkg == 'mcp'
+        run: npm --prefix ../client ci
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

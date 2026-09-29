@@ -84,6 +84,8 @@ export type ScoreOptions = {
   impersonation?: "none" | "weak" | "strong";
   /** Lowest cap imposed by deterministic provider evidence (feed hits, approval to an EOA). */
   evidenceCap?: number;
+  /** Deterministic evidence that warrants human review: a "low" tier is raised to "medium". */
+  reviewFloor?: boolean;
 };
 
 // Caller-asserted "clean" screening deliberately has no effect on the score: a
@@ -125,7 +127,8 @@ export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DE
 
   // Last-resort guard: a non-finite score fails closed to 0 rather than signing NaN.
   score = Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 0;
-  return { score, tier: tierFor(score, inputs), cappedByLowConfidence, signals: inputs };
+  const tier = tierFor(score, inputs);
+  return { score, tier: opts.reviewFloor && tier === "low" ? "medium" : tier, cappedByLowConfidence, signals: inputs };
 }
 
 // Review routing (medium tier) is signal-driven, not score-proximity-driven: a safe
@@ -163,7 +166,12 @@ export type CategoryFacts = {
   phishingDomain?: boolean;
   communityFlaggedDomain?: boolean;
   knownScamAddress?: boolean;
+  drainerCode?: boolean;
   approvalToEoa?: boolean;
+  unverifiedContract?: boolean;
+  simulationFindings?: string[];
+  /** Checks that should have run but failed transiently (e.g. "onchain_unavailable"). */
+  unavailableChecks?: string[];
 };
 
 /** Evaluated families (intent_risk, behavioral) plus the specific findings behind the verdict. */
@@ -179,7 +187,11 @@ export function categoriesFor(inputs: ScoringInputs, facts: CategoryFacts = {}):
   if (facts.phishingDomain) categories.push("phishing_domain");
   if (facts.communityFlaggedDomain) categories.push("community_flagged_domain");
   if (facts.knownScamAddress) categories.push("known_scam_address");
+  if (facts.drainerCode) categories.push("known_drainer_code");
   if (facts.approvalToEoa) categories.push("approval_to_eoa");
+  if (facts.unverifiedContract) categories.push("unverified_contract");
+  for (const f of facts.simulationFindings ?? []) if (f !== "approval_to_eoa" && !categories.includes(f)) categories.push(f);
+  for (const u of facts.unavailableChecks ?? []) if (!categories.includes(u)) categories.push(u);
   if (facts.newAddress) categories.push("new_address");
   return categories;
 }

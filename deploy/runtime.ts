@@ -42,6 +42,14 @@ export type WorkerEnv = {
   ONCHAIN?: string;
   /** JSON map {caip2: rpcUrl} overriding the public default RPCs. */
   RPC_URLS?: string;
+  /** "off" disables transaction simulation (eth_simulateV1). */
+  SIMULATION?: string;
+  /** JSON map {caip2: rpcUrl} overriding the simulation RPCs (must serve eth_simulateV1). */
+  SIMULATION_RPC_URLS?: string;
+  /** "off" disables contract verification lookups (Blockscout). */
+  CONTRACT_INTEL?: string;
+  /** Base URL of the published feeds (MetaMask, OFAC) for runtime refresh; "off" keeps the embedded snapshot. */
+  FEEDS_URL?: string;
   RATE?: KVNamespace;
   COUNTER?: DurableObjectNamespace;
 };

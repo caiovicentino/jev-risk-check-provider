@@ -22,3 +22,10 @@ x402check is MIT-licensed. It uses the following third-party data. Nothing below
 - Use: runtime only. `scripts/update-threat-feeds.ts --scamsniffer --upload` builds hash blobs locally under `.cache/` (git-ignored) and stores them in the operator's Cloudflare KV. The Worker reads them at request time.
 - Not done: the derived data is **not committed to this repository and not bundled into the distributed Worker code**, so no GPL-covered work is conveyed.
 - Handling: ScamSniffer domain hits cap a score only when x402check's own domain analysis corroborates them, because the list also contains popular shared hosts (URL shorteners, storage platforms). EVM address hits are applied directly.
+- Code fingerprints: the same runtime-only rule applies to the drainer-kit code fingerprints derived from the listed addresses (`feed:scamsniffer:code:v1` in KV, `.cache/threat-feeds/scamsniffer-code.bin` locally). They are never committed or bundled.
+
+## Forta labelled-datasets — MIT License
+
+- Source: https://github.com/forta-network/labelled-datasets (`labels/1/phishing_scams.csv`, rows with `is_contract=True`). The commit and date are recorded in `src/data/code-feeds.ts`.
+- Use: `scripts/update-threat-feeds.ts --forta` fetches the runtime code of the labelled contracts from Ethereum. It derives `src/data/forta-drainer-code.bin`: sorted 8-byte SHA-256 prefixes of the logic-code fingerprints (see `src/code-fingerprint.ts`). No addresses or labels are redistributed.
+- Attribution: Copyright (c) 2022 Forta Foundation, licensed under the MIT License (https://github.com/forta-network/labelled-datasets/blob/main/LICENSE). THE DATA IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.

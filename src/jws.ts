@@ -56,6 +56,7 @@ export type AttestationChecks = {
   onchain: { status: string; network?: string | undefined; activity?: string | undefined };
   /** Threat feeds consulted, as "source@as_of:status". */
   feeds?: string[] | undefined;
+  simulation?: { status: string; network?: string | undefined; findings?: string[] | undefined } | undefined;
   model: string;
 };
 
@@ -78,6 +79,8 @@ export type JwsClaims = {
   payment?: Record<string, string> | undefined;
   /** Interaction type the verdict was issued for (wallet integrations). */
   interaction?: string | undefined;
+  /** requestHash() of the request as the caller sent it (see REQUEST_HASH_FIELDS). */
+  request_hash?: string | undefined;
 };
 
 export function signJws(claims: JwsClaims, kid: string, privatePem: string): string {
@@ -147,4 +150,19 @@ export function canonicalJson(value: unknown): string {
 
 export function inputHash(input: Record<string, unknown>): string {
   return createHash("sha256").update(canonicalJson(input)).digest("hex");
+}
+
+/** The request fields a caller sends; `request_hash` covers exactly these, as sent. */
+export const REQUEST_HASH_FIELDS = ["wallet", "chain", "domain", "context", "aud", "screening", "authorization", "payment", "interaction", "transaction"] as const;
+
+/**
+ * SHA-256 of the RFC 8785 canonical JSON of the request fields exactly as the caller
+ * sent them (before server-side normalization), so any client can recompute it from
+ * its own request object and detect an intermediary that altered or dropped a field
+ * (e.g. `context`, which carries the injected content the model must see).
+ */
+export function requestHash(raw: Record<string, unknown>): string {
+  const picked: Record<string, unknown> = {};
+  for (const k of REQUEST_HASH_FIELDS) if (raw[k] !== undefined) picked[k] = raw[k];
+  return createHash("sha256").update(canonicalJson(picked)).digest("hex");
 }

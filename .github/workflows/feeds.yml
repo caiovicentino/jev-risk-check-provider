@@ -1,0 +1,72 @@
+name: feeds
+# Daily refresh of the public feeds the Worker reads at runtime (deploy/fresh-feeds.ts):
+# MetaMask eth-phishing-detect and the OFAC SDN digital currency addresses.
+#
+# build:   regenerate the data with the repository scripts, test it, package it.
+#          Read-only token, no persisted credentials, no dependency install scripts.
+# publish: sign the manifest (Ed25519; the Worker pins the public key) and push it as
+#          the single commit of the `feeds` branch. Runs no dependency code at all.
+# `main` is never modified. ScamSniffer (GPL) is never published here.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch: {}
+permissions: {}
+concurrency:
+  group: feeds
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Regenerate OFAC and MetaMask data
+        run: |
+          npx tsx scripts/update-ofac.ts
+          npx tsx scripts/update-threat-feeds.ts
+      - name: The refreshed data must pass the test suite
+        run: npm test
+      - run: npx tsx scripts/publish-feeds.ts feeds-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feeds
+          path: feeds-out
+          retention-days: 3
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: feeds
+          path: feeds-out
+      - name: Sign the manifest
+        env:
+          FEEDS_SIGNING_KEY: ${{ secrets.FEEDS_SIGNING_KEY }}
+        run: |
+          node -e 'const c=require("node:crypto"),fs=require("node:fs");const key=c.createPrivateKey(process.env.FEEDS_SIGNING_KEY);const m=fs.readFileSync("feeds-out/manifest.json");fs.writeFileSync("feeds-out/manifest.sig",c.sign(null,m,key).toString("base64url"));'
+      - name: Publish to the feeds branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd feeds-out
+          git init -q -b feeds
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "feeds: $(jq -r '.metamask.as_of + " MetaMask, " + .ofac.publish_date + " OFAC"' manifest.json)"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" feeds
+          echo "published: $(jq -c '{metamask: .metamask.as_of, entries: .metamask.entries, ofac: .ofac.publish_date, addresses: .ofac.addresses}' manifest.json)"
