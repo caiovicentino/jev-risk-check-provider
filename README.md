@@ -205,7 +205,7 @@ Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deplo
 On install and on update it shows a disclosure listing exactly what is sent. The install id is random, not derived from the recovery phrase.
 
 ```bash
-cd snap && npm install && npm test          # builds, then 90 tests incl. the built bundle in SES
+cd snap && npm install && npm test          # builds, then 199 tests incl. the built bundle in SES
 npx mm-snap serve                           # then wallet_requestSnaps "local:http://localhost:8062" in MetaMask Flask
 ```
 

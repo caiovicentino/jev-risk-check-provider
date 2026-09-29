@@ -18,17 +18,26 @@ import {
   DRAINER,
   MAX_UINT160,
   MAX_UINT256,
+  NPM,
+  REACTOR,
   RECIPIENT,
+  SAFE,
   UNIVERSAL_ROUTER,
   USDC,
   USER,
+  WETH,
   calldata,
+  daiPermit,
+  erc20Item,
   erc2612Permit,
   eth,
+  multicall,
   nft,
   permitSingle,
+  safeExec,
   seaportOrder,
   textOf,
+  uniswapXOrder,
   utf8Hex,
 } from './helpers';
 
@@ -161,7 +170,7 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
         interaction: { type: 'native_transfer' },
       });
       const text = textOf(response.getInterface().content);
-      expect(text).toContain('x402check · score 12/100 · low');
+      expect(text).toContain('x402check · score 88/100 · low');
       expect(text).toContain('No significant risk signals found.');
       expect(text).toContain('Checked: recipient');
       expect(severityOf(response)).toBeUndefined();
@@ -178,7 +187,7 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
       expect(body.wallet).toBe(RECIPIENT);
       expect(body.payment).toStrictEqual({ network: 'eip155:1', pay_to: RECIPIENT, amount: '5000000', asset: USDC });
       expect(body.interaction).toStrictEqual({ type: 'token_transfer' });
-      expect(body.context).toContain(`ERC-20 transfer: sends 5000000 base units of token ${USDC} to recipient ${RECIPIENT}`);
+      expect(body.context).toContain(`ERC-20 transfer: sends 5 USDC (5000000 base units of ${USDC}) to recipient ${RECIPIENT}`);
     });
 
     it('approve(drainer, MAX) checks the SPENDER and flags UNLIMITED', async () => {
@@ -492,6 +501,129 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
       expect(text).toContain('x402check · score 40/100 · medium');
       expect(text).toContain('This verdict was not signed.');
       expect(severityOf(response)).toBeUndefined();
+    });
+  });
+
+  describe('review regressions through the SES bundle', () => {
+    const CRITICAL = { checked: true, score: 12, tier: 'critical', categories: ['known_scam_address'] };
+    const worstForDrainer = (request: { path: string; body: any }) =>
+      request.path.endsWith('/batch')
+        ? { status: 200, json: { results: request.body.requests.map((item: { wallet: string }) => (item.wallet === DRAINER ? CRITICAL : LOW_RISK_VERDICT)) } }
+        : { status: 200, json: LOW_RISK_VERDICT };
+
+    it('finding 1: a permit whose spender is a DECIMAL string checks the drainer, UNLIMITED', async () => {
+      await snap.onSignature({
+        from: USER,
+        data: erc2612Permit(BigInt(DRAINER).toString(10), `0x${'0'.repeat(8)}${'f'.repeat(64)}`),
+        signatureMethod: 'eth_signTypedData_v4',
+        origin: ORIGIN,
+      });
+      expect(api.last?.path).toBe('/v1/risk-check');
+      expect(api.last?.body.wallet).toBe(DRAINER);
+      expect(api.last?.body.interaction).toStrictEqual({ type: 'permit_signature', unlimited: true });
+      expect(api.last?.body.context).toContain(`signs as ${DRAINER}`);
+    });
+
+    it('finding 2: DAI permit with allowed:"false" is an UNLIMITED permit, not a revocation', async () => {
+      const response = await snap.onSignature({ from: USER, data: daiPermit('false'), signatureMethod: 'eth_signTypedData_v4', origin: ORIGIN });
+      expect(api.last?.body.interaction).toStrictEqual({ type: 'permit_signature', unlimited: true });
+      const text = textOf(response.getInterface().content);
+      expect(text).toContain('UNLIMITED');
+      expect(text).not.toContain('revoke');
+    });
+
+    it('finding 3: a payable call checks the ETH recipient (batch with the decoded inner spender)', async () => {
+      await snap.onTransaction({ from: USER, to: DRAINER, value: '0x4563918244f40000', data: calldata('095ea7b3', UNIVERSAL_ROUTER, 0n), origin: ORIGIN });
+      expect(api.last?.path).toBe('/v1/risk-check/batch');
+      const requests = api.last?.body.requests as { wallet: string; payment?: unknown; interaction: unknown }[];
+      expect(requests.map((item) => item.wallet)).toStrictEqual([DRAINER, UNIVERSAL_ROUTER]);
+      expect(requests[0]?.payment).toStrictEqual({ network: 'eip155:1', pay_to: DRAINER, amount: '5000000000000000000', asset: 'native' });
+      expect(requests[0]?.interaction).toStrictEqual({ type: 'contract_call' });
+    });
+
+    it('finding 4: a Seaport listing paying 1 unit of WETH is critical even if the server says low', async () => {
+      const response = await snap.onSignature({
+        from: USER,
+        data: seaportOrder([nft(BAYC, '1'), nft(BAYC, '2')], [erc20Item(WETH, '1', USER)]),
+        signatureMethod: 'eth_signTypedData_v4',
+        origin: ORIGIN,
+      });
+      expect(severityOf(response)).toBe('critical');
+      const text = textOf(response.getInterface().content);
+      expect(text).toContain('Dangerous request — do not sign');
+      expect(text).toContain('typical of NFT drainer listings');
+      expect(api.last?.body.context).toMatch(/^Proven danger: /u);
+    });
+
+    it('finding 5: a UniswapX output to a third party is checked first; the worst verdict is shown', async () => {
+      api.respondWith(worstForDrainer);
+      const response = await snap.onSignature({
+        from: USER,
+        data: uniswapXOrder([{ token: USDC, amount: '9999000000', recipient: DRAINER }]),
+        signatureMethod: 'eth_signTypedData_v4',
+        origin: 'https://app.uniswap.org',
+      });
+      expect(api.last?.path).toBe('/v1/risk-check/batch');
+      expect(api.last?.body.requests.map((item: { wallet: string }) => item.wallet)).toStrictEqual([DRAINER, REACTOR]);
+      expect(severityOf(response)).toBe('critical');
+      const text = textOf(response.getInterface().content);
+      expect(text).toContain('x402check · score 12/100 · critical');
+      expect(text).toContain(`Checked: recipient ${DRAINER}`);
+      expect(text).toContain('Also checked: spender');
+    });
+
+    it('finding 6: multicall and Safe DELEGATECALL wrappers are decoded', async () => {
+      await snap.onTransaction({ from: USER, to: NPM, data: multicall([calldata('a22cb465', DRAINER, 1n)]), origin: ORIGIN });
+      expect(api.last?.body.wallet).toBe(DRAINER);
+      expect(api.last?.body.interaction).toStrictEqual({ type: 'nft_approval' });
+      const response = await snap.onTransaction({ from: USER, to: SAFE, data: safeExec(DRAINER, 0n, '0x12345678', 1), origin: 'https://app.safe.global' });
+      expect(api.last?.body.wallet).toBe(DRAINER);
+      expect(severityOf(response)).toBe('critical');
+      expect(textOf(response.getInterface().content)).toContain(`DELEGATECALL to ${DRAINER}`);
+    });
+
+    it('finding 7: approve(x, 0) on an NFT contract is an approval, on USDC a revocation', async () => {
+      await snap.onTransaction({ from: USER, to: BAYC, data: calldata('095ea7b3', DRAINER, 0n), origin: ORIGIN });
+      expect(api.last?.body.interaction).toStrictEqual({ type: 'token_approval' });
+      await snap.onTransaction({ from: USER, to: USDC, data: calldata('095ea7b3', DRAINER, 0n), origin: ORIGIN });
+      expect(api.last?.body.interaction).toStrictEqual({ type: 'contract_call' });
+    });
+
+    it('finding 8: a 4 MiB personal_sign and a typed-data field of 4 MiB produce an insight, not an error', async () => {
+      const big = await snap.onSignature({ from: USER, data: `0x${'61'.repeat(4 * 1024 * 1024)}`, signatureMethod: 'personal_sign', origin: ORIGIN });
+      expect(big.response).toHaveProperty('result');
+      expect(textOf(big.getInterface().content)).toContain('x402check · score 88/100 · low');
+      expect(api.last?.body.context).toContain('large payload (4194304 bytes)');
+      const typed = erc2612Permit(DRAINER, '5', 1, { junk: `0x${'ab'.repeat(4 * 1024 * 1024)}` });
+      const response = await snap.onSignature({ from: USER, data: typed, signatureMethod: 'eth_signTypedData_v4', origin: ORIGIN });
+      expect(response.response).toHaveProperty('result');
+      expect(api.last?.body.wallet).toBe(DRAINER);
+    }, 120000);
+
+    it('finding 9a/9b: secrets are redacted and IDN hosts are punycoded in what the bundle sends', async () => {
+      const key = '4c0883a69102937d6231471b5dbb6204fe512961708279f8b3e8b1b1c3a6a2c0';
+      await snap.onSignature({ from: USER, data: utf8Hex(`Export: pk_${key}`), signatureMethod: 'personal_sign', origin: ORIGIN });
+      expect(api.last?.body.context).toContain('[redacted secret-like string]');
+      expect(api.last?.body.context).not.toContain(key);
+      await snap.onSignature({ from: USER, data: utf8Hex('Claim your airdrop at un\u0456swap.org today'), signatureMethod: 'personal_sign', origin: 'metamask' });
+      expect(api.last?.body.domain).toBe('xn--unswap-qvf.org');
+    });
+
+    it('finding 9c: a message naming two addresses checks both and shows the worst verdict', async () => {
+      api.respondWith(worstForDrainer);
+      const response = await snap.onSignature({
+        from: USER,
+        data: utf8Hex(`Claim for token ${USDC}, payout wallet ${DRAINER}`),
+        signatureMethod: 'personal_sign',
+        origin: ORIGIN,
+      });
+      expect(api.last?.path).toBe('/v1/risk-check/batch');
+      expect(api.last?.body.requests.map((item: { wallet: string }) => item.wallet)).toStrictEqual([USDC, DRAINER]);
+      expect(severityOf(response)).toBe('critical');
+      const text = textOf(response.getInterface().content);
+      expect(text).toContain('score 12/100 · critical');
+      expect(text).toContain(`Checked: counterparty ${DRAINER}`);
+      expect(text).toContain('score 88/100 · low');
     });
   });
 });

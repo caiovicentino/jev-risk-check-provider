@@ -16,10 +16,10 @@ import {
   Text,
 } from "@metamask/snaps-sdk/jsx";
 
-import type { Decoded, InteractionType, Role } from "./decode";
-import { capText } from "./decode";
-import type { CheckOutcome, Evidence, FeedEvidence, Tier, Verdict } from "./request";
+import type { BatchItem, CheckOutcome, Evidence, FeedEvidence, Tier, Verdict } from "./request";
 import { API_ORIGIN, JWKS_URL } from "./request";
+import type { Candidate, Decoded, InteractionType, Role } from "./util";
+import { capText, shortAddress } from "./util";
 
 export type RequestKind = "transaction" | "signature";
 
@@ -29,6 +29,15 @@ export type InsightResult = {
 };
 
 type Child = JSXElement | null;
+
+/** The address a verdict is about, with the details shown next to it. */
+type Subject = {
+  address?: string;
+  role?: Role;
+  interaction?: InteractionType;
+  unlimited?: boolean;
+  amountLabel?: string;
+};
 
 const TIER_COPY: Record<Tier, { verdict: string; advice: string }> = {
   low: {
@@ -48,6 +57,8 @@ const TIER_COPY: Record<Tier, { verdict: string; advice: string }> = {
     advice: "Do NOT proceed. This matches fraud, drainer or laundering patterns.",
   },
 };
+
+const TIER_RANK: Record<Tier, number> = { low: 1, medium: 2, high: 3, critical: 4 };
 
 const ROLE_LABEL: Record<Role, string> = {
   recipient: "recipient",
@@ -111,36 +122,56 @@ function sentence(text: string): string {
   return /[.!?]$/u.test(capitalized) ? capitalized : `${capitalized}.`;
 }
 
-function amountRowLabel(decoded: Decoded): string {
-  if (decoded.role === "operator") return "Scope";
-  if (decoded.role === "spender") return "Allowance";
+function primarySubject(decoded: Decoded): Subject {
+  return {
+    address: decoded.counterparty,
+    role: decoded.role,
+    interaction: decoded.interaction.type,
+    unlimited: decoded.unlimited,
+    amountLabel: decoded.amountLabel,
+  };
+}
+
+function candidateSubject(candidate: Candidate): Subject {
+  return {
+    address: candidate.address,
+    role: candidate.role,
+    interaction: candidate.interaction.type,
+    unlimited: candidate.unlimited,
+    amountLabel: candidate.amountLabel,
+  };
+}
+
+function amountRowLabel(subject: Subject): string {
+  if (subject.role === "operator") return "Scope";
+  if (subject.role === "spender") return "Allowance";
   return "Amount";
 }
 
 /** What was decoded and which address was checked (or would have been). */
-function subjectSection(decoded: Decoded, host: string | undefined, checked: boolean): JSXElement {
+function subjectSection(decoded: Decoded, subject: Subject, host: string | undefined, checked: boolean): JSXElement {
   const rows: Child[] = [
     <Row label="Action">
       <Text>{decoded.action}</Text>
     </Row>,
-    decoded.counterparty && decoded.role ? (
+    subject.address && subject.role ? (
       <Row
-        label={`${checked ? "Checked" : "Not checked"}: ${ROLE_LABEL[decoded.role]}`}
+        label={`${checked ? "Checked" : "Not checked"}: ${ROLE_LABEL[subject.role]}`}
         variant={checked ? "default" : "warning"}
         tooltip="The address this request gives rights or value to."
       >
-        <Address address={decoded.counterparty as `0x${string}`} />
+        <Address address={subject.address as `0x${string}`} />
       </Row>
     ) : null,
-    decoded.unlimited ? (
-      <Row label={amountRowLabel(decoded)} variant="critical">
+    subject.unlimited ? (
+      <Row label={amountRowLabel(subject)} variant="critical">
         <Text>
-          <Bold>{decoded.amountLabel ?? "UNLIMITED"}</Bold>
+          <Bold>{subject.amountLabel ?? "UNLIMITED"}</Bold>
         </Text>
       </Row>
-    ) : decoded.amountLabel ? (
-      <Row label={amountRowLabel(decoded)}>
-        <Text>{decoded.amountLabel}</Text>
+    ) : subject.amountLabel ? (
+      <Row label={amountRowLabel(subject)}>
+        <Text>{subject.amountLabel}</Text>
       </Row>
     ) : null,
     host ? (
@@ -157,12 +188,23 @@ function subjectSection(decoded: Decoded, host: string | undefined, checked: boo
   return <Section>{compact(rows)}</Section>;
 }
 
-function signerNote(decoded: Decoded): Child {
-  if (decoded.role !== "signer") return null;
+function signerNote(subject: Subject): Child {
+  if (subject.role !== "signer") return null;
   return (
     <Text color="warning">
       No counterparty address was found in this request, so your own signing address was checked instead.
     </Text>
+  );
+}
+
+function dangerBanner(danger: string[]): Child {
+  if (danger.length === 0) return null;
+  return (
+    <Banner title="Dangerous request — do not sign" severity="danger">
+      {danger.slice(0, 4).map((reason) => (
+        <Text>{capText(sentence(reason), 220)}</Text>
+      ))}
+    </Banner>
   );
 }
 
@@ -177,7 +219,7 @@ function warningsBanner(warnings: string[]): Child {
   );
 }
 
-function evidenceRows(evidence: Evidence | undefined, decoded: Decoded): Child[] {
+function evidenceRows(evidence: Evidence | undefined, subject: Subject): Child[] {
   if (!evidence) return [];
   const rows: Child[] = [];
   const { sanctions, domain, onchain } = evidence;
@@ -237,9 +279,7 @@ function evidenceRows(evidence: Evidence | undefined, decoded: Decoded): Child[]
       } else if (onchain.activity === "some") {
         rows.push(
           <Row label="On-chain">
-            <Text>
-              {`Active address${onchain.tx_count !== undefined ? ` (${onchain.tx_count} transactions)` : ""}`}
-            </Text>
+            <Text>{`Active address${onchain.tx_count !== undefined ? ` (${onchain.tx_count} transactions)` : ""}`}</Text>
           </Row>,
         );
       }
@@ -249,8 +289,8 @@ function evidenceRows(evidence: Evidence | undefined, decoded: Decoded): Child[]
             <Text>Counterparty is a contract</Text>
           </Row>,
         );
-      } else if (onchain.is_contract === false && APPROVAL_TYPES.has(decoded.interaction.type)) {
-        const who = decoded.role === "operator" ? "Operator" : "Spender";
+      } else if (onchain.is_contract === false && subject.interaction && APPROVAL_TYPES.has(subject.interaction)) {
+        const who = subject.role === "operator" ? "Operator" : "Spender";
         rows.push(
           <Row label="Type" variant="critical">
             <Text>{`${who} is a regular wallet (EOA), not a contract — typical of drainers`}</Text>
@@ -260,11 +300,7 @@ function evidenceRows(evidence: Evidence | undefined, decoded: Decoded): Child[]
     } else {
       rows.push(
         <Row label="On-chain">
-          <Text>
-            {onchain.status === "unsupported"
-              ? "On-chain check not supported on this network"
-              : "On-chain data unavailable"}
-          </Text>
+          <Text>{onchain.status === "unsupported" ? "On-chain check not supported on this network" : "On-chain data unavailable"}</Text>
         </Row>,
       );
     }
@@ -275,10 +311,7 @@ function evidenceRows(evidence: Evidence | undefined, decoded: Decoded): Child[]
 function attestation(verdict: Verdict): Child[] {
   const keysUrl = verdict.jwks_url ?? JWKS_URL;
   if (!verdict.jws) {
-    return [
-      <Text color="muted">This verdict was not signed.</Text>,
-      <Link href={keysUrl}>Provider public keys (JWKS)</Link>,
-    ];
+    return [<Text color="muted">This verdict was not signed.</Text>, <Link href={keysUrl}>Provider public keys (JWKS)</Link>];
   }
   return [
     <Text color="muted">Signed verdict (JWS). Verify it independently against the provider's public keys:</Text>,
@@ -296,19 +329,57 @@ function feedLines(feeds: FeedEvidence[] | undefined): { hits: FeedEvidence[]; s
   return { hits, summary: parts.length > 0 ? `Threat feeds: ${parts.join(", ")}` : undefined };
 }
 
-function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undefined): InsightResult {
+/** Sanctions or threat-feed hit, or a high/critical tier. */
+function isAlarming(verdict: Verdict): boolean {
+  return (
+    verdict.tier === "high" ||
+    verdict.tier === "critical" ||
+    verdict.evidence?.sanctions?.status === "listed" ||
+    (verdict.evidence?.feeds ?? []).some((feed) => feed.status === "hit")
+  );
+}
+
+/** Higher = worse: list hits, then tier (unknown counts as medium), then lower score. */
+function riskKey(verdict: Verdict): [number, number] {
+  const listed =
+    verdict.evidence?.sanctions?.status === "listed" || (verdict.evidence?.feeds ?? []).some((feed) => feed.status === "hit");
+  return [(listed ? 10 : 0) + TIER_RANK[verdict.tier ?? "medium"], 100 - (verdict.score ?? 50)];
+}
+
+function verdictLine(verdict: Verdict): string {
+  return `score ${verdict.score !== undefined ? verdict.score : "?"}/100 · ${verdict.tier ?? "unknown tier"}`;
+}
+
+type Also = { candidate: Candidate; item: BatchItem };
+
+function alsoCheckedSection(entries: Also[]): Child {
+  if (entries.length === 0) return null;
+  return (
+    <Section>
+      {entries.map(({ candidate, item }) => (
+        <Row
+          label={`Also checked: ${ROLE_LABEL[candidate.role]}`}
+          variant={item.status !== "ok" ? "warning" : isAlarming(item.verdict) ? "critical" : "default"}
+        >
+          <Text>{`${shortAddress(candidate.address)} · ${item.status === "ok" ? verdictLine(item.verdict) : "NOT verified"}`}</Text>
+        </Row>
+      ))}
+    </Section>
+  );
+}
+
+function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undefined, subject: Subject, also: Also[] = []): InsightResult {
   const sanctions = verdict.evidence?.sanctions;
   const sanctioned = sanctions?.status === "listed";
   const feeds = feedLines(verdict.evidence?.feeds);
   const listedInFeed = feeds.hits.length > 0;
+  const localDanger = decoded.danger.length > 0;
   // An unknown or missing tier never gets the "no significant risk" copy, and a
-  // sanctions or threat-feed hit always gets the critical copy.
-  const copyTier: Tier = sanctioned || listedInFeed ? "critical" : (verdict.tier ?? "medium");
+  // sanctions / threat-feed hit or locally proven danger gets the critical copy.
+  const copyTier: Tier = sanctioned || listedInFeed || localDanger ? "critical" : (verdict.tier ?? "medium");
   const copy = TIER_COPY[copyTier];
-  const score = verdict.score !== undefined ? String(verdict.score) : "?";
-  const tierLabel = verdict.tier ?? "unknown tier";
-  const categories =
-    verdict.categories.length > 0 ? verdict.categories.map(categoryLabel).join(", ") : undefined;
+  const categories = verdict.categories.length > 0 ? verdict.categories.map(categoryLabel).join(", ") : undefined;
+  const alarmingOther = also.some((entry) => entry.item.status === "ok" && isAlarming(entry.item.verdict));
 
   const children: Child[] = [
     sanctioned ? (
@@ -328,16 +399,19 @@ function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undef
         ))}
       </Banner>
     ) : null,
-    <Heading>{`x402check · score ${score}/100 · ${tierLabel}`}</Heading>,
+    dangerBanner(decoded.danger),
+    <Heading>{`x402check · ${verdictLine(verdict)}`}</Heading>,
     <Text>
       <Bold>{copy.verdict}</Bold> {copy.advice}
     </Text>,
-    subjectSection(decoded, host, true),
-    signerNote(decoded),
+    subjectSection(decoded, subject, host, true),
+    also.length > 0 ? <Text color="muted">{`${also.length + 1} addresses were checked; the worst verdict is shown.`}</Text> : null,
+    alsoCheckedSection(also),
+    signerNote(subject),
     warningsBanner(decoded.warnings),
   ];
   const facts: Child[] = [
-    ...evidenceRows(verdict.evidence, decoded),
+    ...evidenceRows(verdict.evidence, subject),
     categories ? (
       <Row label="Categories">
         <Text>{categories}</Text>
@@ -345,32 +419,83 @@ function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undef
     ) : null,
     feeds.summary ? <Text color="muted">{feeds.summary}</Text> : null,
   ];
-  if (compact(facts).length > 0) {
-    children.push(<Section>{compact(facts)}</Section>);
-  }
+  if (compact(facts).length > 0) children.push(<Section>{compact(facts)}</Section>);
   children.push(<Divider />, ...attestation(verdict));
-
-  const highTier = verdict.tier === "high" || verdict.tier === "critical";
+  const critical = isAlarming(verdict) || alarmingOther || localDanger;
   return {
     content: <Box>{compact(children)}</Box>,
-    ...(highTier || sanctioned || listedInFeed ? { severity: "critical" as const } : {}),
+    ...(critical ? { severity: "critical" as const } : {}),
   };
 }
 
-function failureContent(decoded: Decoded, host: string | undefined, title: string, explanation: string): InsightResult {
+function failureContent(
+  decoded: Decoded,
+  host: string | undefined,
+  title: string,
+  explanation: string,
+  also: Also[] = [],
+): InsightResult {
+  const localDanger = decoded.danger.length > 0;
+  const alarming = also.some((entry) => entry.item.status === "ok" && isAlarming(entry.item.verdict));
   return {
     content: (
       <Box>
         {compact([
+          dangerBanner(decoded.danger),
           <Heading>{`x402check · ${title}`}</Heading>,
           <Text>{explanation}</Text>,
-          subjectSection(decoded, host, false),
-          signerNote(decoded),
+          subjectSection(decoded, primarySubject(decoded), host, false),
+          alsoCheckedSection(also),
+          signerNote(primarySubject(decoded)),
           warningsBanner(decoded.warnings),
         ])}
       </Box>
     ),
+    ...(localDanger || alarming ? { severity: "critical" as const } : {}),
   };
+}
+
+function batchCandidates(decoded: Decoded): Candidate[] {
+  const primary: Candidate = {
+    address: decoded.counterparty ?? "",
+    role: decoded.role ?? "counterparty",
+    interaction: decoded.interaction,
+    rank: 0,
+    unlimited: decoded.unlimited,
+    amountLabel: decoded.amountLabel,
+  };
+  return [primary, ...decoded.others];
+}
+
+function renderBatch(decoded: Decoded, items: BatchItem[], kind: RequestKind, host: string | undefined): InsightResult {
+  const candidates = batchCandidates(decoded);
+  const entries: Also[] = items
+    .map((item, index) => ({ item, candidate: candidates[index] }))
+    .filter((entry): entry is Also => entry.candidate !== undefined);
+  let worst: (Also & { item: { status: "ok"; verdict: Verdict } }) | undefined;
+  for (const entry of entries) {
+    if (entry.item.status !== "ok") continue;
+    if (!worst) {
+      worst = entry as Also & { item: { status: "ok"; verdict: Verdict } };
+      continue;
+    }
+    const [a1, a2] = riskKey(entry.item.verdict);
+    const [b1, b2] = riskKey(worst.item.verdict);
+    if (a1 > b1 || (a1 === b1 && a2 > b2)) worst = entry as Also & { item: { status: "ok"; verdict: Verdict } };
+  }
+  const failed = entries.filter((entry) => entry.item.status !== "ok");
+  if (!worst || (failed.length > 0 && !isAlarming(worst.item.verdict))) {
+    // Fail closed: an address that could not be verified is never an all-clear.
+    return failureContent(
+      decoded,
+      host,
+      "verification failed — NOT verified",
+      `${failed.length} of ${entries.length} addresses in this ${kind} could not be verified, so it was NOT verified.`,
+      entries,
+    );
+  }
+  const others = entries.filter((entry) => entry !== worst);
+  return verdictContent(decoded, worst.item.verdict, host, candidateSubject(worst.candidate), others);
 }
 
 /**
@@ -382,15 +507,12 @@ function failureContent(decoded: Decoded, host: string | undefined, title: strin
  * @param host - Hostname of the requesting site.
  * @returns Content and optional severity.
  */
-export function renderOutcome(
-  decoded: Decoded,
-  outcome: CheckOutcome,
-  kind: RequestKind,
-  host?: string,
-): InsightResult {
+export function renderOutcome(decoded: Decoded, outcome: CheckOutcome, kind: RequestKind, host?: string): InsightResult {
   switch (outcome.kind) {
     case "ok":
-      return verdictContent(decoded, outcome.verdict, host);
+      return verdictContent(decoded, outcome.verdict, host, primarySubject(decoded));
+    case "batch":
+      return renderBatch(decoded, outcome.items, kind, host);
     case "network_error":
       return failureContent(
         decoded,
@@ -413,12 +535,7 @@ export function renderOutcome(
         `The risk service returned an error (HTTP ${outcome.status}), so this ${kind} was NOT verified.`,
       );
     case "invalid_response":
-      return failureContent(
-        decoded,
-        host,
-        "check failed — NOT verified",
-        `The risk service returned an unreadable response, so this ${kind} was NOT verified.`,
-      );
+      return failureContent(decoded, host, "check failed — NOT verified", `The risk service returned an unreadable response, so this ${kind} was NOT verified.`);
     case "unverified":
     default:
       return failureContent(
@@ -432,24 +549,65 @@ export function renderOutcome(
 
 /**
  * Renders a request that is not sent to the server (e.g. contract deployment).
+ * Locally proven danger still makes it critical.
  *
  * @param decoded - The decoded request.
  * @param host - Hostname of the requesting site.
- * @returns Content.
+ * @returns Content and optional severity.
  */
 export function renderLocalOnly(decoded: Decoded, host?: string): InsightResult {
   return {
     content: (
       <Box>
         {compact([
+          dangerBanner(decoded.danger),
           <Heading>x402check · not checked</Heading>,
           <Text>{decoded.localNote ?? "There is no counterparty address to check. Nothing was sent to x402check."}</Text>,
-          subjectSection(decoded, host, false),
+          subjectSection(decoded, primarySubject(decoded), host, false),
           warningsBanner(decoded.warnings),
         ])}
       </Box>
     ),
+    ...(decoded.danger.length > 0 ? { severity: "critical" as const } : {}),
   };
+}
+
+/**
+ * Static content for an unexpected internal error: never throws, never an
+ * all-clear.
+ *
+ * @param kind - Transaction or signature (for copy).
+ * @returns Content with critical severity.
+ */
+export function renderInternalError(kind: RequestKind): InsightResult {
+  return {
+    content: (
+      <Box>
+        <Heading>x402check · check failed — NOT verified</Heading>
+        <Text>
+          {`x402check hit an internal error while analyzing this ${kind}, so it was NOT verified. Do not proceed unless you fully trust the site and the counterparty.`}
+        </Text>
+      </Box>
+    ),
+    severity: "critical",
+  };
+}
+
+/**
+ * Runs an insight computation and never throws: any unexpected error (e.g. a
+ * RangeError from a hostile payload) becomes the critical "check failed — NOT
+ * verified" insight instead of a MetaMask error screen.
+ *
+ * @param kind - Transaction or signature (for copy).
+ * @param work - The insight computation.
+ * @returns The insight.
+ */
+export async function withFallback(kind: RequestKind, work: () => Promise<InsightResult>): Promise<InsightResult> {
+  try {
+    return await work();
+  } catch {
+    return renderInternalError(kind);
+  }
 }
 
 /**
@@ -463,18 +621,26 @@ export function disclosureContent(): JSXElement {
     <Box>
       <Heading>x402check: what this Snap sends</Heading>
       <Text>
-        Before you confirm a transaction or signature, x402check sends a risk-check request to{" "}
-        <Bold>x402check.xyz</Bold>. Each request contains only:
+        Before you confirm a transaction or signature, x402check sends a risk-check request to <Bold>x402check.xyz</Bold>. Each
+        request contains only:
       </Text>
-      <Text>- the counterparty address (recipient, spender, operator or contract; your own address only when a message names no one else)</Text>
+      <Text>
+        - the counterparty address(es) (recipient, spender, operator or contract, up to three per request; your own address only
+        when a message names no one else)
+      </Text>
       <Text>- the chain ID</Text>
       <Text>- the requesting site (its hostname)</Text>
-      <Text>- a decoded, human-readable summary of the transaction or signature (for example: "approve UNLIMITED token 0x… to spender 0x…")</Text>
       <Text>
-        Purpose: score the counterparty and site for drainer, fraud, sanctions and impersonation risk, and show you a signed verdict before you sign.
+        - a decoded, human-readable summary of the transaction or signature (for example: "approve UNLIMITED token 0x… to spender
+        0x…"), with secret-looking strings removed
       </Text>
       <Text>
-        A random install ID is sent only to count your free daily checks. It is not derived from your Secret Recovery Phrase and is reset if you reinstall.
+        Purpose: score the counterparty and site for drainer, fraud, sanctions and impersonation risk, and show you a signed verdict
+        before you sign.
+      </Text>
+      <Text>
+        A random install ID is sent only to count your free daily checks. It is not derived from your Secret Recovery Phrase and is
+        reset if you reinstall.
       </Text>
       <Text>
         <Bold>Your private keys and Secret Recovery Phrase never leave your wallet.</Bold> x402check cannot sign or move anything.

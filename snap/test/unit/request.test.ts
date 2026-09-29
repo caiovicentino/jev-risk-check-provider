@@ -5,16 +5,21 @@ import { describe, expect, it } from '@jest/globals';
 
 import { decodePersonalSign, decodeTransaction, decodeTypedData } from '../../src/decode';
 import {
+  BATCH_ENDPOINT,
   ENDPOINT,
   MAX_CONTEXT,
+  buildRiskCheckBodies,
   buildRiskCheckBody,
+  classifyBatchResponse,
   classifyResponse,
   composeContext,
   originHost,
   parseVerdict,
   postRiskCheck,
+  postRiskChecks,
 } from '../../src/request';
-import { DRAINER, MAX_UINT256, RECIPIENT, USDC, USER, calldata, permitSingle, utf8Hex } from '../helpers';
+import { DRAINER, MAX_UINT256, RECIPIENT, REACTOR, USDC, USER, calldata, permitSingle, uniswapXOrder, utf8Hex } from '../helpers';
+import { decodeTypedData as decodeTyped } from '../../src/decode';
 
 const ALLOWED_KEYS = ['chain', 'context', 'domain', 'interaction', 'payment', 'wallet'];
 
@@ -190,5 +195,67 @@ describe('postRiskCheck', () => {
       },
     }));
     expect(outcome).toStrictEqual({ kind: 'invalid_response' });
+  });
+});
+
+describe('batch checks (several addresses)', () => {
+  const decoded = decodeTyped(uniswapXOrder([{ token: USDC, amount: '9999000000', recipient: DRAINER }]), USER);
+  const bodies = buildRiskCheckBodies(decoded, 'https://app.uniswap.org');
+
+  it('builds one body per address with its own interaction, payment and a checked-address sentence', () => {
+    expect(bodies.map((body) => body.wallet)).toStrictEqual([DRAINER, REACTOR]);
+    expect(bodies[0]?.interaction).toStrictEqual({ type: 'token_transfer' });
+    expect(bodies[0]?.payment).toStrictEqual({ network: 'eip155:1', pay_to: DRAINER, amount: '9999000000', asset: USDC });
+    expect(bodies[1]?.interaction).toStrictEqual({ type: 'permit_signature' });
+    expect(bodies[0]?.context).toMatch(new RegExp(`Checked address: recipient ${DRAINER} \\(receives an order output`, 'u'));
+    for (const body of bodies) {
+      expect(body.context.length).toBeLessThanOrEqual(MAX_CONTEXT);
+      expect(Object.keys(body).every((key) => ALLOWED_KEYS.includes(key))).toBe(true);
+    }
+  });
+
+  it('keeps the checked-address sentence when the summary is huge', () => {
+    const long = composeContext({ ...decoded, summary: 'x'.repeat(5000) }, 'app.uniswap.org', decoded.others[0]);
+    expect(long.length).toBeLessThanOrEqual(MAX_CONTEXT);
+    expect(long).toContain(`Checked address: spender ${REACTOR}`);
+  });
+
+  it('POSTs {requests} to the batch endpoint and maps results in order', async () => {
+    const calls: { url: string; body: string }[] = [];
+    const outcome = await postRiskChecks(bodies, 'id', async (url, init) => {
+      calls.push({ url, body: init.body });
+      return {
+        status: 200,
+        json: async () => ({ results: [{ checked: true, score: 10, tier: 'critical' }, { checked: false }] }),
+      };
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(BATCH_ENDPOINT);
+    expect(JSON.parse(calls[0]?.body ?? '')).toStrictEqual({ requests: bodies });
+    expect(outcome).toStrictEqual({
+      kind: 'batch',
+      items: [{ status: 'ok', verdict: { checked: true, score: 10, tier: 'critical', categories: [] } }, { status: 'unverified' }],
+    });
+  });
+
+  it('a single address still uses the single endpoint', async () => {
+    const urls: string[] = [];
+    await postRiskChecks([bodies[0] as never], 'id', async (url) => {
+      urls.push(url);
+      return { status: 200, json: async () => ({ checked: true }) };
+    });
+    expect(urls).toStrictEqual([ENDPOINT]);
+  });
+
+  it('validates the batch response shape and statuses', () => {
+    expect(classifyBatchResponse(200, { results: [{ checked: true }] }, 2)).toStrictEqual({ kind: 'invalid_response' });
+    expect(classifyBatchResponse(200, { nope: [] }, 1)).toStrictEqual({ kind: 'invalid_response' });
+    expect(classifyBatchResponse(200, { results: [42] }, 1)).toStrictEqual({ kind: 'batch', items: [{ status: 'invalid' }] });
+    expect(classifyBatchResponse(402, undefined, 2)).toStrictEqual({ kind: 'quota' });
+    expect(classifyBatchResponse(413, undefined, 2)).toStrictEqual({ kind: 'http_error', status: 413 });
+    expect(classifyBatchResponse(422, { error: 'invalid_request', field: 'wallet', index: 1 }, 2)).toStrictEqual({
+      kind: 'http_error',
+      status: 422,
+    });
   });
 });

@@ -21,22 +21,23 @@ import type {
 
 import type { Decoded } from "./src/decode";
 import { decodeSignature, decodeTransaction } from "./src/decode";
-import { buildRiskCheckBody, originHost, postRiskCheck } from "./src/request";
+import { buildRiskCheckBodies, originHost, postRiskChecks } from "./src/request";
 import { clearLegacyState, getInstallIdSafe, isDisclosureShown, markDisclosureShown } from "./src/state";
 import type { InsightResult, RequestKind } from "./src/ui";
-import { disclosureContent, renderLocalOnly, renderOutcome } from "./src/ui";
+import { disclosureContent, renderLocalOnly, renderOutcome, withFallback } from "./src/ui";
 
 async function runCheck(decoded: Decoded, origin: string | undefined, kind: RequestKind): Promise<InsightResult> {
   const host = originHost(origin);
-  const body = buildRiskCheckBody(decoded, origin);
-  if (!body) {
+  const bodies = buildRiskCheckBodies(decoded, origin);
+  if (bodies.length === 0) {
     // Nothing to check (e.g. contract deployment): no network request at all.
     return renderLocalOnly(decoded, host);
   }
   const installId = await getInstallIdSafe();
-  const outcome = await postRiskCheck(body, installId, async (input, init) => fetch(input, init));
+  const outcome = await postRiskChecks(bodies, installId, async (input, init) => fetch(input, init));
   return renderOutcome(decoded, outcome, kind, host);
 }
+
 
 async function showDisclosure(): Promise<void> {
   await snap.request({
@@ -51,8 +52,9 @@ async function showDisclosure(): Promise<void> {
 }
 
 export const onTransaction: OnTransactionHandler = async ({ transaction, chainId, transactionOrigin }) => {
-  const decoded = decodeTransaction(transaction, chainId);
-  const result = await runCheck(decoded, transactionOrigin, "transaction");
+  const result = await withFallback("transaction", async () =>
+    runCheck(decodeTransaction(transaction, chainId), transactionOrigin, "transaction"),
+  );
   const response: OnTransactionResponse = result.severity
     ? { content: result.content, severity: result.severity }
     : { content: result.content };
@@ -60,8 +62,9 @@ export const onTransaction: OnTransactionHandler = async ({ transaction, chainId
 };
 
 export const onSignature: OnSignatureHandler = async ({ signature, signatureOrigin }) => {
-  const decoded = decodeSignature(signature, originHost(signatureOrigin));
-  const result = await runCheck(decoded, signatureOrigin, "signature");
+  const result = await withFallback("signature", async () =>
+    runCheck(decodeSignature(signature, originHost(signatureOrigin)), signatureOrigin, "signature"),
+  );
   // snaps-sdk 8.x types `OnSignatureResponse.content` as the legacy `Component`,
   // but the runtime validates it with the same struct as transaction insights,
   // which accepts JSX elements.

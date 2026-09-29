@@ -4,10 +4,10 @@
 import { describe, expect, it } from '@jest/globals';
 import { RootJSXElementStruct } from '@metamask/snaps-sdk/jsx';
 
-import { decodeTransaction } from '../../src/decode';
-import type { CheckOutcome, Verdict } from '../../src/request';
-import { categoryLabel, disclosureContent, feedHitLabel, renderLocalOnly, renderOutcome } from '../../src/ui';
-import { BAYC, DRAINER, MAX_UINT256, RECIPIENT, USDC, USER, calldata, textOf } from '../helpers';
+import { decodePersonalSign, decodeTransaction } from '../../src/decode';
+import type { BatchItem, CheckOutcome, Verdict } from '../../src/request';
+import { categoryLabel, disclosureContent, feedHitLabel, renderInternalError, renderLocalOnly, renderOutcome, withFallback } from '../../src/ui';
+import { BAYC, DRAINER, MAX_UINT256, RECIPIENT, SAFE, USDC, USER, ZERO, calldata, safeExec, textOf, utf8Hex } from '../helpers';
 
 const approval = decodeTransaction({ from: USER, to: USDC, data: calldata('095ea7b3', DRAINER, MAX_UINT256) }, 'eip155:1');
 const transfer = decodeTransaction({ from: USER, to: RECIPIENT, value: '0x1', data: '0x' }, 'eip155:1');
@@ -194,5 +194,88 @@ describe('other content', () => {
     expect(feedHitLabel({ source: '__proto__', status: 'hit' })).toBe('Listed by __proto__');
     expect(feedHitLabel({ source: 'scamsniffer-addresses', status: 'hit' })).toBe('Known scam address (ScamSniffer)');
     expect(feedHitLabel({ source: 'chainabuse', kind: 'address', status: 'hit' })).toBe('Listed by chainabuse (address)');
+  });
+});
+
+describe('batch verdicts (several addresses checked)', () => {
+  const twoAddresses = decodePersonalSign(utf8Hex(`Claim for token ${USDC}, payout wallet ${DRAINER}`), USER);
+  const good = (score: number, tier: Verdict['tier']): BatchItem => ({ status: 'ok', verdict: { checked: true, categories: [], score, tier } });
+  const renderBatch = (items: BatchItem[]) => {
+    const result = renderOutcome(twoAddresses, { kind: 'batch', items }, 'signature', 'app.example.com');
+    expect(RootJSXElementStruct.is(result.content)).toBe(true);
+    return { text: textOf(result.content), severity: result.severity };
+  };
+
+  it('shows the WORST verdict (highest tier, then lowest score) for its own address and lists the others', () => {
+    const { text, severity } = renderBatch([good(92, 'low'), good(18, 'critical')]);
+    expect(text).toContain('x402check · score 18/100 · critical');
+    expect(text).toContain(`Checked: counterparty ${DRAINER}`);
+    expect(text).toContain('Also checked: counterparty');
+    expect(text).toContain('score 92/100 · low');
+    expect(text).toContain('2 addresses were checked; the worst verdict is shown.');
+    expect(severity).toBe('critical');
+    // Same tier: the lower score is worse.
+    expect(renderBatch([good(55, 'high'), good(35, 'high')]).text).toContain('score 35/100 · high');
+  });
+
+  it('fails closed when an address could not be verified and nothing else is alarming', () => {
+    const { text, severity } = renderBatch([good(95, 'low'), { status: 'unverified' }]);
+    expect(text).toContain('x402check · verification failed — NOT verified');
+    expect(text).toContain('1 of 2 addresses');
+    expect(text).not.toContain('No significant risk');
+    expect(severity).toBeUndefined();
+  });
+
+  it('an alarming verdict still wins over an unverified one', () => {
+    const { text, severity } = renderBatch([{ status: 'invalid' }, good(10, 'critical')]);
+    expect(text).toContain('score 10/100 · critical');
+    expect(text).toContain('NOT verified');
+    expect(severity).toBe('critical');
+  });
+});
+
+describe('locally proven danger', () => {
+  const delegatecall = decodeTransaction({ from: USER, to: SAFE, data: safeExec(DRAINER, 0n, '0x12345678', 1) }, 'eip155:1');
+
+  it('is loud and critical even when the server says low risk', () => {
+    const result = renderOutcome(delegatecall, ok({ score: 95, tier: 'low' }), 'transaction', 'app.safe.global');
+    const text = textOf(result.content);
+    expect(text).toContain('Dangerous request — do not sign');
+    expect(text).toContain(`DELEGATECALL to ${DRAINER}`);
+    expect(text).toContain('Critical risk detected.');
+    expect(text).not.toContain('No significant risk');
+    expect(result.severity).toBe('critical');
+  });
+
+  it('local-only results with danger are critical too', () => {
+    const burn = decodeTransaction({ from: USER, to: ZERO, value: '0x1', data: '0x' }, 'eip155:1');
+    const result = renderLocalOnly(burn, 'app.example.com');
+    expect(textOf(result.content)).toContain('the funds will be lost');
+    expect(result.severity).toBe('critical');
+  });
+
+  it('failures keep the danger banner and critical severity', () => {
+    const result = renderOutcome(delegatecall, { kind: 'network_error', timedOut: false }, 'transaction');
+    expect(textOf(result.content)).toContain('Dangerous request — do not sign');
+    expect(result.severity).toBe('critical');
+  });
+});
+
+describe('internal errors', () => {
+  it('withFallback turns any exception into the static failure insight (finding 8)', async () => {
+    const result = await withFallback('transaction', async () => {
+      throw new RangeError('Maximum call stack size exceeded');
+    });
+    expect(textOf(result.content)).toContain('x402check · check failed — NOT verified');
+    expect(result.severity).toBe('critical');
+    const passthrough = await withFallback('transaction', async () => renderLocalOnly(approval));
+    expect(textOf(passthrough.content)).toContain('x402check · not checked');
+  });
+
+  it('render a static "check failed — NOT verified" insight with critical severity', () => {
+    const result = renderInternalError('signature');
+    expect(RootJSXElementStruct.is(result.content)).toBe(true);
+    expect(textOf(result.content)).toContain('x402check · check failed — NOT verified');
+    expect(result.severity).toBe('critical');
   });
 });

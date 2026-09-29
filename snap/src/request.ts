@@ -1,16 +1,19 @@
 /**
  * Request/response contract with the x402check API.
  *
- * Pure except for `postRiskCheck`, which takes the `fetch` implementation as a
- * parameter (the Snap passes its network endowment).
+ * Pure except for `postRiskChecks`, which takes the `fetch` implementation as
+ * a parameter (the Snap passes its network endowment).
  */
-import type { Decoded, Interaction, Payment } from "./decode";
-import { capText, isPlausibleHost } from "./decode";
+import type { Candidate, Decoded, Interaction, Payment } from "./util";
+import { capText, hostFromUrl, isPlausibleHost, redactSecrets } from "./util";
 
 export const API_ORIGIN = "https://x402check.xyz";
 export const ENDPOINT = `${API_ORIGIN}/v1/risk-check`;
+export const BATCH_ENDPOINT = `${API_ORIGIN}/v1/risk-check/batch`;
 export const JWKS_URL = `${API_ORIGIN}/.well-known/jwks.json`;
 export const MAX_CONTEXT = 700;
+/** Addresses checked per request (billed per item by the batch endpoint). */
+export const MAX_CHECKS = 3;
 /** Insight handlers get 10s (manifest maxRequestTime); keep headroom. */
 export const REQUEST_TIMEOUT_MS = 8000;
 
@@ -75,8 +78,12 @@ export type Verdict = {
   evidence?: Evidence;
 };
 
+/** One item of a batch check. */
+export type BatchItem = { status: "ok"; verdict: Verdict } | { status: "unverified" } | { status: "invalid" };
+
 export type CheckOutcome =
   | { kind: "ok"; verdict: Verdict }
+  | { kind: "batch"; items: BatchItem[] }
   | { kind: "unverified" }
   | { kind: "quota" }
   | { kind: "http_error"; status: number }
@@ -84,8 +91,8 @@ export type CheckOutcome =
   | { kind: "network_error"; timedOut: boolean };
 
 /**
- * Hostname of a request origin ("https://app.example.com" or a bare host).
- * Returns undefined for non-web origins such as "metamask" or "npm:...".
+ * Hostname of a request origin ("https://app.example.com" or a bare host),
+ * punycode-encoded. Undefined for non-web origins ("metamask", "npm:...").
  *
  * @param origin - The transaction or signature origin.
  * @returns The lowercase hostname, or undefined.
@@ -94,66 +101,36 @@ export function originHost(origin: unknown): string | undefined {
   if (typeof origin !== "string") return undefined;
   const raw = origin.trim();
   if (!raw || raw.length > 2048 || /\s/u.test(raw)) return undefined;
-  let host: string;
-  if (/^https?:\/\//iu.test(raw)) {
-    try {
-      host = new URL(raw).hostname;
-    } catch {
-      return undefined;
-    }
-  } else if (/^[a-z0-9.-]+(?::\d{1,5})?$/iu.test(raw)) {
-    host = raw.replace(/:\d{1,5}$/u, "");
-  } else {
-    return undefined;
+  if (/^https?:\/\//iu.test(raw)) return hostFromUrl(raw);
+  if (/^[\p{L}\p{N}.-]{1,253}(?::\d{1,5})?$/u.test(raw)) {
+    const host = hostFromUrl(`https://${raw}`);
+    return host && isPlausibleHost(host) ? host : undefined;
   }
-  host = host.replace(/\.$/u, "").toLowerCase();
-  return isPlausibleHost(host) ? host : undefined;
+  return undefined;
 }
 
 /**
- * Builds the human-readable `context` string (hard cap 700 chars).
+ * Builds the human-readable `context` string (hard cap 700 chars): proven
+ * dangers first, then the decoded summary, warnings and requesting site, and
+ * (for batch checks) which address this item is about. Secret-looking strings
+ * are redacted.
  *
  * @param decoded - The decoded request.
  * @param host - Hostname of the requesting site, if any.
+ * @param candidate - The address this context accompanies (batch items).
  * @returns The context string.
  */
-export function composeContext(decoded: Decoded, host?: string): string {
-  const parts = [decoded.summary];
-  if (decoded.warnings.length > 0) {
-    parts.push(`Local warnings: ${decoded.warnings.join("; ")}.`);
-  }
-  if (host) {
-    parts.push(`Requested by ${host}.`);
-  }
-  return capText(parts.join(" "), MAX_CONTEXT);
-}
-
-/**
- * Builds the POST body, or undefined when there is no counterparty to check.
- *
- * @param decoded - The decoded request.
- * @param origin - The request origin, if any.
- * @returns The body to send.
- */
-export function buildRiskCheckBody(decoded: Decoded, origin?: unknown): RiskCheckBody | undefined {
-  if (!decoded.counterparty) return undefined;
-  const host = originHost(origin);
-  // The requesting site is the primary domain; a signed message with no origin
-  // falls back to the first host named inside the message.
-  const domain = host ?? decoded.referencedHosts?.[0];
-  const payment = cleanPayment(decoded.payment);
-  return {
-    wallet: decoded.counterparty,
-    ...(decoded.chain ? { chain: decoded.chain } : {}),
-    ...(domain ? { domain } : {}),
-    context: composeContext(decoded, host),
-    ...(payment ? { payment } : {}),
-    // Only `type` and `unlimited: true`; nothing else inside `interaction`.
-    interaction:
-      decoded.interaction.unlimited === true
-        ? { type: decoded.interaction.type, unlimited: true }
-        : { type: decoded.interaction.type },
-  };
+export function composeContext(decoded: Decoded, host?: string, candidate?: Candidate): string {
+  const parts: string[] = [];
+  if (decoded.danger.length > 0) parts.push(`Proven danger: ${decoded.danger.join("; ")}.`);
+  parts.push(decoded.summary);
+  if (decoded.warnings.length > 0) parts.push(`Local warnings: ${decoded.warnings.join("; ")}.`);
+  if (host) parts.push(`Requested by ${host}.`);
+  const checked = candidate
+    ? ` Checked address: ${candidate.role} ${candidate.address}${candidate.reason ? ` (${capText(candidate.reason, 120)})` : ""}.`
+    : "";
+  const body = redactSecrets(capText(parts.join(" "), 4096));
+  return `${capText(body, MAX_CONTEXT - checked.length)}${checked}`;
 }
 
 function cleanPayment(input?: Payment): Payment | undefined {
@@ -166,6 +143,57 @@ function cleanPayment(input?: Payment): Payment | undefined {
   return Object.keys(payment).length > 0 ? payment : undefined;
 }
 
+/**
+ * Builds one POST body per checked address (primary first, at most 3). Empty
+ * when there is nothing to check.
+ *
+ * @param decoded - The decoded request.
+ * @param origin - The request origin, if any.
+ * @returns The bodies to send.
+ */
+export function buildRiskCheckBodies(decoded: Decoded, origin?: unknown): RiskCheckBody[] {
+  if (!decoded.counterparty) return [];
+  const host = originHost(origin);
+  // The requesting site is the primary domain; a signed message with no origin
+  // falls back to the first host named inside the message.
+  const domain = host ?? decoded.referencedHosts?.[0];
+  const primary: Candidate = {
+    address: decoded.counterparty,
+    role: decoded.role ?? "counterparty",
+    interaction: decoded.interaction,
+    ...(decoded.payment ? { payment: decoded.payment } : {}),
+    ...(decoded.reason ? { reason: decoded.reason } : {}),
+    rank: 0,
+  };
+  const candidates = [primary, ...decoded.others].slice(0, MAX_CHECKS);
+  return candidates.map((candidate) => {
+    const payment = cleanPayment(candidate.payment);
+    return {
+      wallet: candidate.address,
+      ...(decoded.chain ? { chain: decoded.chain } : {}),
+      ...(domain ? { domain } : {}),
+      context: composeContext(decoded, host, candidates.length > 1 ? candidate : undefined),
+      ...(payment ? { payment } : {}),
+      // Only `type` and `unlimited: true`; nothing else inside `interaction`.
+      interaction:
+        candidate.interaction.unlimited === true
+          ? { type: candidate.interaction.type, unlimited: true }
+          : { type: candidate.interaction.type },
+    };
+  });
+}
+
+/**
+ * The body for the primary address (undefined when nothing is checked).
+ *
+ * @param decoded - The decoded request.
+ * @param origin - The request origin, if any.
+ * @returns The primary body.
+ */
+export function buildRiskCheckBody(decoded: Decoded, origin?: unknown): RiskCheckBody | undefined {
+  return buildRiskCheckBodies(decoded, origin)[0];
+}
+
 // ---------------------------------------------------------------------------
 // Response parsing (defensive: the UI only ever sees validated fields)
 // ---------------------------------------------------------------------------
@@ -176,7 +204,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function safeString(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
-  const text = value.replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/gu, " ").trim();
+  const text = value
+    .slice(0, max * 4)
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/gu, " ")
+    .trim();
   return text ? capText(text, max) : undefined;
 }
 
@@ -203,6 +234,7 @@ function parseDomain(value: unknown): DomainEvidence | undefined {
   const brand = safeString(value.brand, 40);
   const signals = Array.isArray(value.signals)
     ? value.signals
+        .slice(0, 16)
         .map((signal) => safeString(signal, 80))
         .filter((signal): signal is string => Boolean(signal))
         .slice(0, 4)
@@ -266,6 +298,7 @@ export function parseVerdict(json: unknown): Verdict | { checked: false } | unde
   }
   if (Array.isArray(json.categories)) {
     verdict.categories = json.categories
+      .slice(0, 32)
       .map((category) => safeString(category, 48))
       .filter((category): category is string => Boolean(category))
       .slice(0, 8);
@@ -273,7 +306,7 @@ export function parseVerdict(json: unknown): Verdict | { checked: false } | unde
   if (typeof json.jws === "string" && json.jws.length <= 16384 && /^[\w-]+\.[\w-]*\.[\w-]+$/u.test(json.jws)) {
     verdict.jws = json.jws;
   }
-  if (typeof json.jwks_url === "string" && /^https:\/\/[^\s]{1,300}$/u.test(json.jwks_url)) {
+  if (typeof json.jwks_url === "string" && json.jwks_url.length <= 308 && /^https:\/\/[^\s]{1,300}$/u.test(json.jwks_url)) {
     verdict.jwks_url = json.jwks_url;
   }
   const provider = safeString(json.provider, 64);
@@ -310,13 +343,69 @@ export function classifyResponse(status: number, json: unknown): CheckOutcome {
   return { kind: "ok", verdict };
 }
 
+/**
+ * Maps a batch response: `{ results: [...] }` in request order.
+ *
+ * @param status - HTTP status code.
+ * @param json - Parsed body.
+ * @param expected - Number of requests sent.
+ * @returns The outcome.
+ */
+export function classifyBatchResponse(status: number, json: unknown, expected: number): CheckOutcome {
+  if (status === 402) return { kind: "quota" };
+  if (status !== 200) return { kind: "http_error", status };
+  if (!isObject(json) || !Array.isArray(json.results) || json.results.length !== expected) return { kind: "invalid_response" };
+  const items: BatchItem[] = json.results.map((result) => {
+    const verdict = parseVerdict(result);
+    if (!verdict) return { status: "invalid" };
+    if (verdict.checked === false) return { status: "unverified" };
+    return { status: "ok", verdict };
+  });
+  return { kind: "batch", items };
+}
+
 type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{
   status: number;
   json(): Promise<unknown>;
 }>;
 
+type Posted = { status: number; json: unknown } | { failed: true; timedOut: boolean };
+
+async function postJson(url: string, payload: unknown, installId: string, fetchImpl: FetchLike, timeoutMs: number): Promise<Posted> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Risk-Check-Client": installId,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    let json: unknown;
+    if (response.status === 200) {
+      try {
+        json = await response.json();
+      } catch {
+        json = undefined;
+      }
+    }
+    return { status: response.status, json };
+  } catch {
+    return { failed: true, timedOut };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
- * POSTs the body to the risk-check endpoint with a timeout.
+ * POSTs one body to the risk-check endpoint with a timeout.
  *
  * @param body - The request body.
  * @param installId - Random per-install id (free-tier accounting only).
@@ -330,34 +419,32 @@ export async function postRiskCheck(
   fetchImpl: FetchLike,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<CheckOutcome> {
-  const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-  try {
-    const response = await fetchImpl(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Risk-Check-Client": installId,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    let json: unknown;
-    if (response.status === 200) {
-      try {
-        json = await response.json();
-      } catch {
-        json = undefined;
-      }
-    }
-    return classifyResponse(response.status, json);
-  } catch {
-    return { kind: "network_error", timedOut };
-  } finally {
-    clearTimeout(timer);
+  const posted = await postJson(ENDPOINT, body, installId, fetchImpl, timeoutMs);
+  if ("failed" in posted) return { kind: "network_error", timedOut: posted.timedOut };
+  return classifyResponse(posted.status, posted.json);
+}
+
+/**
+ * Checks one address (single endpoint) or several (batch endpoint).
+ *
+ * @param bodies - Request bodies, primary first.
+ * @param installId - Random per-install id.
+ * @param fetchImpl - The fetch implementation.
+ * @param timeoutMs - Abort after this many milliseconds.
+ * @returns The outcome; never throws.
+ */
+export async function postRiskChecks(
+  bodies: RiskCheckBody[],
+  installId: string,
+  fetchImpl: FetchLike,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<CheckOutcome> {
+  if (bodies.length <= 1) {
+    const [body] = bodies;
+    return body ? postRiskCheck(body, installId, fetchImpl, timeoutMs) : { kind: "invalid_response" };
   }
+  const requests = bodies.slice(0, MAX_CHECKS);
+  const posted = await postJson(BATCH_ENDPOINT, { requests }, installId, fetchImpl, timeoutMs);
+  if ("failed" in posted) return { kind: "network_error", timedOut: posted.timedOut };
+  return classifyBatchResponse(posted.status, posted.json, requests.length);
 }

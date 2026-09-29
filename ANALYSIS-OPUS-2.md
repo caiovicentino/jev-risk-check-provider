@@ -74,6 +74,34 @@
 6. **Rotina diária:** rodar `npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload`, e periodicamente `npm run ofac:update` / `npm run feeds:update` seguidos de deploy.
 7. **Rotacionar a chave de atestação:** ela ficou com permissão 644 até esta revisão (agora está em 600). Não há sinal de exposição, mas a custódia em KMS está no roadmap.
 
-## 5. Rollback
+## 5. Segunda revisão adversarial (depois das correções)
+
+Dois revisores independentes atacaram o código v0.2.0 e só reportaram achados que reproduziram.
+
+- **Backend: 9 achados, todos corrigidos em `1e27dff`**, com os testes em `test/review-regressions.test.ts`:
+  - variante de caixa de endereço Base58Check listado;
+  - codificação alternativa da mesma chave;
+  - verificador comparando `sub` sem diferenciar maiúsculas;
+  - punycode hostil gerando 500 antes da OFAC;
+  - `pre_authorized` subindo o score;
+  - CAIP-10 divergente do `chain`;
+  - `chain: "constructor"` aceito;
+  - limite de corpo contado em caracteres;
+  - liquidação sem veredito;
+  - virada de dia;
+  - `X-PAYMENT`.
+- **Produção:** Worker `161c912e`, validado com sondas sem custo e no workerd.
+- **Snap: 9 achados, todos corrigidos** (199 testes). Os casos:
+  - codificações não canônicas de typed data que assinam o mesmo hash de um drenador;
+  - `allowed` do DAI por truthiness;
+  - valor nativo para contrato com seletor conhecido;
+  - listagens por poeira (Seaport, Blur, LooksRare);
+  - saídas do UniswapX;
+  - wrappers (multicall, Safe, Universal Router, 7579/4337/7702);
+  - approve(x, 0) ambíguo;
+  - estouro de pilha com entradas gigantes;
+  - vazamento de strings com cara de segredo e hosts IDN.
+
+## 6. Rollback
 
 `cd deploy && wrangler rollback` volta à versão anterior. A versão pré-revisão era a `565b0f8e`.

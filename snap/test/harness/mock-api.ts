@@ -19,9 +19,10 @@ export type MockReply =
 
 export type Responder = (request: RecordedRequest) => MockReply;
 
+/** Safety score: 100 = safe; the backend maps >= 80 to "low" risk. */
 export const LOW_RISK_VERDICT = {
   checked: true,
-  score: 12,
+  score: 88,
   tier: 'low',
   categories: [],
   provider: 'x402check',
@@ -29,10 +30,16 @@ export const LOW_RISK_VERDICT = {
   jwks_url: 'https://x402check.xyz/.well-known/jwks.json',
 };
 
+/** Low-risk verdict for /v1/risk-check, one per item for /v1/risk-check/batch. */
+export const lowRisk: Responder = (request) =>
+  request.path.endsWith('/batch')
+    ? { status: 200, json: { results: (request.body?.requests ?? []).map(() => LOW_RISK_VERDICT) } }
+    : { status: 200, json: LOW_RISK_VERDICT };
+
 export class MockApi {
   readonly requests: RecordedRequest[] = [];
 
-  #responder: Responder = () => ({ status: 200, json: LOW_RISK_VERDICT });
+  #responder: Responder = lowRisk;
 
   readonly #server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -83,7 +90,7 @@ export class MockApi {
 
   reset(): void {
     this.requests.length = 0;
-    this.respondWith({ status: 200, json: LOW_RISK_VERDICT });
+    this.respondWith(lowRisk);
   }
 
   get last(): RecordedRequest | undefined {

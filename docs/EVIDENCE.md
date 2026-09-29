@@ -127,13 +127,20 @@ Removing the trust floor moved the red-team layer from 99.2% to 99.0% (FP 9 → 
 - wrapper calls;
 - a stack overflow on huge inputs.
 
-Fixes are tracked in the Snap's own tests (see the Snap commit).
+All nine are fixed and each probe is now a regression test (199 Snap tests). The main changes:
+
+- Typed data is decoded only through the fields declared in `types`, with MetaMask's own normalization. An unknown permit amount is treated as unlimited.
+- Native value always makes the value recipient the primary counterparty.
+- Wrappers (multicall, Safe, Universal Router, ERC-7579/4337, 7702 self-calls) are decoded.
+- Seaport/Blur/LooksRare dust listings and UniswapX outputs are checked.
+- Every handler is wrapped so that any exception renders "NOT verified".
+- Up to 3 candidate counterparties go through the batch endpoint, and the worst verdict is shown.
 
 ## Reproduce
 
 ```bash
 npm test                                     # 63 unit tests
-npm --prefix snap test                       # 90 Snap tests (built bundle in SES)
+npm --prefix snap test                       # 199 Snap tests (built bundle in SES)
 npm run eval:suite -- --seed 200             # needs AI_GATEWAY_API_KEY or TYPESAFE_API_KEY
 TRANCO_LIST=top-1m.txt npm run eval:grounded -- --seed 200 --tranco-n 200000
 npm run security:v2 && npm run prod          # against production (free tier: 25/day)
