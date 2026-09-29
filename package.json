@@ -24,7 +24,8 @@
     "demo": "tsx demo/run.ts",
     "board": "tsx eval/scoreboard.ts",
     "verify": "tsx eval/verify.ts",
-    "security": "tsx eval/security.ts"
+    "security": "tsx eval/security.ts",
+    "security:full": "tsx eval/security-full.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

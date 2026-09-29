@@ -12,7 +12,11 @@ export type HandlerDeps = {
 function validateRequest(body: unknown): RiskCheckRequest | null {
   if (!body || typeof body !== "object") return null;
   const obj = body as Record<string, unknown>;
-  if (typeof obj.wallet !== "string" || obj.wallet.length === 0) return null;
+  if (typeof obj.wallet !== "string" || obj.wallet.trim().length === 0) return null;
+  if (obj.wallet.trim().length > 128) return null;
+  for (const field of ["chain", "domain", "context", "aud"] as const) {
+    if (obj[field] !== undefined && typeof obj[field] !== "string") return null;
+  }
   let screening: RiskCheckRequest["screening"];
   if (obj.screening && typeof obj.screening === "object") {
     const s = obj.screening as Record<string, unknown>;
@@ -28,11 +32,11 @@ function validateRequest(body: unknown): RiskCheckRequest | null {
     }
   }
   return {
-    wallet: obj.wallet,
-    chain: typeof obj.chain === "string" ? obj.chain : undefined,
-    domain: typeof obj.domain === "string" ? obj.domain : undefined,
-    context: typeof obj.context === "string" ? obj.context : undefined,
-    aud: typeof obj.aud === "string" ? obj.aud : undefined,
+    wallet: obj.wallet.trim(),
+    chain: obj.chain as string | undefined,
+    domain: obj.domain as string | undefined,
+    context: obj.context as string | undefined,
+    aud: obj.aud as string | undefined,
     screening,
     authorization,
   };
