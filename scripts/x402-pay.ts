@@ -44,6 +44,12 @@ async function main() {
     console.log("SETTLED:", JSON.stringify({ success: s.success, transaction: s.transaction, network: s.network, payer: s.payer }));
   }
   console.log("STATUS:", res.status);
+  const pr = res.headers.get("payment-required");
+  if (pr) {
+    const decoded = JSON.parse(Buffer.from(pr, "base64").toString("utf8"));
+    console.log("PAYMENT-REQUIRED error:", decoded.error ?? "(none)");
+    console.log("PAYMENT-REQUIRED full:", JSON.stringify(decoded).slice(0, 600));
+  }
   const data = await res.json();
   console.log(JSON.stringify(data).slice(0, 400));
 }

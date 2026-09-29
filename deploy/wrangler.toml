@@ -14,7 +14,7 @@ id = "47c8f208cb1e498e81b8dc2dc15a968c"
 PROVIDER_HOST = "x402check.xyz"
 PAY_TO_EVM = "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178"
 PAY_TO_SOL = "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X"
-FREE_TIER_DAILY = "100"
+FREE_TIER_DAILY = "0"
 
 # Secrets to set before deploy (do NOT commit):
 #   wrangler secret put AI_GATEWAY_API_KEY      (or TYPESAFE_API_KEY)

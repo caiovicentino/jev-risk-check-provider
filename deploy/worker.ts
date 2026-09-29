@@ -86,7 +86,7 @@ function buildStack(env: WorkerEnv): Stack {
     { scheme: "exact", network: "eip155:43114", payTo: payToEvm, price: "$0.001" },
     { scheme: "exact", network: "eip155:143", payTo: payToEvm, price: "$0.001" },
     { scheme: "exact", network: "eip155:1329", payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: "$0.001" },
+    { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: "$0.002" },
     { scheme: "exact", network: BASE_SEPOLIA, payTo: payToEvm, price: "$0.001" },
     { scheme: "exact", network: "eip155:421614", payTo: payToEvm, price: "$0.001" },
     { scheme: "exact", network: SOLANA_DEVNET, payTo: payToSol, price: "$0.001" },
@@ -155,7 +155,7 @@ async function freeQuota(env: WorkerEnv, ip: string): Promise<number> {
 }
 
 async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
-  const paymentHeader = request.headers.get("X-PAYMENT");
+  const paymentHeader = request.headers.get("PAYMENT-SIGNATURE") ?? request.headers.get("X-PAYMENT");
   if (!paymentHeader) {
     const remaining = await freeQuota(env, request.headers.get("CF-Connecting-IP") ?? "unknown");
     if (remaining > 0) {
