@@ -169,80 +169,6 @@ function instructionsToResponse(instr: HTTPResponseInstructions): Response {
   });
 }
 
-/**
- * Quota identity for a client IP. IPv6 is aggregated to its /64: a single host
- * controls a whole /64, so per-address keys would make every limit unbounded.
- */
-export function quotaIpKey(ip: string): string {
-  if (!ip.includes(":")) return ip;
-  const [head = "", tail] = ip.toLowerCase().split("::");
-  const h = head ? head.split(":") : [];
-  const t = tail ? tail.split(":") : [];
-  if (t.length && t[t.length - 1]!.includes(".")) t.splice(t.length - 1, 1, "0", "0"); // embedded IPv4 = 2 groups
-  const groups = tail === undefined ? h : [...h, ...Array<string>(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
-  const prefix = groups.slice(0, 4).map((g) => (Number.parseInt(g || "0", 16) || 0).toString(16));
-  while (prefix.length < 4) prefix.push("0");
-  return `${prefix.join(":")}::/64`;
-}
-
-const NEW_CLIENT_BUDGET_DAILY = 1000;
-// Caps how many fresh client ids one IP (/64) can mint per day.
-const NEW_CLIENTS_PER_IP_DAILY = 10;
-
-type ConsumeResult = { allowed: boolean; remaining: number };
-
-async function doConsume(env: WorkerEnv, key: string, daily: number, cost: number, admit?: { key: string; daily: number }[]): Promise<ConsumeResult | null> {
-  if (!env.COUNTER) return null;
-  const day = new Date().toISOString().slice(0, 10);
-  try {
-    const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
-    const res = await stub.fetch("https://counter/consume", {
-      method: "POST",
-      body: JSON.stringify({ op: "consume", key, day, daily, cost, ...(admit ? { admit } : {}) }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as ConsumeResult;
-    return { allowed: data.allowed, remaining: data.remaining };
-  } catch {
-    return null;
-  }
-}
-
-export async function doTotal(env: WorkerEnv): Promise<number | null> {
-  if (!env.COUNTER) return null;
-  const day = new Date().toISOString().slice(0, 10);
-  try {
-    const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
-    const res = await stub.fetch("https://counter/total", { method: "POST", body: JSON.stringify({ op: "total", day }) });
-    if (!res.ok) return null;
-    return ((await res.json()) as { total: number }).total;
-  } catch {
-    return null;
-  }
-}
-
-function freeDaily(env: WorkerEnv): number {
-  const daily = Number(env.FREE_TIER_DAILY ?? "25");
-  return Number.isFinite(daily) && daily > 0 ? daily : 0;
-}
-
-/** Charges `units` free evaluations; fail-closed (not granted) when the counter is unavailable. */
-export async function chargeFreeTier(env: WorkerEnv, ipKey: string, clientId: string, units: number): Promise<{ granted: boolean; remaining: number }> {
-  const daily = freeDaily(env);
-  if (daily <= 0) return { granted: false, remaining: 0 };
-  if (clientId) {
-    const viaClient = await doConsume(env, `client:${clientId}`, daily, units, [
-      { key: "client-new:global", daily: NEW_CLIENT_BUDGET_DAILY },
-      { key: `client-new-ip:${ipKey}`, daily: NEW_CLIENTS_PER_IP_DAILY },
-    ]);
-    if (viaClient?.allowed) return { granted: true, remaining: viaClient.remaining };
-    // A denied or exhausted client id falls back to the caller's IP allowance, so
-    // draining the global new-client budget cannot lock real new installs out.
-  }
-  const viaIp = await doConsume(env, `ip:${ipKey}`, daily, units);
-  return { granted: viaIp?.allowed === true, remaining: viaIp?.remaining ?? 0 };
-}
-
 export function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return Response.json(body, { status, headers });
 }
@@ -281,11 +207,11 @@ async function allChecked(res: Response): Promise<boolean> {
   }
 }
 
-export async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
+export async function handleProtected(request: Request, _env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
   const path = new URL(request.url).pathname;
-  // 1. Read and validate before any quota or payment work: invalid input never
-  //    costs the caller a free slot and is never priced. The cap is in BYTES and is
-  //    enforced while streaming, so an oversized body is never fully buffered.
+  // 1. Read and validate before any payment work: invalid input is never priced. The
+  //    cap is in BYTES and is enforced while streaming, so an oversized body is never
+  //    fully buffered.
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
   const bytes = await readCapped(request, MAX_BODY_BYTES);
@@ -304,33 +230,16 @@ export async function handleProtected(request: Request, env: WorkerEnv, stack: S
     const v = validateRequest(parsed);
     if (!v.ok) return json(422, { error: "invalid_request", field: v.field });
   }
-  const units = unitsFor(path, parsed);
   const replay = () => new Request(request.url, { method: "POST", headers: request.headers, body: text });
 
-  // 2. Free tier: charged per evaluation (a batch of n costs n slots). Only the x402 v2
-  //    PAYMENT-SIGNATURE header counts as a payment attempt: the SDK in use does not read
-  //    X-PAYMENT, so honouring it here would skip the free tier for a payment that can
-  //    never be processed.
-  const paymentHeader = request.headers.get("PAYMENT-SIGNATURE");
-  const forcePaid = (request.headers.get("X-Risk-Check-Paid") ?? "").trim().length > 0;
-  if (!paymentHeader && !forcePaid) {
-    const clientId = (request.headers.get("X-Risk-Check-Client") ?? "").trim().slice(0, 64);
-    const ipKey = quotaIpKey(request.headers.get("CF-Connecting-IP") ?? "unknown");
-    const free = await chargeFreeTier(env, ipKey, clientId, units);
-    if (free.granted) {
-      const res = await serve(replay());
-      res.headers.set("X-Risk-Check-Free", "true");
-      res.headers.set("X-Risk-Check-Free-Remaining", String(free.remaining));
-      return res;
-    }
-  }
-
-  // 3. Paid path: price = unit price × units; the result is released only after settlement.
+  // 2. Every evaluation is paid (x402 v2, PAYMENT-SIGNATURE): price = unit price × units
+  //    (a batch of n is billed n). There is no free tier. Without a payment the response
+  //    is the 402 challenge listing the accepted mainnet options.
   const ctx: HTTPRequestContext = {
     adapter: fetchAdapter(request, parsed),
     path,
     method: request.method,
-    ...(paymentHeader ? { paymentHeader } : {}),
+    ...(request.headers.get("PAYMENT-SIGNATURE") ? { paymentHeader: request.headers.get("PAYMENT-SIGNATURE") as string } : {}),
   };
   let result: HTTPProcessResult;
   try {
@@ -338,6 +247,7 @@ export async function handleProtected(request: Request, env: WorkerEnv, stack: S
   } catch {
     return json(500, { error: "payment_processing_failed" });
   }
+  // 3. Evaluate, then settle; the result is released only after settlement succeeds.
   if (result.type === "payment-error") return instructionsToResponse(result.response);
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
   const res = await serve(replay());

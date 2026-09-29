@@ -5,19 +5,6 @@ export interface KVNamespace {
   get(key: string, opts: { type: "arrayBuffer"; cacheTtl?: number }): Promise<ArrayBuffer | null>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
 }
-export interface SqlStorage {
-  exec(query: string, ...params: unknown[]): { toArray(): unknown[] };
-}
-export interface DurableObjectState {
-  storage: { sql: SqlStorage } | unknown;
-}
-export interface DurableObjectStub {
-  fetch(input: string, init?: RequestInit): Promise<Response>;
-}
-export interface DurableObjectNamespace {
-  idFromName(name: string): unknown;
-  get(id: unknown): DurableObjectStub;
-}
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
 }
@@ -31,7 +18,6 @@ export type WorkerEnv = {
   PAY_TO_EVM?: string;
   PAY_TO_SOL?: string;
   X402_FACILITATOR_URL?: string;
-  FREE_TIER_DAILY?: string;
   SOL_RPC_URL?: string;
   SOL_RPC_URL_MAINNET?: string;
   X402_FACILITATOR_URL_MAINNET?: string;
@@ -51,6 +37,5 @@ export type WorkerEnv = {
   /** Base URL of the published feeds (MetaMask, OFAC) for runtime refresh; "off" keeps the embedded snapshot. */
   FEEDS_URL?: string;
   RATE?: KVNamespace;
-  COUNTER?: DurableObjectNamespace;
 };
 

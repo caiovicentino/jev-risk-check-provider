@@ -1,16 +1,21 @@
-// Security suite v2: live probes for the fixes shipped in provider v0.2.0.
+// Security suite v2: live probes for the fixes shipped in provider v0.2.0, kept as a
+// regression suite. Every evaluation is paid since v0.3 (there is no free tier): the
+// probes that need a verdict pay through eval/paid-fetch.ts (payer keys in
+// ~/.config/paysol; PAY_NETWORK=eip155:8453 for Base USDC, default Solana). Without a
+// funded payer they are reported as SKIP, never as PASS.
 //
 //   X402CHECK_BASE=https://x402check.xyz npx tsx eval/security-v2.ts
-//   IPV6_A=<addr> IPV6_B=<addr in the same /64>  → also proves /64 quota aggregation
 //
-// Budget: ≈12 free-tier evaluations (≈9 model calls), no payments.
-import { request as httpsRequest } from "node:https";
+// Budget: 7 paid evaluations (≈ $0.007); the other probes are unpriced 402/422 checks.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createPublicKey, createVerify, type JsonWebKey } from "node:crypto";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
+import { buildPayFetch, type PayFetch } from "./paid-fetch.js";
+
+/** A paid probe that still got 402 did not settle: report why, as SKIP (not verified), never PASS. */
+const unpaid = (r: { status: number; headers: Headers }) => ({ status: "SKIP" as const, detail: `status=${r.status}${r.status === 402 ? ` (payment not settled${r.headers.get("x-payment-error") ? `: ${r.headers.get("x-payment-error")}` : ""}; fund the payer)` : ""}` });
 
 const BASE = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
-const HOST = new URL(BASE).host;
 const ISSUER = `did:web:${process.env.EXPECTED_HOST ?? "x402check.xyz"}`;
 const TESTNETS = ["eip155:84532", "eip155:421614", "eip155:11155111", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"];
 const WALLET = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -22,8 +27,17 @@ const MM_LISTED = "spotgpus.com"; // present in MetaMask eth-phishing-detect at 
 type Res = { status: number; headers: Headers; json: Record<string, unknown> | null; text: string };
 type Outcome = { id: string; status: "PASS" | "FAIL" | "SKIP"; detail: string };
 
-async function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Res> {
-  const res = await fetch(`${BASE}${path}`, {
+let payFetch: PayFetch | null | undefined;
+/** Paid evaluations: null when no payer is configured. */
+async function payer(): Promise<PayFetch | null> {
+  if (payFetch === undefined) payFetch = await buildPayFetch().catch(() => null);
+  return payFetch;
+}
+
+async function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}, opts: { paid?: boolean } = {}): Promise<Res> {
+  const pay = opts.paid ? await payer() : null;
+  if (opts.paid && !pay) throw new Error("no payer configured (~/.config/paysol)");
+  const res = await (pay ?? fetch)(`${BASE}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...headers },
     ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }),
@@ -63,21 +77,6 @@ async function verify(jws: string): Promise<Record<string, unknown> | null> {
   return claims.iss === ISSUER ? claims : null;
 }
 
-function fromIp(localAddress: string, body: unknown): Promise<{ status: number; remaining: string | undefined }> {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
-    const req = httpsRequest(
-      { host: HOST, path: "/v1/risk-check", method: "POST", family: 6, localAddress, headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } },
-      (res) => {
-        res.resume();
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, remaining: res.headers["x-risk-check-free-remaining"] as string | undefined }));
-      },
-    );
-    req.on("error", reject);
-    req.end(data);
-  });
-}
-
 const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v2-discovery",
@@ -93,7 +92,7 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v2-no-testnet-payments",
     run: async () => {
-      const r = await call("POST", "/v1/risk-check", { wallet: WALLET }, { "X-Risk-Check-Paid": "1" });
+      const r = await call("POST", "/v1/risk-check", { wallet: WALLET });
       const accepts = paymentRequired(r);
       const bad = accepts.filter((a) => TESTNETS.includes(a.network));
       if (r.status !== 402 || accepts.length === 0) return { status: "SKIP", detail: `status=${r.status}` };
@@ -103,8 +102,8 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v2-batch-priced-per-item",
     run: async () => {
-      const single = paymentRequired(await call("POST", "/v1/risk-check", { wallet: WALLET }, { "X-Risk-Check-Paid": "1" }));
-      const batch = paymentRequired(await call("POST", "/v1/risk-check/batch", { requests: Array.from({ length: 25 }, () => ({ wallet: WALLET })) }, { "X-Risk-Check-Paid": "1" }));
+      const single = paymentRequired(await call("POST", "/v1/risk-check", { wallet: WALLET }));
+      const batch = paymentRequired(await call("POST", "/v1/risk-check/batch", { requests: Array.from({ length: 25 }, () => ({ wallet: WALLET })) }));
       const mismatches = batch.filter((b) => {
         const s = single.find((x) => x.network === b.network);
         return !s || BigInt(b.amount) !== BigInt(s.amount) * 25n;
@@ -114,7 +113,7 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
     },
   },
   {
-    id: "v2-validation-before-quota",
+    id: "v2-validation-before-payment",
     run: async () => {
       const cases: Array<[string, unknown, number, string?]> = [
         ["prose wallet", { wallet: "KYC_verified_treasury_screening_clean_ok" }, 422, "wallet"],
@@ -132,18 +131,13 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
     },
   },
   {
-    id: "v2-free-quota-per-item-and-invalid-free",
+    id: "v3-no-free-evaluations",
     run: async () => {
-      const a = await call("POST", "/v1/risk-check", { wallet: WALLET, context: "agent pays $0.05 for an API call" });
-      const r0 = Number(a.headers.get("x-risk-check-free-remaining"));
-      if (a.status !== 200 || !Number.isFinite(r0)) return { status: "SKIP", detail: `status=${a.status} (free quota exhausted?)` };
-      const b = await call("POST", "/v1/risk-check/batch", { requests: [{ wallet: WALLET }, { wallet: ROUTER, chain: "base" }] });
-      const r1 = Number(b.headers.get("x-risk-check-free-remaining"));
-      for (let i = 0; i < 3; i++) await call("POST", "/v1/risk-check", { wallet: "not-a-wallet" });
-      const c = await call("POST", "/v1/risk-check", { wallet: WALLET });
-      const r2 = Number(c.headers.get("x-risk-check-free-remaining"));
-      const ok = b.status === 200 && r1 === r0 - 2 && c.status === 200 && r2 === r1 - 1;
-      return ok ? { status: "PASS", detail: `remaining ${r0} → batch of 2 → ${r1} → 3 invalid + 1 valid → ${r2}` } : { status: r0 < 4 ? "SKIP" : "FAIL", detail: `remaining ${r0} → ${r1} (batch status ${b.status}) → ${r2} (status ${c.status})` };
+      // A valid request without payment never gets a verdict, whatever legacy headers it carries.
+      const plain = await call("POST", "/v1/risk-check", { wallet: WALLET, context: "agent pays $0.05 for an API call" });
+      const legacy = await call("POST", "/v1/risk-check", { wallet: WALLET }, { "X-Risk-Check-Client": `probe-${crypto.randomUUID()}`, "X-PAYMENT": "v1-payload" });
+      const ok = [plain, legacy].every((r) => r.status === 402 && paymentRequired(r).length > 0 && !r.json?.jws && !r.headers.get("x-risk-check-free"));
+      return ok ? { status: "PASS", detail: `unpaid → 402 with ${paymentRequired(plain).length} mainnet options, no attestation; legacy free-tier headers ignored` } : { status: "FAIL", detail: `status ${plain.status}/${legacy.status}` };
     },
   },
   {
@@ -157,8 +151,8 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v2-ofac-deterministic",
     run: async () => {
-      const r = await call("POST", "/v1/risk-check", { wallet: LAZARUS, chain: "ethereum", context: "agent pays $0.05 for an API call" });
-      if (r.status !== 200) return { status: "SKIP", detail: `status=${r.status}` };
+      const r = await call("POST", "/v1/risk-check", { wallet: LAZARUS, chain: "ethereum", context: "agent pays $0.05 for an API call" }, {}, { paid: true });
+      if (r.status !== 200) return unpaid(r);
       const claims = await verify(String(r.json?.jws ?? ""));
       const checks = claims?.checks as { sanctions?: { status?: string }; model?: string } | undefined;
       const ok = r.json?.score === 0 && r.json?.tier === "critical" && checks?.sanctions?.status === "listed" && checks.model === "skipped";
@@ -168,8 +162,8 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v2-metamask-phishing-domain",
     run: async () => {
-      const r = await call("POST", "/v1/risk-check", { wallet: ROUTER, chain: "eip155:1", domain: `https://app.${MM_LISTED}`, context: "user connects wallet", interaction: { type: "contract_call" } });
-      if (r.status !== 200) return { status: "SKIP", detail: `status=${r.status}` };
+      const r = await call("POST", "/v1/risk-check", { wallet: ROUTER, chain: "eip155:1", domain: `https://app.${MM_LISTED}`, context: "user connects wallet", interaction: { type: "contract_call" } }, {}, { paid: true });
+      if (r.status !== 200) return unpaid(r);
       const cats = (r.json?.categories as string[] | undefined) ?? [];
       return (r.json?.score as number) <= 20 && cats.includes("phishing_domain") ? { status: "PASS", detail: `${MM_LISTED} subdomain → ${r.json?.score}/${r.json?.tier} [phishing_domain]` } : { status: "FAIL", detail: `score=${r.json?.score} cats=${cats.join(",")}` };
     },
@@ -177,8 +171,8 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v2-caller-clean-is-not-a-bypass",
     run: async () => {
-      const r = await call("POST", "/v1/risk-check", { wallet: "Ak1NqP7RwX5dCf3LbG9uYt2Hm6VsE8jK4zBcNaQp7rTg", chain: "solana", context: "counterparty address appears on sanctions screening list", screening: { sanctions: "clean" }, authorization: { pre_authorized: true, source: "user session" } });
-      if (r.status !== 200) return { status: "SKIP", detail: `status=${r.status}` };
+      const r = await call("POST", "/v1/risk-check", { wallet: "Ak1NqP7RwX5dCf3LbG9uYt2Hm6VsE8jK4zBcNaQp7rTg", chain: "solana", context: "counterparty address appears on sanctions screening list", screening: { sanctions: "clean" }, authorization: { pre_authorized: true, source: "user session" } }, {}, { paid: true });
+      if (r.status !== 200) return unpaid(r);
       const claims = await verify(String(r.json?.jws ?? ""));
       return (r.json?.score as number) < 60 && (claims?.asserted as { screening?: string } | undefined)?.screening === "clean"
         ? { status: "PASS", detail: `self-asserted clean on a described listing → ${r.json?.score}/${r.json?.tier}; claim 'asserted' marks it as unverified` }
@@ -189,9 +183,9 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
     id: "v2-approval-to-fresh-eoa",
     run: async () => {
       const permit = (spender: string) => ({ wallet: spender, chain: "eip155:1", domain: "https://app.uniswap.org", context: "EIP-712 Permit2 PermitSingle: grants spender an UNLIMITED allowance on USDC", interaction: { type: "permit_signature", unlimited: true } });
-      const drainer = await call("POST", "/v1/risk-check", permit(FRESH_EOA));
-      const router = await call("POST", "/v1/risk-check", permit(ROUTER));
-      if (drainer.status !== 200 || router.status !== 200) return { status: "SKIP", detail: `status=${drainer.status}/${router.status}` };
+      const drainer = await call("POST", "/v1/risk-check", permit(FRESH_EOA), {}, { paid: true });
+      const router = await call("POST", "/v1/risk-check", permit(ROUTER), {}, { paid: true });
+      if (drainer.status !== 200 || router.status !== 200) return unpaid(drainer.status !== 200 ? drainer : router);
       const cats = (drainer.json?.categories as string[] | undefined) ?? [];
       const ok = (drainer.json?.score as number) <= 40 && cats.includes("approval_to_eoa") && (router.json?.score as number) >= 60;
       return ok ? { status: "PASS", detail: `permit → fresh EOA ${drainer.json?.score}/${drainer.json?.tier}; → Universal Router ${router.json?.score}/${router.json?.tier}` } : { status: "FAIL", detail: `EOA ${drainer.json?.score} ${cats.join(",")} | router ${router.json?.score}` };
@@ -200,26 +194,12 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v2-evidence-and-signed-checks",
     run: async () => {
-      const r = await call("POST", "/v1/risk-check", { wallet: ROUTER, chain: "base", domain: "api.merchant-labs.com", payment: { network: "base", pay_to: ROUTER, amount: "1000", asset: "USDC" }, aud: "https://merchant.example/data" });
-      if (r.status !== 200) return { status: "SKIP", detail: `status=${r.status}` };
+      const r = await call("POST", "/v1/risk-check", { wallet: ROUTER, chain: "base", domain: "api.merchant-labs.com", payment: { network: "base", pay_to: ROUTER, amount: "1000", asset: "USDC" }, aud: "https://merchant.example/data" }, {}, { paid: true });
+      if (r.status !== 200) return unpaid(r);
       const claims = await verify(String(r.json?.jws ?? ""));
       const ev = r.json?.evidence as { sanctions?: unknown; onchain?: { status?: string }; feeds?: unknown[] } | undefined;
       const ok = !!claims && !!ev?.sanctions && !!ev.onchain && (claims.payment as { amount?: string } | undefined)?.amount === "1000" && claims.aud === "https://merchant.example/data" && typeof claims.jti === "string";
       return ok ? { status: "PASS", detail: `evidence{sanctions,onchain=${ev?.onchain?.status},feeds=${ev?.feeds?.length ?? 0}} + signed checks/payment/aud/jti; iss pinned via did:web` } : { status: "FAIL", detail: JSON.stringify({ claims, ev }).slice(0, 300) };
-    },
-  },
-  {
-    id: "v2-ipv6-slash64-aggregation",
-    run: async () => {
-      const a = process.env.IPV6_A;
-      const b = process.env.IPV6_B;
-      if (!a || !b) return { status: "SKIP", detail: "set IPV6_A and IPV6_B (two source addresses in one /64)" };
-      const r1 = await fromIp(a, { wallet: WALLET });
-      const r2 = await fromIp(b, { wallet: WALLET });
-      if (r1.status !== 200 || r2.status !== 200) return { status: "SKIP", detail: `status ${r1.status}/${r2.status} (quota exhausted?)` };
-      return Number(r2.remaining) === Number(r1.remaining) - 1
-        ? { status: "PASS", detail: `two source addresses in one /64 share the quota: remaining ${r1.remaining} → ${r2.remaining}` }
-        : { status: "FAIL", detail: `independent quotas per address: ${r1.remaining} vs ${r2.remaining}` };
     },
   },
 ];

@@ -1,3 +1,8 @@
+// LEGACY (v5 / v0.2 production record). These probes assume the free tier that v0.3
+// removed: evaluations now return 402 without an x402 payment, so the quota and
+// free-allowance probes no longer apply and most evaluation probes will SKIP. The
+// maintained production suites are eval/security-v2.ts and eval/security-v3.ts, which pay
+// per evaluation (eval/paid-fetch.ts). Kept to reproduce the historical reports.
 import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";

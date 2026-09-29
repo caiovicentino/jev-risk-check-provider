@@ -13,9 +13,8 @@ import { generateKeyPair } from "../src/jws.js";
 import { createHandler } from "../src/handler.js";
 import type { JevLike } from "../src/jev.js";
 import type { Answer, RiskCheckRequest } from "../src/types.js";
-import { RateCounter } from "../deploy/counter.js";
 import { handleProtected, type Stack } from "../deploy/protected.js";
-import type { DurableObjectNamespace, WorkerEnv } from "../deploy/runtime.js";
+import type { WorkerEnv } from "../deploy/runtime.js";
 
 const LAZARUS = "0x098B716B8Aaf21512996dC57EB0615e2383E2f96";
 const WALLET = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -104,14 +103,6 @@ test("R5 prototype keys are not chains; an unknown risk class fails closed", asy
   assert.equal(e.result.checked, false);
 });
 
-function counterEnv(daily = 25) {
-  const db = new DatabaseSync(":memory:");
-  const sql = { exec: (q: string, ...p: unknown[]) => { const rows = db.prepare(q).all(...(p as never[])); return { toArray: () => rows }; } };
-  const counter = new RateCounter({ storage: { sql } }, {});
-  const ns: DurableObjectNamespace = { idFromName: () => "q", get: () => ({ fetch: (i: string, init?: RequestInit) => counter.fetch(new Request(i, init)) }) };
-  return { env: { COUNTER: ns, FREE_TIER_DAILY: String(daily) } as WorkerEnv, counter };
-}
-
 function stack(j: JevLike, settles: { n: number }): Stack {
   const deps = { provider: provider(j) };
   const http = {
@@ -130,7 +121,7 @@ const post = (path: string, body: string, headers: Record<string, string> = {}) 
   new Request(`https://x402check.xyz${path}`, { method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "198.51.100.1", ...headers }, body });
 
 test("R6 the body cap is in bytes and checked before buffering", async () => {
-  const { env } = counterEnv();
+  const env: WorkerEnv = {};
   const s = stack(jev(), { n: 0 });
   const multibyte = JSON.stringify({ wallet: WALLET, context: "€".repeat(30_000) }); // ~90 KB, < 64K chars
   assert.ok(multibyte.length < 64 * 1024 && Buffer.byteLength(multibyte) > 64 * 1024);
@@ -140,7 +131,7 @@ test("R6 the body cap is in bytes and checked before buffering", async () => {
 });
 
 test("R7 a paid request is not settled when the evaluation could not be produced", async () => {
-  const { env } = counterEnv();
+  const env: WorkerEnv = {};
   const settles = { n: 0 };
   const failing: JevLike = { systemOne: async () => { throw new Error("model down"); } };
   const res = await run(env, stack(failing, settles), post("/v1/risk-check/batch", JSON.stringify({ requests: [{ wallet: WALLET }, { wallet: WALLET }] }), { "PAYMENT-SIGNATURE": "sig" }));
@@ -151,18 +142,7 @@ test("R7 a paid request is not settled when the evaluation could not be produced
   assert.equal(settles.n, 1);
 });
 
-test("R8 a request stamped with an older day cannot reset today's counters", async () => {
-  const { counter } = counterEnv();
-  const consume = async (day: string) =>
-    ((await (await counter.fetch(new Request("https://c/consume", { method: "POST", body: JSON.stringify({ op: "consume", key: "ip:x", day, daily: 2 }) }))).json()) as { allowed: boolean }).allowed;
-  assert.deepEqual([await consume("2026-09-30"), await consume("2026-09-30"), await consume("2026-09-30")], [true, true, false]);
-  assert.equal(await consume("2026-09-29"), false, "late request from the previous day must not reopen the allowance");
-  assert.equal(await consume("2026-09-30"), false);
-});
-
-test("R9 an X-PAYMENT-only request is served by the free tier instead of dead-ending at 402", async () => {
-  const { env } = counterEnv();
-  const res = await run(env, stack(jev(), { n: 0 }), post("/v1/risk-check", JSON.stringify({ wallet: WALLET }), { "X-PAYMENT": "v1-payload" }));
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("X-Risk-Check-Free"), "true");
+test("R9 an X-PAYMENT-only (x402 v1) request gets the v2 402 challenge, never an unpaid evaluation", async () => {
+  const res = await run({}, stack(jev(), { n: 0 }), post("/v1/risk-check", JSON.stringify({ wallet: WALLET }), { "X-PAYMENT": "v1-payload" }));
+  assert.equal(res.status, 402);
 });

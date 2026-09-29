@@ -48,7 +48,7 @@ type JwsCheck = {
   claims: AttestationClaims | null;
 };
 
-type CaseOutcome = "correct" | "incorrect" | "unchecked" | "quota_exhausted";
+type CaseOutcome = "correct" | "incorrect" | "unchecked" | "unpaid";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -103,22 +103,14 @@ function verifyAttestation(jws: string, keys: Map<string, JsonWebKey>): JwsCheck
 }
 
 let payFetch: ((input: string, init?: RequestInit) => Promise<Response>) | null = null;
-// X402CHECK_CLIENT_IDS=a,b,c: install-style ids; on a free-tier 402 the run moves to the
-// next id and retries the same case (each id: its own allowance, then the IP allowance).
-const CLIENT_IDS = (process.env.X402CHECK_CLIENT_IDS ?? process.env.X402CHECK_CLIENT_ID ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-let clientIdx = 0;
 
 async function postRiskCheck(req: RiskCheckRequest): Promise<{ status: number; body: RiskCheckResult | null }> {
-  if (process.env.PAID && !payFetch) payFetch = await buildPayFetch();
+  // Every evaluation is paid since v0.3 (no free tier); PAID=0 only for a dry run of the 402s.
+  if (process.env.PAID !== "0" && !payFetch) payFetch = await buildPayFetch();
   const doFetch = payFetch ?? fetch;
   const res = await doFetch(ENDPOINT, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(process.env.PAID ? { "X-Risk-Check-Paid": "1" } : {}),
-      // Optional install-style id: the free tier then charges this id first, then the IP allowance.
-      ...(CLIENT_IDS[clientIdx] ? { "X-Risk-Check-Client": CLIENT_IDS[clientIdx] as string } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
     signal: AbortSignal.timeout(60_000),
   });
@@ -141,8 +133,8 @@ async function runCase(c: ShadowCase, keys: Map<string, JsonWebKey>, bucket: { n
     if (status === 402) {
       return {
         entry: { ...base, score: null, tier: null, checked: false, jws_valid: null, latency_ms: latency, ts },
-        outcome: "quota_exhausted",
-        detail: "HTTP 402 payment_required — free quota exhausted",
+        outcome: "unpaid",
+        detail: "HTTP 402 — payment not settled (fund the payer; every evaluation is paid)",
         mismatch: null,
       };
     }
@@ -198,7 +190,7 @@ async function runCase(c: ShadowCase, keys: Map<string, JsonWebKey>, bucket: { n
   }
 }
 
-function printReport(r: ProdReport, attempted: number, quotaExhausted: boolean): void {
+function printReport(r: ProdReport, attempted: number, unpaidStop: boolean): void {
   console.log("\n== PROD REPORT ==");
   console.log(`endpoint: ${r.endpoint}`);
   console.log(`cases: ${r.cases} | attempted: ${attempted} | correct: ${r.correct} | accuracy: ${(r.accuracy * 100).toFixed(1)}%`);
@@ -207,7 +199,7 @@ function printReport(r: ProdReport, attempted: number, quotaExhausted: boolean):
     console.log(`  ${cat.padEnd(14)} ${String(s.correct).padStart(2, "0")}/${s.n}`);
   }
   for (const n of r.notes) console.log(`note: ${n}`);
-  if (quotaExhausted) console.log("STOPPED: free quota exhausted (402) — rerun later for full coverage");
+  if (unpaidStop) console.log("STOPPED: payment not settled (402) — fund the payer key in ~/.config/paysol");
   console.log(`report: ${EVAL_EVIDENCE_DIR}/prod-report.json | log: ${EVAL_EVIDENCE_DIR}/prod-log.jsonl`);
 }
 
@@ -224,19 +216,13 @@ async function main(): Promise<void> {
   const entries: ProdLogEntry[] = [];
   let correct = 0;
   let jwsVerified = 0;
-  let quotaExhausted = false;
+  let unpaidStop = false;
 
   for (let i = 0; i < CASES.length; i++) {
     const c = CASES[i]!;
     const bucket = (perCategory[c.category] ??= { n: 0, correct: 0 });
     bucket.n++;
-    let run = await runCase(c, keys, bucket);
-    while (run.outcome === "quota_exhausted" && !process.env.PAID && clientIdx + 1 < CLIENT_IDS.length) {
-      clientIdx++;
-      console.log(`  free allowance exhausted — switching to client id #${clientIdx + 1}`);
-      run = await runCase(c, keys, bucket);
-    }
-    const { entry, outcome, detail, mismatch } = run;
+    const { entry, outcome, detail, mismatch } = await runCase(c, keys, bucket);
     entries.push(entry);
     appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
     if (mismatch) jwsMismatches.push(mismatch);
@@ -244,8 +230,8 @@ async function main(): Promise<void> {
     if (entry.jws_valid === true) jwsVerified++;
     const mark = outcome === "correct" ? "PASS" : outcome === "incorrect" ? "MISS" : "SKIP";
     console.log(`  [${String(entries.length).padStart(2, "0")}/${CASES.length}] ${c.id}: ${mark} — ${detail}`);
-    if (outcome === "quota_exhausted") {
-      quotaExhausted = true;
+    if (outcome === "unpaid") {
+      unpaidStop = true;
       notes.push(`${c.id}: ${detail} — stopped without retry, ${CASES.length - entries.length} cases not run`);
       break;
     }
@@ -265,7 +251,7 @@ async function main(): Promise<void> {
     notes,
   };
   writeFileSync(`${EVAL_EVIDENCE_DIR}/prod-report.json`, JSON.stringify(report, null, 2));
-  printReport(report, entries.length, quotaExhausted);
+  printReport(report, entries.length, unpaidStop);
 }
 
 main().catch((err) => {

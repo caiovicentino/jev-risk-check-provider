@@ -12,11 +12,15 @@ test("landing page carries no stale or unsupported claims", () => {
     "0</b><span>false negatives",
     "53/53</b>",
     "Peel chains, mixer hops",
+    "free per day", // no free tier since v0.3: every evaluation is paid
+    "Free tier",
+    "evaluations per day",
+    "X-Risk-Check-Free",
   ]) {
     assert.ok(!page.includes(stale), `stale claim present: ${stale}`);
   }
   // Evidence figures must match docs/EVIDENCE.md (canonical run, seed 200).
-  for (const required of ["OFAC SDN", "Not detected:", "asserted", "did:web:x402check.xyz", "25 evaluations per day", "27/30", "0&ndash;3/60", "24/24", "0/62"]) {
+  for (const required of ["OFAC SDN", "Not detected:", "asserted", "did:web:x402check.xyz", "$0.001 per evaluation", "27/30", "0&ndash;3/60", "24/24", "0/62", "18/25", "0/84", "43/100", "0/9,625", "0.011%"]) {
     assert.ok(page.includes(required), `missing: ${required}`);
   }
 });

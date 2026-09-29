@@ -71,7 +71,8 @@ export function saneDate(d: unknown, now = Date.now()): d is string {
 }
 
 async function get(base: string, name: string, fetchImpl: typeof fetch): Promise<ArrayBuffer> {
-  const init = { signal: AbortSignal.timeout(8000), cf: { cacheTtl: 3600, cacheEverything: true } } as RequestInit;
+  // Edge-cache successes for an hour; never cache a miss (a 404 before the first publish would otherwise stick).
+  const init = { signal: AbortSignal.timeout(8000), cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": 3600, "300-599": 0 } } } as RequestInit;
   const res = await fetchImpl(new URL(name, base).toString(), init);
   if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
   return res.arrayBuffer();

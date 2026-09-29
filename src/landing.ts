@@ -4,7 +4,7 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>x402check — pre-payment risk checks for x402 agents and wallets</title>
-<meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, approval-to-wallet detection and injected-instruction analysis — as signed, verifiable attestations. $0.001 per evaluation, 25 free per day.">
+<meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, transaction simulation, drainer-kit code fingerprints and injected-instruction analysis — as signed, verifiable attestations. $0.001 per evaluation, paid per call with x402.">
 <link rel="canonical" href="https://x402check.xyz/">
 <meta name="theme-color" content="#fcfcfa">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%239945ff'/%3E%3Cstop offset='1' stop-color='%2314f195'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='monospace' font-size='34' font-weight='bold' text-anchor='middle' fill='%230a0b10'%3Ex%3C/text%3E%3C/svg%3E">
@@ -18,7 +18,7 @@ const PAGE = `<!doctype html>
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="x402check — check the counterparty before paying">
-<meta name="twitter:description" content="OFAC SDN screening, phishing and drainer feeds, approvals to plain wallets, injected-intent detection — signed attestations that state which checks ran. $0.001/evaluation, 25 free/day.">
+<meta name="twitter:description" content="OFAC SDN screening, phishing and drainer feeds, transaction simulation, drainer-kit code, injected-intent detection — signed attestations that state which checks ran. $0.001 per evaluation via x402.">
 <meta name="twitter:image" content="https://x402check.xyz/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -90,9 +90,10 @@ const PAGE = `<!doctype html>
 
   /* metrics ledger */
   .ledger { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
-  .ledger-row { display: grid; grid-template-columns: repeat(6, 1fr); }
+  .ledger-row { display: grid; grid-template-columns: repeat(4, 1fr); }
   .ledger-cell { padding: 20px 18px; border-right: 1px solid var(--line); }
-  .ledger-cell:last-child { border-right: none; }
+  .ledger-cell:nth-child(4n) { border-right: none; }
+  .ledger-cell:nth-child(-n+4) { border-bottom: 1px solid var(--line); }
   .ledger-cell b { font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 22px; display: block; margin-bottom: 4px; }
   .ledger-cell b.ok { color: var(--green); }
   .ledger-cell span { color: var(--faint); font-size: 12px; line-height: 1.5; display: block; }
@@ -119,9 +120,10 @@ const PAGE = `<!doctype html>
   @media (max-width: 860px) {
     .hero { grid-template-columns: 1fr; gap: 40px; padding: 48px 0; }
     .cols { grid-template-columns: 1fr; }
-    .ledger-row { grid-template-columns: repeat(3, 1fr); }
-    .ledger-cell:nth-child(3n) { border-right: none; }
-    .ledger-cell:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+    .ledger-row { grid-template-columns: repeat(2, 1fr); }
+    .ledger-cell:nth-child(4n) { border-right: 1px solid var(--line); }
+    .ledger-cell:nth-child(2n) { border-right: none; }
+    .ledger-cell:nth-child(-n+6) { border-bottom: 1px solid var(--line); }
   }
 </style>
 </head>
@@ -134,6 +136,7 @@ const PAGE = `<!doctype html>
       <a href="#evidence">Evidence</a>
       <a href="#integrate">Integration</a>
       <a href="#wallets">Wallets</a>
+      <a href="/status">Data status</a>
       <a href="/.well-known/risk-check.json">Discovery</a>
       <a href="https://github.com/caiovicentino/jev-risk-check-provider">Source</a>
     </nav>
@@ -143,7 +146,7 @@ const PAGE = `<!doctype html>
     <div>
       <div class="kicker">x402 trust-provider &middot; risk-check extension &middot; reference implementation</div>
       <h1>Check the counterparty before an agent or a wallet pays.</h1>
-      <p class="lede">x402check screens the address against the <b>OFAC SDN list</b> and curated <b>phishing / drainer feeds</b>, flags look-alike domains and <b>approvals granted to plain wallets</b>, and reads the content the agent acted on for <b>injected instructions</b>. Every verdict is a <b>signed attestation</b> that states which checks actually ran. ~0.5&nbsp;s, $0.001, fail-closed.</p>
+      <p class="lede">x402check screens the address against the <b>OFAC SDN list</b> and curated <b>phishing / drainer feeds</b>, <b>simulates the transaction</b> to see where the assets actually go, recognizes <b>drainer-kit code</b>, flags look-alike domains and approvals granted to plain wallets, and reads the content the agent acted on for <b>injected instructions</b>. Every verdict is a <b>signed attestation</b> that states which checks actually ran. $0.001, fail-closed.</p>
       <div class="cta-row">
         <a class="cta solid" href="#integrate">Integrate in 5 minutes</a>
         <a class="cta line" href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">Read the evidence</a>
@@ -160,7 +163,7 @@ const PAGE = `<!doctype html>
         <div class="row"><span class="k">tier</span><span class="v">low</span></div>
         <div class="row"><span class="k">input_hash</span><span class="v">894df5fe0e6667f2...</span></div>
       </div>
-      <div class="doc-foot">signature: MEUCIQ&amp;hellip; (64 bytes, r||s) &middot; verifiable against /.well-known/jwks.json &middot; TTL 1h</div>
+      <div class="doc-foot">signature: MEUCIQ&hellip; (64 bytes, r||s) &middot; verifiable against /.well-known/jwks.json &middot; TTL 1h</div>
     </div>
   </div>
 
@@ -173,6 +176,10 @@ const PAGE = `<!doctype html>
         <p>MetaMask&rsquo;s eth-phishing-detect list (embedded) and ScamSniffer&rsquo;s drainer addresses, plus our own look-alike analysis: leet and IDN homoglyphs, typosquats, brand&nbsp;+&nbsp;lure names, official domains reused as subdomains.</p></div>
       <div class="item"><h3><em>Approvals</em> &middot; on-chain facts</h3>
         <p>Approvals and permits normally go to contracts. Granting a plain wallet (EOA) control over tokens is a classic drainer pattern &mdash; detected from the chain itself, not from what the caller says.</p></div>
+      <div class="item"><h3><em>Simulation</em> &middot; where the assets go</h3>
+        <p>The transaction is simulated (<span class="mono" style="font-size:13px">eth_simulateV1</span>) before it is signed. Assets that leave with nothing in return and end up with a wallet the user never named, or are parked in an unverified contract, are flagged &mdash; even when the called contract itself is on no list.</p></div>
+      <div class="item"><h3><em>Drainer kits</em> &middot; code fingerprints</h3>
+        <p>Most drainer contracts are redeployments of a few kits. A contract whose logic code matches a listed drainer&rsquo;s is recognized before its own address is listed. Token, NFT and proxy code is never fingerprinted, so clones of real tokens cannot match.</p></div>
       <div class="item"><h3><em>Injected intent</em> &middot; guard bypass</h3>
         <p>When the agent passes the content it acted on (tool output, page text, skill file), a typed model flags instructions that try to redirect funds or disable the payment guard.</p></div>
     </div>
@@ -183,7 +190,7 @@ const PAGE = `<!doctype html>
     <div class="sec-head"><span class="sec-no">02</span><h2>How it works</h2></div>
     <div class="cols">
       <div class="item"><h3>Deterministic evidence first</h3>
-        <p>Sanctions, feeds, domain analysis and on-chain facts are computed by code and cap the score on their own. The model (TypeSafe Jev, typed questions) can only add risk from the content; weights and caps live in open-source code.</p></div>
+        <p>Sanctions, feeds, domain analysis, on-chain facts, simulation and code fingerprints are computed by code and cap the score on their own. The model (TypeSafe Jev, typed questions) can only add risk from the content; weights and caps live in open-source code.</p></div>
       <div class="item"><h3>Caller claims stay claims</h3>
         <p>A caller&rsquo;s <span class="mono" style="font-size:13px">screening</span> or <span class="mono" style="font-size:13px">authorization</span> fields are recorded as <span class="mono" style="font-size:13px">asserted</span> in the attestation and can never lower the score. Prose like &ldquo;already screened&rdquo; is treated the same way.</p></div>
       <div class="item"><h3>Signed, scoped verdicts</h3>
@@ -199,8 +206,10 @@ const PAGE = `<!doctype html>
       <div class="ledger-row">
         <div class="ledger-cell"><b class="ok">24/24</b><span>OFAC SDN addresses (4 chains) &rarr; critical, deterministic</span></div>
         <div class="ledger-cell"><b class="ok">27/30</b><span>drainer permits caught with the drainer feed <i>turned off</i> (approval-to-wallet rule)</span></div>
+        <div class="ledger-cell"><b class="ok">18/25</b><span>real drainer transactions flagged by simulation (hidden recipient); 0/84 on well-known contracts</span></div>
+        <div class="ledger-cell"><b class="ok">43/100</b><span>listed drainer contracts recognized by earlier kits&rsquo; code at creation; 0/9,625 legit contracts matched</span></div>
         <div class="ledger-cell"><b class="ok">0/62</b><span>false positives on well-known contracts and top dApp domains</span></div>
-        <div class="ledger-cell"><b>0.003%</b><span>of the Tranco top 200k domains capped by deterministic rules</span></div>
+        <div class="ledger-cell"><b>0.011%</b><span>of the Tranco top 200k domains capped by deterministic rules &mdash; mostly hosts on MetaMask&rsquo;s own list</span></div>
         <div class="ledger-cell"><b>0&ndash;3/60</b><span>unlisted phishing domains caught without the feed &mdash; feeds do the heavy lifting</span></div>
         <div class="ledger-cell"><b>0/30</b><span>plain transfers to unlisted drainers &mdash; not detectable from the address alone</span></div>
       </div>
@@ -211,7 +220,8 @@ const PAGE = `<!doctype html>
   <section id="integrate">
     <div class="sec-head"><span class="sec-no">04</span><h2>Integration</h2></div>
     <pre>
-<span class="cm"># 25 free evaluations per day per caller (a batch of n costs n), then x402</span>
+<span class="cm"># Paid per call with x402: $0.001 in USDC ($0.002 on Solana); a batch of n is billed n.</span>
+<span class="cm"># An unpaid call returns 402 with the accepted mainnet options; any x402 client pays and retries.</span>
 curl -X POST https://x402check.xyz/v1/risk-check \\
   -H <span class="g">"Content-Type: application/json"</span> \\
   -d '{
@@ -234,7 +244,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
 }
 
 <span class="cm"># Verify: npx tsx scripts/verify-attest.ts &lt;jws&gt; --issuer did:web:x402check.xyz</span>
-<span class="cm"># Past the free tier the endpoint speaks x402: the 402 carries mainnet USDC options.</span>
+<span class="cm"># TypeScript: @x402check/client with an x402-paying fetch (e.g. wrapFetchWithPayment from @x402/fetch).</span>
     </pre>
   </section>
 
@@ -244,7 +254,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
       <div class="item"><h3>Decode, then check the real counterparty</h3>
         <p>For an <span class="mono" style="font-size:13px">approve</span>, a Permit2 signature or a Seaport order, the counterparty is the spender, operator or recipient inside the calldata or typed data &mdash; not the token contract. Send that address and the interaction type.</p></div>
       <div class="item"><h3>Fail-closed UX, tiered copy</h3>
-        <p>Check unavailable or quota used up &rarr; say &ldquo;not verified&rdquo;, never all-clear. Tiers map to badge, amber caution, red warning and hard block with override. <span class="mono" style="font-size:13px">X-Risk-Check-Free-Remaining</span> reports the daily allowance.</p></div>
+        <p>Check unavailable or not paid &rarr; say &ldquo;not verified&rdquo;, never all-clear. Tiers map to badge, amber caution, red warning and hard block with override.</p></div>
       <div class="item"><h3>MetaMask Snap (preview)</h3>
         <p>Open-source Snap with <span class="mono" style="font-size:13px">onTransaction</span> / <span class="mono" style="font-size:13px">onSignature</span> insights and a privacy notice on install. Not yet published to npm nor allowlisted by MetaMask: build it from source and load it in MetaMask Flask.</p></div>
       <div class="item"><h3>Verifiable, not vibes</h3>
@@ -259,10 +269,9 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
     <div class="sec-head"><span class="sec-no">06</span><h2>Pricing &amp; identity</h2></div>
     <table>
       <tr><th></th><th></th></tr>
-      <tr><td>Free tier</td><td>25 evaluations per day per caller (IPv6 counted per /64); a batch of n uses n</td></tr>
-      <tr><td>Paid</td><td>$0.001 per evaluation ($0.002 on Solana), batch billed per item, USDC via x402 on mainnet &mdash; Base, Polygon, Arbitrum, Avalanche, Monad, Sei, Solana</td></tr>
+      <tr><td>Price</td><td>$0.001 per evaluation ($0.002 on Solana), batch billed per item, USDC via x402 on mainnet &mdash; Base, Polygon, Arbitrum, Avalanche, Monad, Sei, Solana. Every evaluation is paid; the attestation is released only after settlement.</td></tr>
       <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> &mdash; <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
-      <tr><td>Data</td><td>OFAC SDN (U.S. Treasury), MetaMask eth-phishing-detect, ScamSniffer (runtime), public JSON-RPC &mdash; see THIRD_PARTY_NOTICES.md</td></tr>
+      <tr><td>Data</td><td>OFAC SDN (U.S. Treasury) and MetaMask eth-phishing-detect, refreshed daily; ScamSniffer (runtime); Forta labelled datasets; Blockscout; public JSON-RPC &mdash; see THIRD_PARTY_NOTICES.md and the live <a href="/status">data status</a></td></tr>
       <tr><td>Engine</td><td>Deterministic checks and scoring in open-source code (MIT); TypeSafe Jev System One for content intent</td></tr>
     </table>
   </section>

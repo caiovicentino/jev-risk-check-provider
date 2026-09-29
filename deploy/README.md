@@ -4,32 +4,29 @@
 
 | Route | What |
 |---|---|
-| `POST /v1/risk-check` | single evaluation. Free tier, then x402 |
-| `POST /v1/risk-check/batch` | up to 25 evaluations. Billed and counted per item |
+| `POST /v1/risk-check` | single evaluation, paid with x402 ($0.001; $0.002 on Solana) |
+| `POST /v1/risk-check/batch` | up to 25 evaluations, billed per item |
 | `GET /.well-known/risk-check.json` | discovery: pricing networks, data sources, attestation claims |
 | `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation key (`kid jev-attest-v1`), `did:web` document |
-| `GET /healthz` | liveness + `freeEvalsToday`. Edge-cached 60 s so it cannot hammer the quota Durable Object |
+| `GET /healthz` | liveness and version |
 | `GET /status` | data freshness: the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. Edge-cached 60 s |
 
 ## Layout
 
 - `worker.ts` — entry point: routing, CORS, `/healthz`, `/status`, embedded MetaMask and Forta sets (`.bin` Data modules), `RateCounter` export
 - `fresh-feeds.ts` — runtime refresh of OFAC and MetaMask from the `feeds` branch (checksums, counts, no large shrink), in the background
-- `protected.ts` — paid and free-tier flow: validate → quota → pay → evaluate → settle → release
-- `counter.ts` — `RateCounter` Durable Object (SQLite). Atomic per-key daily counters with a cost per request; admission budgets for new client ids
+- `protected.ts` — the paid flow: validate → price → verify payment → evaluate → settle → release
 - `feeds.ts` — ScamSniffer blobs (domains, addresses, drainer-code fingerprints) read from KV at runtime (GPL-3.0 data: never bundled or committed)
 - `runtime.ts` — minimal Workers types, so `deploy/` type-checks with the rest of the repo (`npm run typecheck`)
 
 ## Request flow (protected routes)
 
-1. **Validate first.** Read the body (≤ 64 KiB), parse it, validate it (`src/validate.ts`). Invalid input gets `422 {error, field[, index]}` or `413` and costs no free slot and no payment.
-2. **Free tier.** Units = 1 per evaluation, so a batch of *n* costs *n*.
-   - With `X-Risk-Check-Client`, the id is charged against its own daily allowance. The first sighting of an id must also fit the per-/64 (10/day) and global (1000/day) new-client budgets.
-   - If the id is refused or exhausted, the IP allowance is used instead, so draining the global budget cannot lock real users out.
-   - IP keys use the full IPv4 address. IPv6 keys use the **/64**.
-   - Response headers: `X-Risk-Check-Free: true` and `X-Risk-Check-Free-Remaining`.
-3. **Paid.** The x402 price is unit × units (`adapter.getBody()` exposes the validated body to the SDK's dynamic price). Flow: verify → evaluate → **settle** → release. If settlement fails the response is `402 payment_settlement_failed` and no attestation is returned.
-4. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
+1. **Validate first.** Read the body (≤ 64 KiB), parse it, validate it (`src/validate.ts`). Invalid input gets `422 {error, field[, index]}` or `413` and is never priced.
+2. **Every evaluation is paid; there is no free tier.**
+   - **Price:** the x402 price is unit × units, 1 unit per evaluation, so a batch of *n* costs *n*. `adapter.getBody()` exposes the validated body to the SDK's dynamic price.
+   - **Unpaid request:** it gets the `402` challenge with the accepted options.
+   - **Paid request:** verify → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed` and no attestation is returned.
+3. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
 
 ## Secrets and variables
 
@@ -56,7 +53,6 @@ Optional variables:
 | `ONCHAIN` | `"off"` disables provider-side JSON-RPC lookups |
 | `RPC_URLS` | JSON `{caip2: url}` overriding the public RPCs in `src/onchain.ts` |
 | `SOL_RPC_URL_MAINNET` | Solana RPC for on-chain facts and x402 Solana settlement |
-| `FREE_TIER_DAILY` | free evaluations per caller per day (default 25) |
 | `SIMULATION` | `"off"` disables transaction simulation (`eth_simulateV1`) |
 | `SIMULATION_RPC_URLS` | JSON `{caip2: url}` overriding the simulation RPCs (they must serve `eth_simulateV1`) |
 | `CONTRACT_INTEL` | `"off"` disables contract-verification lookups (Blockscout) |

@@ -18,7 +18,6 @@ id = "47c8f208cb1e498e81b8dc2dc15a968c"
 PROVIDER_HOST = "x402check.xyz"
 PAY_TO_EVM = "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178"
 PAY_TO_SOL = "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X"
-FREE_TIER_DAILY = "25"
 
 # Secrets to set before deploy (do NOT commit):
 #   wrangler secret put AI_GATEWAY_API_KEY      (or TYPESAFE_API_KEY)
@@ -30,13 +29,14 @@ FREE_TIER_DAILY = "25"
 #   3. the provider DID becomes did:web:<your-domain>, verifiable by any resource server
 #   4. publish the discovery doc URL in your x402 PaymentRequired extensions
 
-[[durable_objects.bindings]]
-name = "COUNTER"
-class_name = "RateCounter"
-
+# v1 created the free-tier quota counter; v2 deletes it (v0.3 removed the free tier).
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RateCounter"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["RateCounter"]
 
 # Embedded threat-feed hash sets (src/data/*.bin) are bundled as ArrayBuffer Data modules.
 # Keep this table LAST: TOML keys written after a [[table]] header belong to that table.
