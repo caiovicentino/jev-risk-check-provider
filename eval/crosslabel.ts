@@ -123,7 +123,11 @@ async function main(): Promise<void> {
   console.log("report: eval/evidence/crosslabel-report.json");
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run when executed directly: the suite imports this module's helpers, and a
+// module-level run would silently execute a second, concurrent workload.
+if (process.argv[1]?.endsWith("crosslabel.ts")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -1,0 +1,166 @@
+{
+  "timestamp": "2026-09-29T14:39:05.136Z",
+  "invalid_requests": 0,
+  "sources": {
+    "metamask": "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json",
+    "ssDomains": "https://raw.githubusercontent.com/scamsniffer/scam-database/main/blacklist/domains.json",
+    "ssAddresses": "https://raw.githubusercontent.com/scamsniffer/scam-database/main/blacklist/address.json"
+  },
+  "layers": {
+    "A_ofac_sdn": {
+      "expected": "risky",
+      "n": 24,
+      "unchecked": 0,
+      "detected_below_60": "24/24",
+      "rate": "100.0% (95% CI 86.2–100.0%)",
+      "tier_high_or_critical": "24/24",
+      "misses": [],
+      "categories": {
+        "sanctioned_address": 24,
+        "compliance_risk": 24
+      }
+    },
+    "B_metamask_listed_domain": {
+      "expected": "risky",
+      "n": 40,
+      "unchecked": 0,
+      "detected_below_60": "40/40",
+      "rate": "100.0% (95% CI 91.2–100.0%)",
+      "tier_high_or_critical": "40/40",
+      "misses": [],
+      "categories": {
+        "impersonation": 40,
+        "fraud_signal": 40,
+        "phishing_domain": 40,
+        "community_flagged_domain": 1
+      }
+    },
+    "B_scamsniffer_address": {
+      "expected": "risky",
+      "n": 30,
+      "unchecked": 0,
+      "detected_below_60": "30/30",
+      "rate": "100.0% (95% CI 88.6–100.0%)",
+      "tier_high_or_critical": "30/30",
+      "misses": [],
+      "categories": {
+        "known_threat": 30,
+        "fraud_signal": 30,
+        "known_scam_address": 30,
+        "approval_to_eoa": 27,
+        "new_address": 12
+      }
+    },
+    "B_scamsniffer_only_domain_feed_on": {
+      "expected": "risky",
+      "n": 60,
+      "unchecked": 0,
+      "detected_below_60": "60/60",
+      "rate": "100.0% (95% CI 94.0–100.0%)",
+      "tier_high_or_critical": "60/60",
+      "misses": [],
+      "categories": {
+        "impersonation": 60,
+        "fraud_signal": 60,
+        "community_flagged_domain": 47,
+        "phishing_domain": 13
+      }
+    },
+    "C_heldout_drainer_permit": {
+      "expected": "risky",
+      "n": 30,
+      "unchecked": 0,
+      "detected_below_60": "27/30",
+      "rate": "90.0% (95% CI 74.4–96.5%)",
+      "tier_high_or_critical": "27/30",
+      "misses": [
+        "ss:b0856be00b1b0878 → 81/low",
+        "ss:86b92e53622e292b → 81/low",
+        "ss:31c79be2535a3130 → 80/low"
+      ],
+      "categories": {
+        "approval_to_eoa": 27,
+        "new_address": 12
+      }
+    },
+    "C_heldout_drainer_transfer": {
+      "expected": "risky",
+      "n": 30,
+      "unchecked": 0,
+      "detected_below_60": "0/30",
+      "rate": "0.0% (95% CI 0.0–11.4%)",
+      "tier_high_or_critical": "0/30",
+      "misses": [
+        "ss:54a96d6d7adec21b → 94/low",
+        "ss:b820f2e93f271c10 → 95/low",
+        "ss:b0856be00b1b0878 → 94/low",
+        "ss:c0d55fdcee70e68d → 94/low",
+        "ss:86b92e53622e292b → 94/low",
+        "ss:c8f62354e4b980c1 → 95/low",
+        "ss:d9bfeca2032f9346 → 95/low",
+        "ss:5413d03cf3ca7c80 → 95/low"
+      ],
+      "categories": {
+        "new_address": 12
+      }
+    },
+    "C_heldout_phishing_domain": {
+      "expected": "risky",
+      "n": 60,
+      "unchecked": 0,
+      "detected_below_60": "1/60",
+      "rate": "1.7% (95% CI 0.3–8.9%)",
+      "tier_high_or_critical": "1/60",
+      "misses": [
+        "ss:b4de761b1d180874 → 92/low",
+        "ss:2a62922b9e888e94 → 92/low",
+        "ss:dbd32cadb82461e4 → 92/low",
+        "ss:2f7c7adad6cc4c84 → 92/low",
+        "ss:d18ba33f39c56f47 → 92/low",
+        "ss:eaff26343daab394 → 73/medium",
+        "ss:a73fb0e003cdf6f1 → 93/low",
+        "ss:a0436cb01d9c98f4 → 93/low"
+      ],
+      "categories": {
+        "fraud_signal": 9,
+        "impersonation": 1
+      }
+    },
+    "D_legit_address": {
+      "expected": "safe",
+      "n": 22,
+      "unchecked": 0,
+      "passed_60_or_above": "22/22",
+      "rate": "100.0% (95% CI 85.1–100.0%)",
+      "tier_high_or_critical": "0/22",
+      "misses": [],
+      "categories": {}
+    },
+    "D_legit_domain": {
+      "expected": "safe",
+      "n": 40,
+      "unchecked": 0,
+      "passed_60_or_above": "40/40",
+      "rate": "100.0% (95% CI 91.2–100.0%)",
+      "tier_high_or_critical": "0/40",
+      "misses": [],
+      "categories": {}
+    },
+    "D_tranco_deterministic_scan": {
+      "expected": "safe",
+      "n": 199999,
+      "strong_impersonation": 0,
+      "weak_brand_token_uncapped": 79,
+      "any_feed_hit": 78,
+      "capped_by_deterministic_rules": 5,
+      "capped_rate": "0.003% (95% CI 0.001–0.006%) — upper bound on FP: popular ≠ benign (some listed hosts are genuine abuse)",
+      "capped_examples": [
+        "temporary.site: none feed:metamask-phishing-detect",
+        "ss:07789dc83cb686a1: none feed:scamsniffer-domains",
+        "xn--80affa3aj0al.xn--80asehdb: none feed:scamsniffer-domains",
+        "ss:a227373b500b8020: none feed:scamsniffer-domains",
+        "tornadoeth.cash: none feed:metamask-phishing-detect"
+      ]
+    }
+  }
+}

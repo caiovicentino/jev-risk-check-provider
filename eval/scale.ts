@@ -1,7 +1,7 @@
 import { mkdirSync, appendFileSync, writeFileSync } from "node:fs";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient } from "../src/jev.js";
-import { buildProvider, EVAL_EVIDENCE_DIR } from "./harness.js";
+import { buildProductionLikeProvider, EVAL_EVIDENCE_DIR } from "./harness.js";
 import { generateCorpus, sampleForStability } from "./scale-cases.js";
 import type { ShadowCase } from "./cases.js";
 
@@ -64,7 +64,7 @@ async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Prom
   return results;
 }
 
-async function evaluateCase(provider: ReturnType<typeof buildProvider>, c: ShadowCase, repeat: number | null, phase: ScaleEntry["phase"], runId: string, sampleJws: boolean): Promise<ScaleEntry> {
+async function evaluateCase(provider: ReturnType<typeof buildProductionLikeProvider>, c: ShadowCase, repeat: number | null, phase: ScaleEntry["phase"], runId: string, sampleJws: boolean): Promise<ScaleEntry> {
   const t0 = Date.now();
   try {
     const evaluation = await provider.evaluate(c.request);
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   console.log(`backend: ${typesafeKey ? "typesafe-direct" : "vercel-ai-gateway"}`);
   console.log(`corpus: ${PER_CATEGORY * 7} cases (seed=${SEED}) | stability: ${STABILITY_COUNT}×${STABILITY_REPEATS} | concurrency=${CONCURRENCY}`);
 
-  const provider = buildProvider(backend);
+  const provider = buildProductionLikeProvider(backend);
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   const logFile = `${EVAL_EVIDENCE_DIR}/scale-log.jsonl`;
 
@@ -266,7 +266,11 @@ function printReport(r: ScaleReport): void {
   console.log(`report: ${EVAL_EVIDENCE_DIR}/scale-report.json | log: ${EVAL_EVIDENCE_DIR}/scale-log.jsonl`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run when executed directly: the suite imports this module's helpers, and a
+// module-level run would silently execute a second, concurrent workload.
+if (process.argv[1]?.endsWith("scale.ts")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -1,0 +1,152 @@
+{
+  "timestamp": "2026-09-28T18:58:46.699Z",
+  "endpoint": "https://x402check.xyz",
+  "request_budget": 30,
+  "requests_used": 20,
+  "probes": [
+    {
+      "id": "ih-malformed-json",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=422 body={\"error\":\"invalid_request\"} latency=841ms — rejected cleanly, no 500"
+    },
+    {
+      "id": "ih-wallet-number",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=422 body={\"error\":\"invalid_request\"} — wallet:123 rejected with invalid_request"
+    },
+    {
+      "id": "ih-wallet-empty",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=422 body={\"error\":\"invalid_request\"} — empty wallet rejected"
+    },
+    {
+      "id": "ih-wallet-missing",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=422 body={\"error\":\"invalid_request\"} — missing wallet rejected"
+    },
+    {
+      "id": "ih-context-oversized",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=200 checked=true score=72 tier=low latency=1317ms — accepted or degraded gracefully, payload not echoed"
+    },
+    {
+      "id": "ih-context-control-chars",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=200 checked=true score=55 tier=high latency=950ms — no 500 on control bytes"
+    },
+    {
+      "id": "ih-batch-empty",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=422 body={\"error\":\"invalid_request\"} — empty batch rejected"
+    },
+    {
+      "id": "ih-batch-oversize",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=413 body={\"error\":\"batch_too_large\",\"max\":25} — batch over 25 rejected before evaluation"
+    },
+    {
+      "id": "ih-batch-not-array",
+      "category": "input-hardening",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=422 body={\"error\":\"invalid_request\"} — non-array requests rejected"
+    },
+    {
+      "id": "mp-get-risk-check",
+      "category": "method-path",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=404 body={\"error\":\"not_found\"} x-risk-check-free=true — no evaluation on GET (note: the paywall still spent a free-tier slot before the 404)"
+    },
+    {
+      "id": "mp-post-healthz",
+      "category": "method-path",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=404 body={\"error\":\"not_found\"} — no ok:true on POST"
+    },
+    {
+      "id": "mp-path-traversal",
+      "category": "method-path",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=400 html-error from edge — traversal path rejected before reaching the origin (body: <html> <head><title>400 Bad Request</title></head> <body> <center><h1>400 Bad Request</h1></center> <hr><center>cloudfla)"
+    },
+    {
+      "id": "mp-post-jwks",
+      "category": "method-path",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=404 body={\"error\":\"not_found\"} — no mutation; POST not accepted as a write"
+    },
+    {
+      "id": "ft-xff-spoof",
+      "category": "free-tier",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=200 x-risk-check-free=true latency=1076ms — spoofed X-Forwarded-For/X-Real-IP produced no quota-grant anomaly: free=true is identical to every probe on this shared IP with remaining quota; the deployed worker keys the KV counter on CF-Connecting-IP (deploy/worker.ts:137), which Cloudflare sets from the socket and strips from client input, so client-supplied forwarding headers cannot rotate the quota key"
+    },
+    {
+      "id": "pi-injection-direct",
+      "category": "prompt-injection",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "score=0 tier=critical latency=1097ms — injection did not force a perfect score (<95, gateway noCalibration cap respected)"
+    },
+    {
+      "id": "pi-prose-authorization",
+      "category": "prompt-injection",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "score=36 tier=high latency=793ms — prose claims not accepted as structured evidence (score <90 or tier not low)"
+    },
+    {
+      "id": "rh-attestation-fields",
+      "category": "response-hygiene",
+      "request_budget": 0,
+      "status": "PASS",
+      "detail": "jws(522 chars) + jwks_url=https://x402check.xyz/.well-known/jwks.json + expires_at=2026-09-28T19:58:44.263Z present on the successful response"
+    },
+    {
+      "id": "rh-jws-header",
+      "category": "response-hygiene",
+      "request_budget": 0,
+      "status": "PASS",
+      "detail": "jws header alg=ES256 kid=jev-attest-v1 (parsed locally, typ=risk-check+jwt)"
+    },
+    {
+      "id": "rh-landing-no-leak",
+      "category": "response-hygiene",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=200 text/html, 16332 bytes — no internal tokens (AI_GATEWAY, Bearer, PRIVATE; sk- scanned with key-prefix boundary — 'sk-' inside risk-check is not a key)"
+    },
+    {
+      "id": "pay-garbage-payment",
+      "category": "x402-payment",
+      "request_budget": 1,
+      "status": "PASS",
+      "detail": "status=402 body={} — garbage X-PAYMENT rejected with 4xx error JSON, no free evaluation"
+    }
+  ],
+  "passed": 20,
+  "failed": 0,
+  "skipped": 0,
+  "updated": "2026-09-28T19:00:17.329Z"
+}

@@ -4,7 +4,7 @@ import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { buildPayFetch } from "./paid-fetch.js";
 let payFetch: ((input: string, init?: RequestInit) => Promise<Response>) | null = null;
 
-const ENDPOINT = "https://x402check.xyz";
+const ENDPOINT = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
 const HOST = "x402check.xyz";
 const REQUEST_BUDGET = 70;
 const EVAL_BUDGET = process.env.PAID ? 80 : 20;

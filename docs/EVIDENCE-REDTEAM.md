@@ -1,5 +1,15 @@
 # Red-team evidence — jev-risk-check-provider
 
+> **Historical record (question set v5, 2026-09-27/28), superseded by v0.2.0 — see [EVIDENCE.md](EVIDENCE.md).**
+> An independent review (2026-09-29) found issues that change how these numbers read:
+> - The corpora's context text **describes the risk it labels** ("funds routed through a mixer…"). With an attacker-written context, the same cases are detected only when a look-alike domain is present (v6 `realistic` layer: 20/100).
+> - The red-team generator was not reproducible: it used `Math.random`, discarded mutations for the identity wrapper, emitted invalid `brand-x..tld` domains, and its "decoded" hints were still base64. It is fixed in the v6 corpus.
+> - The "screening-integrated" gate simulation derived the caller's `screening` field from the ground-truth label.
+> - Suite modules started duplicate workloads on import.
+>
+> The numbers below are kept unchanged as a record of what was measured at the time.
+
+
 Five adversarial iterations against the provider, each driven by the previous run's failure data. Backend: Vercel AI Gateway (`typesafe-ai/jev`). Corpus: parameterized mutation engine (`eval/redteam-cases.ts`) — synonym swaps, authority spoofing, softening wrappers, encoding, distributed multi-field malice, plus legitimate-lookalike patterns (FP-resistance probe) and prose-only clearance claims (dual-use class).
 
 ## Iteration story (the honest log)

@@ -2,7 +2,7 @@ import { generateText } from "ai";
 import { writeFileSync } from "node:fs";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient } from "../src/jev.js";
-import { buildProvider } from "./harness.js";
+import { buildProductionLikeProvider } from "./harness.js";
 import { generateRedTeamCorpus, type RedTeamCase } from "./redteam-cases.js";
 import { generateCorpus } from "./scale-cases.js";
 import { leetNormalize, SUSPICIOUS_TLDS } from "../src/domain-analysis.js";
@@ -78,7 +78,7 @@ type JudgeResult = {
 
 export async function benchJev(cases: CaseLike[]): Promise<JudgeResult> {
   const backend = typesafeKey ? new JevClient({ apiKey: typesafeKey }) : new GatewayJevClient();
-  const provider = buildProvider(backend);
+  const provider = buildProductionLikeProvider(backend);
   let fn = 0;
   let fp = 0;
   let errors = 0;
@@ -184,7 +184,11 @@ async function main(): Promise<void> {
   console.log("\nreport: eval/evidence/benchmark-report.json");
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run when executed directly: the suite imports this module's helpers, and a
+// module-level run would silently execute a second, concurrent workload.
+if (process.argv[1]?.endsWith("benchmark-judge.ts")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -1,0 +1,408 @@
+{
+  "timestamp": "2026-09-29T12:36:43.217Z",
+  "endpoint": "https://x402check.xyz",
+  "requestBudget": 70,
+  "evalBudget": 80,
+  "probes": [
+    {
+      "id": "ih2-proto-pollution",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — pollution payload rejected with 4xx",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-nested-bomb",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — 40-level nested object rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-unicode-context",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — zero-width/RTL-override context with Cyrillic homoglyph domain rejected safely",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-wallet-10kb",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 — 10KB wallet rejected before evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-domain-url-space",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 — URL-shaped domain rejected safely",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-batch-mixed-invalid",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — all-or-nothing: batch containing an invalid item rejected wholesale (no partial evaluation billed)",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-batch-duplicates",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — duplicate batch rejected wholesale",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-content-type-plain",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — JSON body with text/plain content-type handled safely (no 500; non-request body rejected)",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-trailing-garbage",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — trailing garbage after JSON rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-huge-array-field",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — huge array in unknown field rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-wallet-null",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — wallet:null rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-wallet-array",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — wallet as array rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-wallet-object",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — wallet as object rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-wallet-bool",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — wallet as boolean rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-wallet-whitespace",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 — whitespace-padded wallet rejected before evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-context-number",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 — wrong-type context rejected before evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-deep-500",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — 500-level nested object rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-null-body",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — literal null body rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-array-body",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — array body rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-bom-body",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — BOM-prefixed body rejected cleanly",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-batch-strings",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — batch of string items rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-batch-null-items",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — batch of null items rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-batch-100-invalid",
+      "category": "input-hardening",
+      "status": "SKIP",
+      "detail": "status=402 body={} — unexpected response class",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-wrong-type-fields",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — wrong-typed optional fields rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "ih2-domain-wrong-type",
+      "category": "input-hardening",
+      "status": "PASS",
+      "detail": "status=402 body={} — array-typed domain rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "att-jws-header-alg",
+      "category": "attestation",
+      "status": "SKIP",
+      "detail": "no successful evaluation captured in this run",
+      "requestBudget": 0
+    },
+    {
+      "id": "att-jws-ttl",
+      "category": "attestation",
+      "status": "SKIP",
+      "detail": "no successful evaluation captured in this run",
+      "requestBudget": 0
+    },
+    {
+      "id": "att-input-hash",
+      "category": "attestation",
+      "status": "SKIP",
+      "detail": "no successful evaluation captured in this run",
+      "requestBudget": 0
+    },
+    {
+      "id": "att-jwks-did-crosscheck",
+      "category": "attestation",
+      "status": "PASS",
+      "detail": "1 EC/P-256 key, kid=jev-attest-v1; did:web:x402check.xyz verificationMethod x/y/kid match jwks.json exactly",
+      "requestBudget": 2
+    },
+    {
+      "id": "att-claims-integrity",
+      "category": "attestation",
+      "status": "SKIP",
+      "detail": "no successful evaluation captured in this run",
+      "requestBudget": 0
+    },
+    {
+      "id": "att-signature-verify",
+      "category": "attestation",
+      "status": "SKIP",
+      "detail": "no successful evaluation captured in this run",
+      "requestBudget": 1
+    },
+    {
+      "id": "att-typ-header",
+      "category": "attestation",
+      "status": "SKIP",
+      "detail": "no successful evaluation captured in this run",
+      "requestBudget": 0
+    },
+    {
+      "id": "pay2-sig-garbage",
+      "category": "payment-path",
+      "status": "PASS",
+      "detail": "status=402 body={} x-risk-check-free=absent — base64-of-garbage PAYMENT-SIGNATURE rejected with no evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "pay2-sig-missing-fields",
+      "category": "payment-path",
+      "status": "PASS",
+      "detail": "status=402 body={} — clear rejection of a missing-field payment payload, no evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "pay2-sig-replay",
+      "category": "payment-path",
+      "status": "PASS",
+      "detail": "status=402 both attempts, identical error body, no evaluation either time — replay of garbage is deterministically rejected (quota untouched: payment-header path skips free tier)",
+      "requestBudget": 2
+    },
+    {
+      "id": "pay2-both-headers",
+      "category": "payment-path",
+      "status": "PASS",
+      "detail": "status=402 body={} — both X-PAYMENT (v1) and PAYMENT-SIGNATURE (v2) present: single deterministic path taken (worker prefers PAYMENT-SIGNATURE, deploy/worker.ts:158), no evaluation, no double-spend; with both payloads invalid the choice is not externally distinguishable",
+      "requestBudget": 1
+    },
+    {
+      "id": "pay2-huge-header",
+      "category": "payment-path",
+      "status": "PASS",
+      "detail": "status=402 body={} x-risk-check-free=absent — >16KB PAYMENT-SIGNATURE header rejected with no evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "pay2-empty-header",
+      "category": "payment-path",
+      "status": "PASS",
+      "detail": "status=402 body={} x-risk-check-free=absent — empty-string header is falsy in the worker (?? keeps \"\"), so it falls through to the free tier, not a paywall bypass; with an invalid wallet this is a 422 (1 slot, no evaluation)",
+      "requestBudget": 1
+    },
+    {
+      "id": "cors-preflight",
+      "category": "http-posture",
+      "status": "PASS",
+      "detail": "status=204 (origin https://evil.example) — no Allow-Credentials with wildcard CORS; CORS headers observed: *, Content-Type, Accept, PAYMENT-SIGNATURE, X-PAYMENT, X-Risk-Check-Paid, X-Risk-Check-Client, GET, POST, OPTIONS; note: the preflight consumed a free-tier slot before the response (protected-path gating runs before method routing)",
+      "requestBudget": 1
+    },
+    {
+      "id": "mp2-get-risk-check",
+      "category": "method-path",
+      "status": "PASS",
+      "detail": "status=405 body={\"error\":\"method_not_allowed\"} x-risk-check-free=absent — no evaluation on GET (free-tier slot consumed before the 404)",
+      "requestBudget": 1
+    },
+    {
+      "id": "mp2-head-root",
+      "category": "method-path",
+      "status": "PASS",
+      "detail": "status=200, body 0 bytes (undici strips HEAD bodies; headers only) — no leak",
+      "requestBudget": 1
+    },
+    {
+      "id": "mp2-wellknown-cache",
+      "category": "method-path",
+      "status": "PASS",
+      "detail": "Cache-Control: risk-check.json: absent | jwks.json: absent | did.json: absent — no long-lived caching directive on key material (absent directive = CF default, which does not cache dynamic JSON responses; rotation is not trapped by a stale cache)",
+      "requestBudget": 1
+    },
+    {
+      "id": "pay2-duplicate-headers",
+      "category": "http-posture",
+      "status": "PASS",
+      "detail": "status=402 body={} x-risk-check-free=absent — duplicate X-PAYMENT headers (fetch/undici merges to \"alpha, beta\") rejected with no evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "pay2-no-free-on-paid-error",
+      "category": "http-posture",
+      "status": "PASS",
+      "detail": "status=402 body={} — paid-path error carries no X-Risk-Check-Free marker (free tier never entered when a payment header is present)",
+      "requestBudget": 1
+    },
+    {
+      "id": "dos2-batch-25-distinct",
+      "category": "dos-abuse",
+      "status": "SKIP",
+      "detail": "status=402 body={} — unexpected response class",
+      "requestBudget": 1
+    },
+    {
+      "id": "dos2-context-50kb",
+      "category": "dos-abuse",
+      "status": "PASS",
+      "detail": "status=402 — 50KB context rejected before evaluation",
+      "requestBudget": 1
+    },
+    {
+      "id": "dos2-rapid-identical",
+      "category": "dos-abuse",
+      "status": "SKIP",
+      "detail": "statuses 402/402 checked=false/false — not both evaluated, quota consistency inconclusive",
+      "requestBudget": 2
+    },
+    {
+      "id": "dos2-quota-counter",
+      "category": "dos-abuse",
+      "status": "PASS",
+      "detail": "atomic counter: 12 concurrent distinct-client requests → free-total advanced exactly +12 (no undercount, no overcount)",
+      "requestBudget": 2
+    },
+    {
+      "id": "dos2-many-headers",
+      "category": "dos-abuse",
+      "status": "PASS",
+      "detail": "status=402 body={} — 60 unknown headers rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "dos2-long-query",
+      "category": "dos-abuse",
+      "status": "PASS",
+      "detail": "status=402 body={} — 8KB query string on risk-check rejected cleanly, no 500",
+      "requestBudget": 1
+    },
+    {
+      "id": "dos2-huge-header-unauth",
+      "category": "dos-abuse",
+      "status": "PASS",
+      "detail": "status=200 — 16KB header passed through to the origin without breaking the health probe (edge header limit not hit at this size)",
+      "requestBudget": 1
+    },
+    {
+      "id": "jev-injection-ofac",
+      "category": "jev-adversarial",
+      "status": "SKIP",
+      "detail": "status=402 body={} — no evaluation to inspect",
+      "requestBudget": 1
+    },
+    {
+      "id": "jev-authority-spoof",
+      "category": "jev-adversarial",
+      "status": "SKIP",
+      "detail": "status=402 body={} — no evaluation to inspect",
+      "requestBudget": 1
+    },
+    {
+      "id": "jev-encoded-injection",
+      "category": "jev-adversarial",
+      "status": "SKIP",
+      "detail": "status=402 body={} — no evaluation to inspect",
+      "requestBudget": 1
+    },
+    {
+      "id": "jev-ptbr-injection",
+      "category": "jev-adversarial",
+      "status": "SKIP",
+      "detail": "status=402 body={} — no evaluation to inspect",
+      "requestBudget": 1
+    },
+    {
+      "id": "rh2-error-hygiene",
+      "category": "response-hygiene",
+      "status": "PASS",
+      "detail": "status=405 body={\"error\":\"method_not_allowed\"} — error responses are minimal JSON: no stack traces, no internal tokens, no attestation material",
+      "requestBudget": 0
+    }
+  ],
+  "passed": 43,
+  "failed": 0,
+  "skipped": 13,
+  "budgetUsed": {
+    "requests": 52,
+    "evaluations": 0,
+    "freeTierSlots": 38
+  }
+}

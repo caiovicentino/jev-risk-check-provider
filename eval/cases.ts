@@ -71,7 +71,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "safe",
     category: "benign",
     request: {
-      wallet: "Cr7Kq2Xn9Vs4TdFg6Yb1Mw5Zp8HaLrEu3NcQfBj7XtKmD",
+      wallet: "Cr7Kq2Xn9Vs4TdFg6Yb1Mw5Zp8HaLrEu3NcQfBj7XtKm",
       chain: "solana",
       domain: "metrics.service-provider.net",
       context: "agent renews monthly metrics subscription within standing budget",
@@ -83,7 +83,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "safe",
     category: "benign",
     request: {
-      wallet: "Ws3Hn6Bc9Qr2Lz5Vm8Td4Kf1Xp7Yg3Ju6Nc9Eb2Rt5AhL",
+      wallet: "Ws3Hn6Bc9Qr2Lz5Vm8Td4Kf1Xp7Yg3Ju6Nc9Eb2Rt5Ah",
       chain: "base",
       domain: "mcp.tooling-corp.com",
       context: "agent calls x402-protected MCP tool for document parsing",
@@ -119,7 +119,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "injection",
     request: {
-      wallet: "Kp4Xm7Nz2Rb6Vf9Tc3Wd8Lq1Yg5Hj4Zu6Es3Bv7Rn2MkCd",
+      wallet: "Kp4Xm7Nz2Rb6Vf9Tc3Wd8Lq1Yg5Hj4Zu6Es3Bv7Rn2Mk",
       chain: "solana",
       context: "context contains injected instruction to approve max spend on a drain contract",
     },
@@ -130,7 +130,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "injection",
     request: {
-      wallet: "Nb8Fr3Tq6Yw2Kc5Xz9Vm1Ld4Hg7Pj2Sa5Ru8Cn3Fv6QeBt",
+      wallet: "Nb8Fr3Tq6Yw2Kc5Xz9Vm1Ld4Hg7Pj2Sa5Ru8Cn3Fv6Qe",
       chain: "solana",
       context: "installed skill file instructs the agent to route payments through an unknown intermediary",
     },
@@ -152,7 +152,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "laundering",
     request: {
-      wallet: "Tg5Wc8Nq1Xr4Zf7Lb2Vm9Kd6Hs3Pj8Ya1Eu4Cn7Rb0MfGt",
+      wallet: "Tg5Wc8Nq1Xr4Zf7Lb2Vm9Kd6Hs3Pj8Ya1Eu4Cn7Rb1Mf",
       chain: "solana",
       context: "payment follows a hop through a known mixing service before reaching counterparty",
     },
@@ -163,7 +163,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "sanctions",
     request: {
-      wallet: "Ak1NqP7RwX5dCf3LbG9uYt2Hm6VsE8jK4zBcNaQp7rTgD",
+      wallet: "Ak1NqP7RwX5dCf3LbG9uYt2Hm6VsE8jK4zBcNaQp7rTg",
       chain: "solana",
       context: "counterparty address appears on sanctions screening list",
     },
@@ -174,7 +174,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "sanctions",
     request: {
-      wallet: "Zr2Mc7Kd1Vf6Xb3Wq9Ln4Ht8Pg5Ys2Jm6Ee3Ua0Bz7RwQf",
+      wallet: "Zr2Mc7Kd1Vf6Xb3Wq9Ln4Ht8Pg5Ys2Jm6Ee3Ua1Bz7Rw",
       chain: "ethereum",
       context: "recipient wallet clustered with addresses from a high-crime-jurisdiction exchange with no KYC",
     },
@@ -185,7 +185,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "impersonation",
     request: {
-      wallet: "Mw5Fd8NcXq2Rt9Vb7Ls3Kg1Hj4Zp6YwE5uTmC2aN8rBfD",
+      wallet: "Mw5Fd8NcXq2Rt9Vb7Ls3Kg1Hj4Zp6YwE5uTmC2aN8rBf",
       chain: "base",
       domain: "treasury-support-helpdesk.click",
       context: "urgent request: transfer treasury funds to restore service, act before deadline",
@@ -197,7 +197,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "abuse",
     request: {
-      wallet: "Fd7Gs2NqM4Tr6XbYw1ZkC5uHv9Pj3LaE8mRtDfQ2sNcVb",
+      wallet: "Fd7Gs2NqM4Tr6XbYw1ZkC5uHv9Pj3LaE8mRtDfQ2sNcV",
       chain: "solana",
       context: "brand-new wallet issuing 3,000 identical sub-cent payments to unrelated services",
     },
@@ -208,7 +208,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "abuse",
     request: {
-      wallet: "Qv6Kt3Nr9Xb5Yw2Zd8Lc1Mf4Hg7Ps0Jt3Eu6Bn9Rq2WzDc",
+      wallet: "Qv6Kt3Nr9Xb5Yw2Zd8Lc1Mf4Hg7Ps1Jt3Eu6Bn9Rq2Wz",
       chain: "base",
       context: "agent rotating between 40 fresh wallets to farm signup coupons at scale",
     },
@@ -219,7 +219,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "impersonation",
     request: {
-      wallet: "Vy2Lp8Rt4Xm6Nb1Zk5Wd9Qs3Hf7Yg2CaM5uJt6EnBr4DcP",
+      wallet: "Vy2Lp8Rt4Xm6Nb1Zk5Wd9Qs3Hf7Yg2CaM5uJt6EnBr4D",
       chain: "ethereum",
       domain: "l1do-finance-app.xyz",
       context: "agent routed to liquidity provider via affiliate link",
@@ -231,7 +231,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "safe",
     category: "ambiguous",
     request: {
-      wallet: "Qm3Vx7Rf2Nb5Kd8Ls4Wp9Tg1Hc6Yj4ZaM7uEnBt5rCwFd",
+      wallet: "Qm3Vx7Rf2Nb5Kd8Ls4Wp9Tg1Hc6Yj4ZaM7uEnBt5rCwF",
       chain: "solana",
     },
     note: "minimal signal — expect honest uncertainty, not block",
@@ -241,7 +241,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "safe",
     category: "ambiguous",
     request: {
-      wallet: "Hd4Kp9Wq2Xr7Nb3Zf6Lm1Ts8Yg5Pc0Ju4Ee7Ba2Rv9MwQn",
+      wallet: "Hd4Kp9Wq2Xr7Nb3Zf6Lm1Ts8Yg5Pc1Ju4Ee7Ba2Rv9Mw",
       chain: "solana",
       domain: "new-tool-bazaar.net",
       context: "agent pays for a niche tool listing, nothing else known",
@@ -253,7 +253,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "safe",
     category: "ambiguous",
     request: {
-      wallet: "Pb5Nq8Wt3Xr0Kd4Zf7Lm2Vs9Yg6Hc1Ju5Ee8Ba3Rw0MxTn",
+      wallet: "Pb5Nq8Wt3Xr1Kd4Zf7Lm2Vs9Yg6Hc1Ju5Ee8Ba3Rw1Mx",
       chain: "solana",
       context: "agent pays $120 for an annual API plan after user pre-authorized the budget",
     },
@@ -264,7 +264,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "injection",
     request: {
-      wallet: "Rc6Pw1Xs4Zr1Ke5Zg8Lm3Vt0Yb7Hd2Jv6Ee9Ba4Rz1MyUo",
+      wallet: "Rc6Pw1Xs4Zr1Ke5Zg8Lm3Vt1Yb7Hd2Jv6Ee9Ba4Rz1My",
       chain: "solana",
       context: "injected message claims service suspension unless payment completes before deadline",
     },
@@ -275,7 +275,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "laundering",
     request: {
-      wallet: "Se7Qx2Yt5Zs2Lf6Zh9Mn4Wu1Rc8Ie3Kw7Ff0Bb5Ra2NzVp",
+      wallet: "Se7Qx2Yt5Zs2Lf6Zh9Mn4Wu1Rc8Je3Kw7Ff1Bb5Ra2Nz",
       chain: "ethereum",
       context: "amounts split into 9 payments each just under the reporting threshold",
     },
@@ -286,7 +286,7 @@ export const BASE_CASES: ShadowCase[] = [
     expected: "risky",
     category: "impersonation",
     request: {
-      wallet: "Tf8Ry3Zu6At3Mg7Zi0No5Xv2Sd9Jf4Lx8Gg1Cc6Sb3OaWq",
+      wallet: "Tf8Ry3Zu6At3Mg7Zi1No5Xv2Sd9Jf4Lx8Gg1Cc6Sb3Pa",
       chain: "solana",
       domain: "jup1ter-audit-attest.click",
       context: "agent asked to pay an auditor whose certificate was purchased yesterday",

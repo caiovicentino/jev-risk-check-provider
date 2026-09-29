@@ -2,6 +2,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { Provider } from "../src/provider.js";
 import { generateKeyPair } from "../src/jws.js";
 import type { JevLike } from "../src/jev.js";
+import type { OnchainLookup } from "../src/onchain.js";
+import type { ThreatIntelFeeds } from "../src/threat-intel.js";
+import { loadFeedsFromDisk } from "../src/feeds-node.js";
 import type { RiskCheckResult } from "../src/types.js";
 import { CASES, type ShadowCase } from "./cases.js";
 
@@ -26,11 +29,37 @@ export type LogEntry = {
   ts: string;
 };
 
-export function buildProvider(jev: JevLike | null): Provider {
-  return new Provider({ host: "paysol.local", keyPair: generateKeyPair("jev-attest-v1"), jev });
+export type ProviderOptions = { onchain?: OnchainLookup | null; feeds?: ThreatIntelFeeds | null };
+
+/** Bare provider (OFAC screen always on; no feeds, no on-chain) unless options say otherwise. */
+export function buildProvider(jev: JevLike | null, opts: ProviderOptions = {}): Provider {
+  const feeds = opts.feeds ?? null;
+  return new Provider({
+    host: "paysol.local",
+    keyPair: generateKeyPair("jev-attest-v1"),
+    jev,
+    onchain: opts.onchain ?? null,
+    ...(feeds ? { feeds: () => feeds } : {}),
+  });
 }
 
-export function withScreeningSimulation(cases: ShadowCase[]): ShadowCase[] {
+let diskFeeds: ThreatIntelFeeds | null = null;
+/**
+ * Production-regime provider for synthetic corpora: OFAC + embedded feeds (+ ScamSniffer
+ * when cached locally), on-chain OFF — synthetic addresses have no chain history by
+ * construction, so on-chain facts would only measure the corpus generator.
+ */
+export function buildProductionLikeProvider(jev: JevLike | null, opts: { onchain?: OnchainLookup | null } = {}): Provider {
+  diskFeeds ??= loadFeedsFromDisk();
+  return buildProvider(jev, { feeds: diskFeeds, onchain: opts.onchain ?? null });
+}
+
+/**
+ * COMPARISON ONLY — reproduces the pre-v6 "screening-integrated simulation", which
+ * derived the caller's screening field from the ground-truth label (risky → flagged,
+ * safe → clean). That leaks the label into the input; never use it for the gate.
+ */
+export function withLabelDerivedScreening(cases: ShadowCase[]): ShadowCase[] {
   return cases.map((c) => ({
     ...c,
     request: { ...c.request, screening: { sanctions: c.expected === "safe" ? ("clean" as const) : ("flagged" as const) } },

@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-09-29T12:34:39.724Z",
+  "endpoint": "https://x402check.xyz/v1/risk-check",
+  "cases": 53,
+  "correct": 8,
+  "accuracy": 0.1509433962264151,
+  "jwsVerified": 8,
+  "jwsMismatches": [],
+  "perCategory": {
+    "benign": {
+      "n": 6,
+      "correct": 6
+    },
+    "impersonation": {
+      "n": 2,
+      "correct": 2
+    },
+    "injection": {
+      "n": 1,
+      "correct": 0
+    }
+  },
+  "notes": [
+    "risky-drain-instruction: HTTP 402 payment_required — free quota exhausted — stopped without retry, 44 cases not run"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-09-29T14:30:06.374Z",
+  "endpoint": "http://localhost:8799",
+  "passed": 11,
+  "failed": 0,
+  "skipped": 1,
+  "results": [
+    {
+      "id": "v2-discovery",
+      "status": "PASS",
+      "detail": "v0.2.0; pricing networks=7 (no testnets); https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML (publis…"
+    },
+    {
+      "id": "v2-no-testnet-payments",
+      "status": "PASS",
+      "detail": "402 offers 7 mainnet options only"
+    },
+    {
+      "id": "v2-batch-priced-per-item",
+      "status": "PASS",
+      "detail": "25-item batch = 25 × unit on all 7 networks (e.g. eip155:8453 1000 → 25000)"
+    },
+    {
+      "id": "v2-validation-before-quota",
+      "status": "PASS",
+      "detail": "5 malformed requests rejected (422/413) with the offending field named"
+    },
+    {
+      "id": "v2-free-quota-per-item-and-invalid-free",
+      "status": "PASS",
+      "detail": "remaining 9 → batch of 2 → 7 → 3 invalid + 1 valid → 6"
+    },
+    {
+      "id": "v2-healthz-edge-cached",
+      "status": "PASS",
+      "detail": "cache-control: public, max-age=60"
+    },
+    {
+      "id": "v2-ofac-deterministic",
+      "status": "PASS",
+      "detail": "Lazarus (OFAC SDN) → 0/critical, signed checks.sanctions=listed, model skipped"
+    },
+    {
+      "id": "v2-metamask-phishing-domain",
+      "status": "PASS",
+      "detail": "spotgpus.com subdomain → 20/critical [phishing_domain]"
+    },
+    {
+      "id": "v2-caller-clean-is-not-a-bypass",
+      "status": "PASS",
+      "detail": "self-asserted clean on a described listing → 30/high; claim 'asserted' marks it as unverified"
+    },
+    {
+      "id": "v2-approval-to-fresh-eoa",
+      "status": "PASS",
+      "detail": "permit → fresh EOA 40/high; → Universal Router 71/low"
+    },
+    {
+      "id": "v2-evidence-and-signed-checks",
+      "status": "PASS",
+      "detail": "evidence{sanctions,onchain=ok,feeds=1} + signed checks/payment/aud/jti; iss pinned via did:web"
+    },
+    {
+      "id": "v2-ipv6-slash64-aggregation",
+      "status": "SKIP",
+      "detail": "set IPV6_A and IPV6_B (two source addresses in one /64)"
+    }
+  ]
+}

@@ -126,7 +126,7 @@ export class MockJevClient implements JevLike {
   constructor(private readonly fixtures: Record<string, Record<string, Answer>>) {}
 
   async systemOne(state: object, _questions: JevQuestions): Promise<{ answers: Record<string, Answer>; usage: Usage }> {
-    const wallet = (state as { payer?: { wallet?: string } }).payer?.wallet ?? "";
+    const wallet = (state as { subject?: { wallet?: string } }).subject?.wallet ?? "";
     const answers = this.fixtures[wallet];
     if (!answers) throw new Error(`no synthetic fixture for wallet ${wallet}`);
     return { answers, usage: SYNTHETIC_USAGE };

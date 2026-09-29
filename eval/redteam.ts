@@ -1,7 +1,7 @@
 import { mkdirSync, appendFileSync, writeFileSync } from "node:fs";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient } from "../src/jev.js";
-import { buildProvider, EVAL_EVIDENCE_DIR } from "./harness.js";
+import { buildProductionLikeProvider, EVAL_EVIDENCE_DIR } from "./harness.js";
 import { generateRedTeamCorpus, type RedTeamCase } from "./redteam-cases.js";
 
 const args = process.argv.slice(2);
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   console.log(`backend: ${typesafeKey ? "typesafe-direct" : "vercel-ai-gateway"}`);
   console.log(`red-team corpus: ${COUNT} cases (seed=${SEED}) | concurrency=${CONCURRENCY}`);
 
-  const provider = buildProvider(backend);
+  const provider = buildProductionLikeProvider(backend);
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   const logFile = `${EVAL_EVIDENCE_DIR}/redteam-log.jsonl`;
   const corpus = generateRedTeamCorpus(COUNT, SEED);
@@ -190,7 +190,11 @@ async function main(): Promise<void> {
   console.log(`report: ${EVAL_EVIDENCE_DIR}/redteam-report.json | log: ${logFile}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run when executed directly: the suite imports this module's helpers, and a
+// module-level run would silently execute a second, concurrent workload.
+if (process.argv[1]?.endsWith("redteam.ts")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

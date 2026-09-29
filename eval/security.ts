@@ -2,7 +2,7 @@ import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 
-const ENDPOINT = "https://x402check.xyz";
+const ENDPOINT = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
 const HOST = "x402check.xyz";
 const REQUEST_BUDGET = 30;
 const LEAK_TOKENS = ["AI_GATEWAY", "sk-", "Bearer", "PRIVATE"];

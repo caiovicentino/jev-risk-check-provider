@@ -1,5 +1,14 @@
 # Security evidence — live endpoint hardening probes
 
+> **Historical record (v5 worker, 2026-09-28/29).** Probes that encode pre-v0.2.0 behaviour are annotated in v0.2.0:
+> - 1-char and 10 KB wallets were accepted. They now get 422, because the wallet must be an address.
+> - Batches were priced as one item. Pricing and the free tier are now per item.
+> - Testnet payments were accepted on the production route. That is now off by default.
+> - Quota was consumed before validation. Validation now runs first.
+>
+> The v0.2.0 probes live in `eval/security-v2.ts`, and their results are in [EVIDENCE.md](EVIDENCE.md).
+
+
 Run: 2026-09-28 · live endpoint `https://x402check.xyz` (Cloudflare Worker, `deploy/worker.ts`) · scripted suite: `eval/security.ts` · raw results: `eval/evidence/security-report.json`
 
 ## Methodology

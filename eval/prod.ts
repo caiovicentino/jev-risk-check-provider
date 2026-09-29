@@ -5,8 +5,10 @@ import { DECISION_THRESHOLD, EVAL_EVIDENCE_DIR } from "./harness.js";
 import type { RiskCheckRequest, RiskCheckResult } from "../src/types.js";
 import { buildPayFetch } from "./paid-fetch.js";
 
-const ENDPOINT = "https://x402check.xyz/v1/risk-check";
-const JWKS_URL = "https://x402check.xyz/.well-known/jwks.json";
+// X402CHECK_BASE points the suite at a staging target (e.g. `wrangler dev`) before a deploy.
+const BASE = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
+const ENDPOINT = `${BASE}/v1/risk-check`;
+const JWKS_URL = `${BASE}/.well-known/jwks.json`;
 const EXPECTED_ISS = "did:web:x402check.xyz";
 const DELAY_MS = 150;
 
@@ -107,7 +109,12 @@ async function postRiskCheck(req: RiskCheckRequest): Promise<{ status: number; b
   const doFetch = payFetch ?? fetch;
   const res = await doFetch(ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(process.env.PAID ? { "X-Risk-Check-Paid": "1" } : {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(process.env.PAID ? { "X-Risk-Check-Paid": "1" } : {}),
+      // Optional install-style id: the free tier then charges this id first, then the IP allowance.
+      ...(process.env.X402CHECK_CLIENT_ID ? { "X-Risk-Check-Client": process.env.X402CHECK_CLIENT_ID } : {}),
+    },
     body: JSON.stringify(req),
     signal: AbortSignal.timeout(60_000),
   });
