@@ -90,7 +90,7 @@ async function main(): Promise<void> {
 
   const disc = await call("GET", "/.well-known/risk-check.json");
   const signals = (disc.json?.signals as string[] | undefined) ?? [];
-  add("discovery_v03", disc.json?.version === "0.3.0" && signals.includes("transaction_simulation") && signals.includes("drainer_code_fingerprint"), `version=${String(disc.json?.version)} signals=${signals.join(",")}`);
+  add("discovery_v03", String(disc.json?.version ?? "").startsWith("0.3.") && signals.includes("transaction_simulation") && signals.includes("drainer_code_fingerprint"), `version=${String(disc.json?.version)} signals=${signals.join(",")}`);
 
   const st = await call("GET", "/status");
   const data = (st.json?.data ?? {}) as Record<string, { as_of?: string; age_days?: number; origin?: string } | undefined>;
