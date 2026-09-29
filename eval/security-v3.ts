@@ -9,7 +9,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createPublicKey, createVerify, type JsonWebKey } from "node:crypto";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
-import { buildPayFetch, type PayFetch } from "./paid-fetch.js";
+import { buildPayFetch, settlementReceipt, type PayFetch, type SettlementReceipt } from "./paid-fetch.js";
+
+/** Every settlement this run paid for (tx hashes on-chain), for the report. */
+const receipts: Array<SettlementReceipt & { probe: string }> = [];
 
 const BASE = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
 const ISSUER = `did:web:${process.env.EXPECTED_HOST ?? "x402check.xyz"}`;
@@ -34,6 +37,8 @@ async function call(method: string, path: string, body?: unknown, opts: { paid?:
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(60_000),
   });
+  const receipt = opts.paid ? settlementReceipt(res.headers) : null;
+  if (receipt) receipts.push({ probe: `${method} ${path}`, ...receipt });
   const text = await res.text();
   let json: Record<string, unknown> | null = null;
   try {
@@ -135,7 +140,8 @@ async function main(): Promise<void> {
   if (!settled(wrap)) add("simulation_legit_wrap", null, `not paid (status ${wrap.status}): fund the payer`);
   else add("simulation_legit_wrap", wrap.status === 200 && wsim?.status === "ok" && (wsim.findings ?? []).length === 0 && (wsim.inflows ?? []).length === 1 && wrap.json?.tier === "low", `HTTP ${wrap.status} score=${String(wrap.json?.score)} tier=${String(wrap.json?.tier)} simulation=${wsim?.status} findings=${(wsim?.findings ?? []).join("+") || "none"}`);
 
-  const report = { timestamp: new Date().toISOString(), base: BASE, pass: out.filter((o) => o.status === "PASS").length, fail: out.filter((o) => o.status === "FAIL").length, skip: out.filter((o) => o.status === "SKIP").length, outcomes: out };
+  for (const r of receipts) console.log(`paid: ${r.network} tx ${r.transaction} (payer ${r.payer})`);
+  const report = { timestamp: new Date().toISOString(), base: BASE, receipts, pass: out.filter((o) => o.status === "PASS").length, fail: out.filter((o) => o.status === "FAIL").length, skip: out.filter((o) => o.status === "SKIP").length, outcomes: out };
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   writeFileSync(`${EVAL_EVIDENCE_DIR}/security-v3-report.json`, JSON.stringify(report, null, 2));
   console.log(`\n${report.pass} PASS · ${report.fail} FAIL · ${report.skip} SKIP`);

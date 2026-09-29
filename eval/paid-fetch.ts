@@ -27,3 +27,17 @@ export async function buildPayFetch(): Promise<PayFetch> {
   cached = wrapFetchWithPayment(fetch.bind(globalThis), client) as PayFetch;
   return cached;
 }
+
+export type SettlementReceipt = { success?: boolean | undefined; transaction?: string | undefined; network?: string | undefined; payer?: string | undefined };
+
+/** The x402 settlement receipt of a paid response (PAYMENT-RESPONSE, base64 JSON), if any. */
+export function settlementReceipt(headers: Headers): SettlementReceipt | null {
+  const raw = headers.get("payment-response") ?? headers.get("x-payment-response");
+  if (!raw) return null;
+  try {
+    const r = JSON.parse(Buffer.from(raw, "base64").toString("utf8")) as SettlementReceipt;
+    return { success: r.success, transaction: r.transaction, network: r.network, payer: r.payer };
+  } catch {
+    return null;
+  }
+}

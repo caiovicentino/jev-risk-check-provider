@@ -26,7 +26,8 @@
    - **Price:** the x402 price is unit × units, 1 unit per evaluation, so a batch of *n* costs *n*. `adapter.getBody()` exposes the validated body to the SDK's dynamic price.
    - **Unpaid request:** it gets the `402` challenge with the accepted options.
    - **Paid request:** verify → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed` and no attestation is returned.
-3. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
+3. **Facilitator routing** (`mainnetFacilitators` in `protected.ts`): PayAI for the EVM networks it supports, then Dexter for Solana, Monad and any EVM network PayAI lacks. Dexter refuses payments below its published gas-cost floor, which is above $0.001 on Base, Polygon, Arbitrum and Avalanche. `/status` → `payments` lists each network's facilitator, floor and `below_floor`.
+4. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
 
 ## Secrets and variables
 

@@ -160,7 +160,8 @@ if (v.tier === "high" || v.tier === "critical") warnOrBlock(v);
 Every evaluation is paid; there is no free tier.
 
 - **Price:** $0.001 per evaluation ($0.002 on Solana). A batch of *n* is billed *n*.
-- **Settlement:** USDC via x402 v2 (`PAYMENT-SIGNATURE`), **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The facilitator is Dexter (gas-sponsored), with PayAI as fallback. The x402 "exact" scheme is gasless for the payer, so USDC alone is enough.
+- **Settlement:** USDC via x402 v2 (`PAYMENT-SIGNATURE`), **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The x402 "exact" scheme is gasless for the payer, so USDC alone is enough.
+- **Facilitators:** EVM payments settle through PayAI, and Solana and Monad through Dexter. Dexter's published gas-cost floors are above $0.001 on Base, Polygon, Arbitrum and Avalanche. [`/status`](https://x402check.xyz/status) shows each network's facilitator and floor against the price.
 - **An unpaid request** gets `402` with the accepted options in `PAYMENT-REQUIRED`. Any x402 client pays and retries.
 - **Invalid input** is rejected (`422`/`413`) before anything is priced.
 - **Release after settlement:** the attestation is returned only once the payment settles. If the evaluation cannot be produced, nothing is settled (`503`, no charge).

@@ -1,7 +1,29 @@
 {
-  "timestamp": "2026-09-29T18:41:56.034Z",
+  "timestamp": "2026-09-29T19:37:32.389Z",
   "base": "https://x402check.xyz",
-  "client": "v3-probe-2e07b4c7-e780-444f-98d8-7ebe2c5a1260",
+  "receipts": [
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0x737dbba55f9268c522452bfc8b7bac483eb174df0b774e0e7acd7fb789496fbf",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xee4055b469747755bc49bcab6b682c5abe1edbb5735b67f9beccef4cea53e838",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xeb082bc5f324b4e298703efe0a9f43b6c9f07eb176f9eef7c3802ec1028e8447",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    }
+  ],
   "pass": 8,
   "fail": 0,
   "skip": 0,
@@ -14,7 +36,7 @@
     {
       "id": "status_freshness",
       "status": "PASS",
-      "detail": "ofac=2026-09-23(embedded) metamask=2026-09-29(embedded) scamsniffer={\"as_of\":\"2026-09-29\",\"age_days\":0,\"domains\":340004,\"addresses\":2530,\"code_finge leaks=false"
+      "detail": "ofac=2026-09-29(embedded) metamask=2026-09-29(embedded) scamsniffer={\"as_of\":\"2026-09-29\",\"age_days\":0,\"domains\":340004,\"addresses\":2530,\"code_finge leaks=false"
     },
     {
       "id": "tx_non_evm_chain",
@@ -44,7 +66,7 @@
     {
       "id": "simulation_legit_wrap",
       "status": "PASS",
-      "detail": "HTTP 200 score=94 tier=low simulation=ok findings=none"
+      "detail": "HTTP 200 score=88 tier=low simulation=ok findings=none"
     }
   ]
 }

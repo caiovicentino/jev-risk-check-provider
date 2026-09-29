@@ -1,9 +1,53 @@
 {
-  "timestamp": "2026-09-29T19:07:52.590Z",
+  "timestamp": "2026-09-29T19:38:17.354Z",
   "endpoint": "https://x402check.xyz",
-  "passed": 6,
+  "receipts": [
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xfaafcc65b7220f64b03c7329807234472f43019b1e9570a883fce357ea06612a",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xc16676208ef7c351702647cc523a07dd878db9c8432eb6f3e72ea6ae85296ec9",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xf56fd640373a86586901a56be5499abf8472d857838b1056f9be62fcb83dd997",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0x6b74bdd60b80f0a07f739f7018d19bbaba19bb5f0ebc4f4ce7b47a8669640e05",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xe4a4dd27980361d6112abfcc295edc4c774a618419d19bec772f19211d8a27c0",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0x042907735fe346a27883bed26da0b0f1ee5a7bf4c90bb9bcf6da6bb26cfd5893",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    }
+  ],
+  "passed": 11,
   "failed": 0,
-  "skipped": 5,
+  "skipped": 0,
   "results": [
     {
       "id": "v2-discovery",
@@ -37,28 +81,28 @@
     },
     {
       "id": "v2-ofac-deterministic",
-      "status": "SKIP",
-      "detail": "error: Error: no payer configured (~/.config/paysol)"
+      "status": "PASS",
+      "detail": "Lazarus (OFAC SDN) → 0/critical, signed checks.sanctions=listed, model skipped"
     },
     {
       "id": "v2-metamask-phishing-domain",
-      "status": "SKIP",
-      "detail": "error: Error: no payer configured (~/.config/paysol)"
+      "status": "PASS",
+      "detail": "spotgpus.com subdomain → 20/critical [phishing_domain]"
     },
     {
       "id": "v2-caller-clean-is-not-a-bypass",
-      "status": "SKIP",
-      "detail": "error: Error: no payer configured (~/.config/paysol)"
+      "status": "PASS",
+      "detail": "self-asserted clean on a described listing → 30/high; claim 'asserted' marks it as unverified"
     },
     {
       "id": "v2-approval-to-fresh-eoa",
-      "status": "SKIP",
-      "detail": "error: Error: no payer configured (~/.config/paysol)"
+      "status": "PASS",
+      "detail": "permit → fresh EOA 40/high; → Universal Router 84/low"
     },
     {
       "id": "v2-evidence-and-signed-checks",
-      "status": "SKIP",
-      "detail": "error: Error: no payer configured (~/.config/paysol)"
+      "status": "PASS",
+      "detail": "evidence{sanctions,onchain=ok,feeds=5} + signed checks/payment/aud/jti; iss pinned via did:web"
     }
   ]
 }

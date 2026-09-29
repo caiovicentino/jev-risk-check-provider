@@ -1,4 +1,4 @@
-import { handleProtected, ensureStack, json, PROTECTED } from "./protected.js";
+import { handleProtected, ensureStack, json, paymentRouting, PROTECTED } from "./protected.js";
 import { createHandler } from "../src/handler.js";
 import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
 import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
@@ -45,6 +45,11 @@ async function status(env: WorkerEnv): Promise<Response> {
     scamsniffer = { status: "unavailable" };
   }
   const mm = fresh.metamask;
+  // Which facilitator settles each network, and whether our price clears its published floor.
+  const payments = await Promise.race([
+    paymentRouting(env).catch(() => null),
+    new Promise<null>((r) => setTimeout(() => r(null), 3000)),
+  ]);
   return json(200, {
     version: PROVIDER_VERSION,
     time: new Date().toISOString(),
@@ -56,6 +61,7 @@ async function status(env: WorkerEnv): Promise<Response> {
     },
     refresh: { source: env.FEEDS_URL === "off" ? "off" : (env.FEEDS_URL ?? DEFAULT_FEEDS_URL), checked_at: fresh.checked_at ?? null, published_at: fresh.generated_at ?? null, error: fresh.error ?? null },
     checks: { onchain: env.ONCHAIN === "off" ? "off" : "on", simulation: env.SIMULATION === "off" ? "off" : "on", contract_verification: env.CONTRACT_INTEL === "off" ? "off" : "on" },
+    payments: payments ?? { status: "unavailable" },
   }, { "Cache-Control": "public, max-age=60" });
 }
 

@@ -44,6 +44,7 @@ Every evaluation is paid per call via x402: $0.001 in USDC, $0.002 on Solana, wi
 - The price is the product: an agent or wallet pays for a signed, evidence-backed verdict at the moment it matters.
 - The price is also the anti-abuse control: nothing is evaluated without settlement, and the attestation is released only after the payment settles.
 - Partners get the same per-call economics through x402. Volume pricing is on the roadmap, not a free tier.
+- **Operational risk:** facilitators can set gas-cost floors above the price. Routing picks a facilitator that settles at our price, and `/status` exposes each network's floor so a rising floor is visible immediately.
 
 ## Distribution
 

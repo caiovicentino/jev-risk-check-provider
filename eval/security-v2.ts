@@ -10,7 +10,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createPublicKey, createVerify, type JsonWebKey } from "node:crypto";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
-import { buildPayFetch, type PayFetch } from "./paid-fetch.js";
+import { buildPayFetch, settlementReceipt, type PayFetch, type SettlementReceipt } from "./paid-fetch.js";
+
+/** Every settlement this run paid for (tx hashes on-chain), for the report. */
+const receipts: Array<SettlementReceipt & { probe: string }> = [];
 
 /** A paid probe that still got 402 did not settle: report why, as SKIP (not verified), never PASS. */
 const unpaid = (r: { status: number; headers: Headers }) => ({ status: "SKIP" as const, detail: `status=${r.status}${r.status === 402 ? ` (payment not settled${r.headers.get("x-payment-error") ? `: ${r.headers.get("x-payment-error")}` : ""}; fund the payer)` : ""}` });
@@ -43,6 +46,8 @@ async function call(method: string, path: string, body?: unknown, headers: Recor
     ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }),
     signal: AbortSignal.timeout(60_000),
   });
+  const receipt = opts.paid ? settlementReceipt(res.headers) : null;
+  if (receipt) receipts.push({ probe: `${method} ${path}`, ...receipt });
   const text = await res.text();
   let json: Record<string, unknown> | null = null;
   try {
@@ -216,7 +221,8 @@ async function main(): Promise<void> {
     results.push({ id: p.id, ...o });
     console.log(`${o.status.padEnd(4)} ${p.id.padEnd(40)} ${o.detail}`);
   }
-  const summary = { timestamp: new Date().toISOString(), endpoint: BASE, passed: results.filter((r) => r.status === "PASS").length, failed: results.filter((r) => r.status === "FAIL").length, skipped: results.filter((r) => r.status === "SKIP").length, results };
+  for (const r of receipts) console.log(`paid: ${r.network} tx ${r.transaction} (payer ${r.payer})`);
+  const summary = { timestamp: new Date().toISOString(), endpoint: BASE, receipts, passed: results.filter((r) => r.status === "PASS").length, failed: results.filter((r) => r.status === "FAIL").length, skipped: results.filter((r) => r.status === "SKIP").length, results };
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   writeFileSync(`${EVAL_EVIDENCE_DIR}/security-v2-report.json`, JSON.stringify(summary, null, 2));
   console.log(`\n${summary.passed} PASS · ${summary.failed} FAIL · ${summary.skipped} SKIP → ${EVAL_EVIDENCE_DIR}/security-v2-report.json`);

@@ -111,3 +111,25 @@ test("paid path releases the attestation only after settlement succeeds", async 
   const body = (await failed.json()) as Record<string, unknown>;
   assert.equal(body.jws, undefined);
 });
+
+test("payment routing: EVM networks settle through PayAI (below Dexter's gas floors), Solana and Monad through Dexter", async () => {
+  const { scopedFacilitator, paymentRouting } = await import("../deploy/protected.js");
+  const kind = (network: string, floor?: number) => ({ x402Version: 2, scheme: "exact", network, ...(floor !== undefined ? { extra: { paymentFloorAvailable: true, minPaymentAmountUsd: floor } } : {}) });
+  const client = (kinds: ReturnType<typeof kind>[]) => ({ verify: async () => ({ isValid: true }), settle: async () => ({ success: true }), getSupported: async () => ({ kinds }) }) as never;
+  const payai = client([kind("eip155:8453"), kind("eip155:137"), kind("eip155:42161"), kind("eip155:43114"), kind("eip155:1329"), kind("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")]);
+  const dexter = client([kind("eip155:8453", 0.0015), kind("eip155:137", 0.0031), kind("eip155:143", 0.0003), kind("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", 0.0013)]);
+  const routes = await paymentRouting({}, [
+    { name: "payai", client: scopedFacilitator(payai, (n) => n.startsWith("eip155:")) },
+    { name: "dexter", client: dexter },
+  ]);
+  const by = Object.fromEntries(routes.map((r) => [r.network, r]));
+  assert.equal(by["eip155:8453"]?.facilitator, "payai");
+  assert.equal(by["eip155:1329"]?.facilitator, "payai");
+  assert.equal(by["eip155:143"]?.facilitator, "dexter");
+  assert.equal(by["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]?.facilitator, "dexter", "PayAI is scoped to EVM");
+  assert.equal(by["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]?.below_floor, false, "$0.002 clears Dexter's Solana floor");
+  assert.ok(routes.every((r) => !r.below_floor));
+  // The failure this routing fixes: Dexter alone settles Base below its gas-cost floor.
+  const dexterOnly = await paymentRouting({}, [{ name: "dexter", client: dexter }]);
+  assert.equal(dexterOnly.find((r) => r.network === "eip155:8453")?.below_floor, true);
+});

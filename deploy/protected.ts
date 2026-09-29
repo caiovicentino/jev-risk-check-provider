@@ -9,7 +9,7 @@ import { createSimulator } from "../src/simulation.js";
 import { createContractIntel } from "../src/contract-intel.js";
 import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import type { ThreatIntelFeeds } from "../src/threat-intel.js";
-import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
+import { HTTPFacilitatorClient, x402ResourceServer, type FacilitatorClient } from "@x402/core/server";
 import { x402HTTPResourceServer, type HTTPAdapter, type HTTPRequestContext, type HTTPProcessResult, type HTTPResponseInstructions, type PaymentOption } from "@x402/core/http";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
@@ -78,6 +78,69 @@ export function buildAccepts(env: WorkerEnv): PaymentOption[] {
   return accepts;
 }
 
+/**
+ * A facilitator restricted to some networks: its /supported kinds are filtered, so the
+ * resource server routes only those networks to it (routing = first facilitator, in
+ * order, that supports the network).
+ */
+export function scopedFacilitator(inner: FacilitatorClient, allow: (network: string) => boolean): FacilitatorClient {
+  return {
+    verify: (payload, requirements) => inner.verify(payload, requirements),
+    settle: (payload, requirements) => inner.settle(payload, requirements),
+    getSupported: async () => {
+      const supported = await inner.getSupported();
+      return { ...supported, kinds: supported.kinds.filter((k) => allow(String(k.network))) };
+    },
+  };
+}
+
+/**
+ * Mainnet facilitators, in routing order.
+ * - PayAI for EVM: it settles at our $0.001 price. Dexter publishes gas-cost floors that
+ *   are above $0.001 on Base, Polygon, Arbitrum and Avalanche (measured 2026-09-29:
+ *   $0.0015–$0.0061), and it refuses anything below them.
+ * - Dexter for Solana (floor ≈ $0.0013 < $0.002) and Monad (≈ $0.0003), and for any EVM
+ *   network PayAI does not support.
+ * `/status` reports each network's facilitator and published floor against the price.
+ */
+export function mainnetFacilitators(env: WorkerEnv): Array<{ name: string; client: FacilitatorClient }> {
+  const payai = new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_PAYAI ?? DEFAULT_PAYAI_FACILITATOR });
+  const dexter = new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR });
+  return [
+    { name: "payai", client: scopedFacilitator(payai, (n) => n.startsWith("eip155:")) },
+    { name: "dexter", client: dexter },
+  ];
+}
+
+export type PaymentRoute = { network: string; price_usd: number; facilitator: string | null; floor_usd: number | null; below_floor: boolean };
+
+/** Which facilitator settles each accepted network, with its published floor (cached 10 min). */
+let routingCache: { at: number; value: Promise<PaymentRoute[]> } | null = null;
+export function paymentRouting(env: WorkerEnv, injected?: Array<{ name: string; client: FacilitatorClient }>): Promise<PaymentRoute[]> {
+  if (!injected && routingCache && Date.now() - routingCache.at < 10 * 60 * 1000) return routingCache.value;
+  const facilitators = injected ?? mainnetFacilitators(env);
+  const value = (async () => {
+    const supported = await Promise.all(facilitators.map((f) => f.client.getSupported().catch(() => ({ kinds: [] as Array<{ x402Version: number; scheme: string; network: string; extra?: Record<string, unknown> }> }))));
+    return buildAccepts(env)
+      .filter((a) => !String(a.network).includes("sepolia") && String(a.network) !== SOLANA_DEVNET)
+      .map((a) => {
+        const network = String(a.network);
+        const price = String(a.network) === SOLANA_MAINNET ? UNIT_PRICE_SOL : UNIT_PRICE_EVM;
+        const i = supported.findIndex((s) => s.kinds.some((k) => k.x402Version === 2 && k.scheme === "exact" && String(k.network) === network));
+        const kind = i >= 0 ? supported[i]?.kinds.find((k) => k.x402Version === 2 && k.scheme === "exact" && String(k.network) === network) : undefined;
+        const floorRaw = kind?.extra && (kind.extra as { paymentFloorAvailable?: unknown }).paymentFloorAvailable === true ? Number((kind.extra as { minPaymentAmountUsd?: unknown }).minPaymentAmountUsd) : NaN;
+        const floor = Number.isFinite(floorRaw) ? floorRaw : null;
+        return { network, price_usd: price, facilitator: i >= 0 ? (facilitators[i]?.name ?? null) : null, floor_usd: floor, below_floor: floor !== null && price < floor };
+      });
+  })();
+  if (injected) return value;
+  routingCache = { at: Date.now(), value };
+  value.catch(() => {
+    routingCache = null;
+  });
+  return value;
+}
+
 function stackKey(env: WorkerEnv): string {
   return JSON.stringify([
     env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK,
@@ -114,9 +177,8 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   const pricing: PricingInfo = { unitUsd: UNIT_PRICE_EVM.toFixed(3), networks: accepts.map((a) => String(a.network)) };
   const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds, simulator, contractIntel }), pricing };
 
-  const facilitators = [
-    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR }),
-    new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL_PAYAI ?? DEFAULT_PAYAI_FACILITATOR }),
+  const facilitators: FacilitatorClient[] = [
+    ...mainnetFacilitators(env).map((f) => f.client),
     ...(env.ENABLE_TESTNETS === "true" ? [new HTTPFacilitatorClient({ url: env.X402_FACILITATOR_URL ?? DEFAULT_FACILITATOR })] : []),
   ];
   const resourceServer = new x402ResourceServer(facilitators);

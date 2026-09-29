@@ -140,30 +140,33 @@ Reading: the model detects risk that is **present in the content it is given**. 
 
 ## 7. Production (`https://x402check.xyz`)
 
-**`security-v3` against production (Worker `fbc0a6dc`): 8/8 PASS.** The run happened before the free tier was removed later the same day, so the evaluations did not need a payment:
+All results are from Worker `d230e4a5` (v0.3.0, paid-only). **Every evaluation below was paid through x402 and settled on-chain in USDC on Base**, and the transaction hashes are in the reports.
 
-- discovery v0.3.0 and `/status`;
-- three 422 validations;
-- a Forta-fingerprinted drainer contract, on no address list, capped at **30** with a verified attestation;
-- a real drainer transaction replayed to **20**: a hidden recipient, whose address is also ScamSniffer-listed, with the finding signed in `checks.simulation`;
-- a WETH wrap left at **94/low**.
+| Suite | Result | Paid evaluations |
+|---|---|---|
+| `npm run prod`: 53 described cases against the live endpoint | **53/53** correct, **53/53** attestations verified (issuer pinned, `exp` checked), 0 mismatches | 53 |
+| `npm run security:v2`: v0.2 fixes, plus "no free evaluations" | **11/11 PASS** | 6 |
+| `npm run security:v3`: v0.3 features | **8/8 PASS** | 3 |
 
-The same probes passed on workerd with the production code before the deploy.
+The `security:v3` probes cover:
+- a Forta-fingerprinted drainer contract, on no address list, capped at **30**;
+- a real drainer transaction replayed to **20** (hidden recipient, signed in `checks.simulation`);
+- a WETH wrap at **88/low**;
+- three 422s, discovery and `/status`.
 
-**`security-v2` after the paid-only deploy: 6 PASS · 0 FAIL · 5 SKIP.**
+The `security:v2` probes cover:
+- OFAC listing → 0/critical with the model skipped;
+- MetaMask-listed domain → 20;
+- self-asserted "clean" → 30;
+- permit to a fresh EOA → 40, and to the Universal Router → 84;
+- signed evidence, `payment` and `aud`;
+- mainnet-only 402 options, 25 × pricing for a batch, validation before payment;
+- an unpaid request gets 402 and no attestation.
 
-- **PASS:**
-  - discovery;
-  - mainnet-only 402 options;
-  - batch pricing (25 × unit on all 7 networks);
-  - validation before payment;
-  - **no free evaluations**: an unpaid request gets 402 and no attestation, and legacy free-tier headers are ignored;
-  - health.
-- **SKIP:** the five probes that need a verdict. They pay per evaluation, and no funded payer was configured.
-
-**No free tier (v0.3):** every evaluation is paid. The probes that need a verdict now pay through `eval/paid-fetch.ts` and wait on a funded payer key. Until then they report SKIP, never PASS. An unpaid request is verified to get 402 with the accepted options.
-
-The v0.2 production record (53/53 cases, 53 attestations verified; `security:v2` 12/12, `security` 20/20, `security:full` 54 PASS / 0 FAIL / 2 SKIP) was measured on Worker `76bc1051`/`2c3937fa` and is kept in the corresponding reports.
+**Found and fixed by paying for real:** the paid validation exposed a production failure that the free tier had hidden.
+- Dexter, then the first facilitator, publishes gas-cost floors per network. On 2026-09-29 they were $0.0015 on Base, $0.0031 on Polygon, $0.0039 on Avalanche and $0.0061 on Arbitrum, all above the $0.001 price. So it refused **every EVM payment** (`policy:amount_below_floor`).
+- EVM payments now settle through PayAI, which verified and settled $0.001 on Base. Solana ($0.002, above a $0.0013 floor) and Monad ($0.0003 floor) stay on Dexter.
+- `/status` now reports, per network, the facilitator, its published floor and whether the price clears it. A floor rising above the price can no longer fail silently.
 
 ## 8. Reviews
 
