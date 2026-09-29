@@ -4,7 +4,9 @@
  * Pure except for `postRiskChecks`, which takes the `fetch` implementation as
  * a parameter (the Snap passes its network endowment).
  */
-import type { Candidate, Decoded, Interaction, Payment } from "./util";
+import type { SimulationEvidence } from "./simulation";
+import { parseSimulation } from "./simulation";
+import type { Candidate, Decoded, Interaction, Payment, SimulationTransaction } from "./util";
 import { capText, hostFromUrl, isPlausibleHost, redactSecrets } from "./util";
 
 export const API_ORIGIN = "https://x402check.xyz";
@@ -25,6 +27,8 @@ export type RiskCheckBody = {
   context: string;
   payment?: Payment;
   interaction: Interaction;
+  /** EVM transaction to simulate (primary item of a transaction check only). */
+  transaction?: SimulationTransaction;
 };
 
 export type Tier = "low" | "medium" | "high" | "critical";
@@ -45,12 +49,18 @@ export type DomainEvidence = {
   signals: string[];
 };
 
+export type CodeKind = "none" | "delegated" | "tiny" | "delegating" | "token" | "nft" | "logic";
+
+/** EVM code classification of the checked address. */
+export type CodeFacts = { kind: CodeKind; bytes: number; fingerprint?: string; delegate?: string };
+
 export type OnchainEvidence = {
   status: "ok" | "unavailable" | "unsupported";
   network?: string;
   is_contract?: boolean;
   activity?: "none" | "some";
   tx_count?: number;
+  code?: CodeFacts;
 };
 
 export type FeedEvidence = {
@@ -65,6 +75,7 @@ export type Evidence = {
   domain?: DomainEvidence;
   onchain?: OnchainEvidence;
   feeds?: FeedEvidence[];
+  simulation?: SimulationEvidence;
 };
 
 export type Verdict = {
@@ -79,12 +90,15 @@ export type Verdict = {
 };
 
 /** One item of a batch check. */
-export type BatchItem = { status: "ok"; verdict: Verdict } | { status: "unverified" } | { status: "invalid" };
+export type BatchItem = { status: "ok"; verdict: Verdict } | { status: "unverified"; reason?: string } | { status: "invalid" };
+
+/** `checked: false`, with the provider's reason when given. */
+export type Unverified = { checked: false; reason?: string };
 
 export type CheckOutcome =
   | { kind: "ok"; verdict: Verdict }
   | { kind: "batch"; items: BatchItem[] }
-  | { kind: "unverified" }
+  | { kind: "unverified"; reason?: string }
   | { kind: "quota" }
   | { kind: "http_error"; status: number }
   | { kind: "invalid_response" }
@@ -166,7 +180,10 @@ export function buildRiskCheckBodies(decoded: Decoded, origin?: unknown): RiskCh
     rank: 0,
   };
   const candidates = [primary, ...decoded.others].slice(0, MAX_CHECKS);
-  return candidates.map((candidate) => {
+  // The transaction is simulated once, with the primary item: the provider
+  // requires an eip155 chain, and a batch must not simulate it N times.
+  const transaction = decoded.transaction && decoded.chain?.startsWith("eip155:") ? decoded.transaction : undefined;
+  return candidates.map((candidate, index) => {
     const payment = cleanPayment(candidate.payment);
     return {
       wallet: candidate.address,
@@ -179,6 +196,7 @@ export function buildRiskCheckBodies(decoded: Decoded, origin?: unknown): RiskCh
         candidate.interaction.unlimited === true
           ? { type: candidate.interaction.type, unlimited: true }
           : { type: candidate.interaction.type },
+      ...(transaction && index === 0 ? { transaction: { ...transaction } } : {}),
     };
   });
 }
@@ -260,7 +278,25 @@ function parseOnchain(value: unknown): OnchainEvidence | undefined {
   if (typeof value.tx_count === "number" && Number.isFinite(value.tx_count) && value.tx_count >= 0) {
     out.tx_count = Math.floor(value.tx_count);
   }
+  const code = parseCode(value.code);
+  if (code) out.code = code;
   return out;
+}
+
+const CODE_KINDS = new Set<string>(["none", "delegated", "tiny", "delegating", "token", "nft", "logic"]);
+
+function parseCode(value: unknown): CodeFacts | undefined {
+  if (!isObject(value) || typeof value.kind !== "string" || !CODE_KINDS.has(value.kind)) return undefined;
+  if (typeof value.bytes !== "number" || !Number.isFinite(value.bytes) || value.bytes < 0) return undefined;
+  const fingerprint = typeof value.fingerprint === "string" && /^(?:0x)?[0-9a-fA-F]{8,128}$/u.test(value.fingerprint) ? value.fingerprint : undefined;
+  const delegate =
+    typeof value.delegate === "string" && /^0x[0-9a-fA-F]{40}$/u.test(value.delegate) ? value.delegate.toLowerCase() : undefined;
+  return {
+    kind: value.kind as CodeKind,
+    bytes: Math.floor(value.bytes),
+    ...(fingerprint ? { fingerprint } : {}),
+    ...(delegate ? { delegate } : {}),
+  };
 }
 
 function parseFeeds(value: unknown): FeedEvidence[] | undefined {
@@ -286,9 +322,12 @@ function parseFeeds(value: unknown): FeedEvidence[] | undefined {
  * @param json - The parsed response body.
  * @returns The sanitized verdict, `{checked:false}` marker, or undefined.
  */
-export function parseVerdict(json: unknown): Verdict | { checked: false } | undefined {
+export function parseVerdict(json: unknown): Verdict | Unverified | undefined {
   if (!isObject(json) || typeof json.checked !== "boolean") return undefined;
-  if (json.checked === false) return { checked: false };
+  if (json.checked === false) {
+    const reason = typeof json.reason === "string" && /^[a-z0-9_]{1,48}$/u.test(json.reason) ? json.reason : undefined;
+    return reason ? { checked: false, reason } : { checked: false };
+  }
   const verdict: Verdict = { checked: true, categories: [] };
   if (typeof json.score === "number" && Number.isFinite(json.score)) {
     verdict.score = Math.min(100, Math.max(0, Math.round(json.score)));
@@ -317,10 +356,12 @@ export function parseVerdict(json: unknown): Verdict | { checked: false } | unde
     const domain = parseDomain(json.evidence.domain);
     const onchain = parseOnchain(json.evidence.onchain);
     const feeds = parseFeeds(json.evidence.feeds);
+    const simulation = parseSimulation(json.evidence.simulation);
     if (sanctions) evidence.sanctions = sanctions;
     if (domain) evidence.domain = domain;
     if (onchain) evidence.onchain = onchain;
     if (feeds) evidence.feeds = feeds;
+    if (simulation) evidence.simulation = simulation;
     if (Object.keys(evidence).length > 0) verdict.evidence = evidence;
   }
   return verdict;
@@ -339,7 +380,7 @@ export function classifyResponse(status: number, json: unknown): CheckOutcome {
   if (status !== 200) return { kind: "http_error", status };
   const verdict = parseVerdict(json);
   if (!verdict) return { kind: "invalid_response" };
-  if (verdict.checked === false) return { kind: "unverified" };
+  if (verdict.checked === false) return verdict.reason ? { kind: "unverified", reason: verdict.reason } : { kind: "unverified" };
   return { kind: "ok", verdict };
 }
 
@@ -358,7 +399,7 @@ export function classifyBatchResponse(status: number, json: unknown, expected: n
   const items: BatchItem[] = json.results.map((result) => {
     const verdict = parseVerdict(result);
     if (!verdict) return { status: "invalid" };
-    if (verdict.checked === false) return { status: "unverified" };
+    if (verdict.checked === false) return verdict.reason ? { status: "unverified", reason: verdict.reason } : { status: "unverified" };
     return { status: "ok", verdict };
   });
   return { kind: "batch", items };

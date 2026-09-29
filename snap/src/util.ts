@@ -42,6 +42,13 @@ export type Payment = {
   asset?: string;
 };
 
+/**
+ * The transaction sent for server-side simulation (provider v0.3). Exactly the
+ * keys the provider accepts: addresses as 0x-hex, value as minimal 0x-hex,
+ * data as even-length 0x-hex (omitted when empty).
+ */
+export type SimulationTransaction = { from: string; to: string; value: string; data?: string };
+
 /** An address worth checking, with why it matters. */
 export type Candidate = {
   address: string;
@@ -86,6 +93,10 @@ export type Decoded = {
   localNote?: string;
   /** Hostnames referenced inside a signed message (personal_sign). */
   referencedHosts?: string[];
+  /** Transaction to simulate server-side (EVM transactions only). */
+  transaction?: SimulationTransaction;
+  /** Why the transaction is not simulated, when it is not. */
+  simulationSkipped?: string;
 };
 
 export const ZERO_ADDRESS = `0x${"0".repeat(40)}`;

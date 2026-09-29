@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from '@jest/glo
 import type {} from '@metamask/snaps-jest';
 import { assertIsResponseWithInterface, handleRequest } from '@metamask/snaps-simulation';
 
+import { DISCLOSURE_VERSION } from '../src/state';
 import { LOW_RISK_VERDICT, MockApi } from './harness/mock-api';
 import type { BuiltSnap } from './harness/snap';
 import { installBuiltSnap, readSnapState } from './harness/snap';
@@ -68,7 +69,7 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
   beforeEach(async () => {
     api.reset();
     snap = await installBuiltSnap(mockOrigin, {
-      unencryptedState: { installId: 'ab'.repeat(16), disclosureVersion: 1 },
+      unencryptedState: { installId: 'ab'.repeat(16), disclosureVersion: DISCLOSURE_VERSION },
     });
   });
 
@@ -92,7 +93,7 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
 
       const state = readSnapState(fresh, false);
       expect(state?.installId).toMatch(/^[0-9a-f]{32}$/u);
-      expect(state?.disclosureVersion).toBe(1);
+      expect(state?.disclosureVersion).toBe(DISCLOSURE_VERSION);
       // Nothing is sent to the network on install.
       expect(api.requests).toHaveLength(0);
 
@@ -143,11 +144,25 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
     it('onUpdate on a current install shows no dialog and keeps non-legacy encrypted state', async () => {
       const current = await installBuiltSnap(mockOrigin, {
         state: { unrelated: 'keep' },
-        unencryptedState: { installId: 'cd'.repeat(16), disclosureVersion: 1 },
+        unencryptedState: { installId: 'cd'.repeat(16), disclosureVersion: DISCLOSURE_VERSION },
       });
       expect(await current.onUpdate()).toRespondWith(null);
       expect(readSnapState(current, true)).toStrictEqual({ unrelated: 'keep' });
-      expect(readSnapState(current, false)).toStrictEqual({ installId: 'cd'.repeat(16), disclosureVersion: 1 });
+      expect(readSnapState(current, false)).toStrictEqual({ installId: 'cd'.repeat(16), disclosureVersion: DISCLOSURE_VERSION });
+    });
+
+    it('onUpdate from 0.2.0 (disclosure v1) shows the new transaction disclosure and records the new version', async () => {
+      const previous = await installBuiltSnap(mockOrigin, { unencryptedState: { installId: 'ef'.repeat(16), disclosureVersion: 1 } });
+      const pending = previous.onUpdate();
+      const ui = await pending.getInterface();
+      expect(ui.type).toBe('alert');
+      const text = textOf(ui.content);
+      expect(text).toContain('the full transaction (from, to, value and calldata)');
+      expect(text).toContain('public RPC node');
+      expect(text).toContain('Blockscout');
+      await (ui as { ok(): Promise<void> }).ok();
+      expect(await pending).toRespondWith(null);
+      expect(readSnapState(previous, false)).toStrictEqual({ installId: 'ef'.repeat(16), disclosureVersion: DISCLOSURE_VERSION });
     });
   });
 
@@ -168,6 +183,7 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
         context: expect.stringContaining('Native transfer: sends 0.01 ETH (10000000000000000 wei) to recipient'),
         payment: { network: 'eip155:8453', pay_to: RECIPIENT, amount: '10000000000000000', asset: 'native' },
         interaction: { type: 'native_transfer' },
+        transaction: { from: USER, to: RECIPIENT, value: '0x2386f26fc10000' },
       });
       const text = textOf(response.getInterface().content);
       expect(text).toContain('x402check · score 88/100 · low');
@@ -624,6 +640,119 @@ describe('x402check snap (built bundle in the SES execution environment)', () =>
       expect(text).toContain('score 12/100 · critical');
       expect(text).toContain(`Checked: counterparty ${DRAINER}`);
       expect(text).toContain('score 88/100 · low');
+    });
+  });
+
+  describe('transaction simulation (provider v0.3) through the SES bundle', () => {
+    const simulated = (simulation: unknown, tier = 'low', score = 90) => ({
+      status: 200,
+      json: { checked: true, score, tier, categories: [], evidence: { simulation } },
+    });
+
+    it('sends the transaction to simulate with the risk check', async () => {
+      await snap.onTransaction({ from: USER, to: USDC, value: '0x0', data: calldata('095ea7b3', DRAINER, MAX_UINT256), origin: ORIGIN });
+      expect(api.last?.path).toBe('/v1/risk-check');
+      expect(api.last?.body.transaction).toStrictEqual({ from: USER, to: USDC, value: '0x0', data: calldata('095ea7b3', DRAINER, MAX_UINT256) });
+      expect(api.last?.body.chain).toBe('eip155:1');
+    });
+
+    it('renders the simulated effects and makes a drainer finding critical', async () => {
+      api.respondWith(
+        simulated({
+          status: 'ok',
+          network: 'eip155:1',
+          outflows: [{ standard: 'native', asset: 'native', amount: '1000000000000000000', counterparty: DRAINER, counterparty_is_contract: false }],
+          inflows: [],
+          approvals: [],
+          findings: ['outflow_to_undisclosed_eoa'],
+        }),
+      );
+      const response = await snap.onTransaction({ from: USER, to: RECIPIENT, value: '0xde0b6b3a7640000', data: '0x', origin: ORIGIN });
+      expect(severityOf(response)).toBe('critical');
+      const text = textOf(response.getInterface().content).replace(/\s+/gu, ' ');
+      expect(text).toContain('Simulation: likely wallet drainer — do not proceed');
+      expect(text).toContain('What this transaction does (simulated)');
+      expect(text).toContain('You send 1 ETH → 0x9d17bb…b277bc (wallet)');
+      expect(text).not.toContain('No significant risk');
+    });
+
+    it('reverted and unavailable simulations are stated plainly', async () => {
+      api.respondWith(simulated({ status: 'reverted', network: 'eip155:1', findings: ['simulation_reverted'] }, 'medium', 60));
+      const reverted = await snap.onTransaction({ from: USER, to: USDC, data: calldata('a9059cbb', RECIPIENT, 1n), origin: ORIGIN });
+      expect(textOf(reverted.getInterface().content)).toContain('This transaction would revert (fail) if sent as is.');
+      api.respondWith(simulated({ status: 'unavailable', network: 'eip155:1' }));
+      const unavailable = await snap.onTransaction({ from: USER, to: USDC, data: calldata('a9059cbb', RECIPIENT, 1n), origin: ORIGIN });
+      expect(textOf(unavailable.getInterface().content).replace(/\s+/gu, ' ')).toContain('NOT simulated: the simulation service was unavailable');
+    });
+
+    it('oversize calldata is not sent for simulation, with a visible warning', async () => {
+      // 49,154 characters: just over the provider's 48 KiB cap.
+      const data: `0x${string}` = `0xdeadbeef${'00'.repeat(24_572)}`;
+      const response = await snap.onTransaction({ from: USER, to: RECIPIENT, data, origin: ORIGIN });
+      expect(api.last?.body.transaction).toBeUndefined();
+      const text = textOf(response.getInterface().content).replace(/\s+/gu, ' ');
+      expect(text).toContain('too large to simulate');
+      expect(text).toContain('NOT simulated');
+    });
+
+    it('a non-EVM chain and signatures never send a transaction', async () => {
+      await snap.onTransaction({ chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', from: USER, to: RECIPIENT, value: '0x1', data: '0x', origin: ORIGIN });
+      expect(api.last?.body).not.toHaveProperty('transaction');
+      expect(api.last?.body).not.toHaveProperty('chain');
+      const response = await snap.onSignature({ from: USER, data: permitSingle(DRAINER), signatureMethod: 'eth_signTypedData_v4', origin: ORIGIN });
+      expect(api.last?.body).not.toHaveProperty('transaction');
+      expect(textOf(response.getInterface().content)).not.toContain('simulated');
+    });
+  });
+
+  describe('drainer-kit code fingerprints through the SES bundle', () => {
+    it('a reverted simulation of a known drainer contract is critical, with the revert line and the banner', async () => {
+      api.respondWith({
+        status: 200,
+        json: {
+          checked: true,
+          score: 60,
+          tier: 'medium',
+          categories: ['known_drainer_code'],
+          evidence: {
+            simulation: {
+              status: 'reverted',
+              network: 'eip155:1',
+              findings: ['simulation_reverted', 'known_drainer_code'],
+              code_matches: [{ address: DRAINER, role: 'called', sources: ['forta-phishing-code'] }],
+            },
+            feeds: [{ source: 'scamsniffer-code', kind: 'code', as_of: '2026-09-28', status: 'hit' }],
+          },
+        },
+      });
+      const response = await snap.onTransaction({ from: USER, to: DRAINER, data: calldata('deadbeef', 1n), origin: ORIGIN });
+      expect(severityOf(response)).toBe('critical');
+      const text = textOf(response.getInterface().content).replace(/\s+/gu, ' ');
+      expect(text).toContain('This transaction would revert (fail) if sent as is.');
+      expect(text).toContain('The contract you are calling (0x9d17bb…b277bc) runs the same code as contracts listed as wallet drainers (listed by Forta).');
+      expect(text).toContain('Runs known wallet-drainer code (ScamSniffer drainer code fingerprints)');
+      expect(text).toContain('Known drainer code');
+    });
+  });
+
+  describe('provider review follow-up through the SES bundle', () => {
+    it('outflow_exceeds_declared is critical; a checked:false reason is shown', async () => {
+      api.respondWith({
+        status: 200,
+        json: {
+          checked: true,
+          score: 30,
+          tier: 'high',
+          categories: [],
+          evidence: { simulation: { status: 'ok', outflows: [], inflows: [], approvals: [], findings: ['outflow_exceeds_declared'] } },
+        },
+      });
+      const exceeds = await snap.onTransaction({ from: USER, to: USDC, data: calldata('a9059cbb', RECIPIENT, 1n), origin: ORIGIN });
+      expect(severityOf(exceeds)).toBe('critical');
+      expect(textOf(exceeds.getInterface().content)).toContain('receives a different asset or a larger amount than this transaction shows');
+      api.respondWith({ status: 200, json: { checked: false, reason: 'model_malformed_answers' } });
+      const unverified = await snap.onTransaction({ from: USER, to: USDC, data: calldata('a9059cbb', RECIPIENT, 1n), origin: ORIGIN });
+      expect(textOf(unverified.getInterface().content)).toContain('failed closed (the risk model returned malformed answers)');
     });
   });
 });

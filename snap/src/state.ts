@@ -11,7 +11,12 @@
  */
 import type { Json } from "@metamask/snaps-sdk";
 
-export const DISCLOSURE_VERSION = 1;
+/**
+ * Bump whenever the disclosure changes, so updated installs see it again.
+ * 1: v0.2 (counterparty, chain, site, summary). 2: v0.3 adds the full
+ * transaction sent for simulation (public RPC, Blockscout).
+ */
+export const DISCLOSURE_VERSION = 2;
 const INSTALL_ID_RE = /^[0-9a-f]{32}$/u;
 
 type State = Record<string, Json>;

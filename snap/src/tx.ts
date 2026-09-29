@@ -3,6 +3,7 @@
  * wrapper calls: multicall, Safe execTransaction / multiSend, Universal Router
  * execute, ERC-7579 / ERC-4337 smart-account execute and EIP-7702 self-calls.
  */
+import { planSimulation } from "./simulation";
 import type { Candidate, Decoded } from "./util";
 import {
   PERMIT2_ADDRESS,
@@ -1063,8 +1064,9 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
   const warnings: string[] = [];
   const danger: string[] = [];
   let value = parseUint(tx.value);
+  const valueInvalid = value === undefined && !isMissing(tx.value);
   if (value === undefined) {
-    if (!isMissing(tx.value)) warnings.push("the transaction value could not be parsed");
+    if (valueInvalid) warnings.push("the transaction value could not be parsed");
     value = 0n;
   }
   const valueText = value > 0n ? nativeAmount(value, chain) : undefined;
@@ -1102,6 +1104,8 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
   const from = lenientAddress(tx.from);
   const rawData = tx.data !== undefined && tx.data !== null && tx.data !== "" ? tx.data : tx.input;
   let data = normalizeCalldata(rawData);
+  // The simulation gets the full calldata (or is skipped when it is too large).
+  const fullData = data;
   if (data !== null && data.length > MAX_CALLDATA_HEX) {
     warnings.push(`the calldata is very large (${data.length / 2} bytes); only the first 1 MiB was decoded`);
     data = data.slice(0, MAX_CALLDATA_HEX);
@@ -1123,6 +1127,8 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
     );
   }
 
+  const plan = planSimulation({ chain, from, to, value: valueInvalid ? undefined : value, data: fullData });
+  if ("warning" in plan && plan.warning) warnings.push(plan.warning);
   const ctx: Ctx = { chain, user: from, depth: 0, budget: { calls: MAX_INNER_CALLS } };
   const action: Action =
     data === null
@@ -1163,6 +1169,7 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
       summary,
       warnings: dedupe([...warnings, ...action.warnings]),
       danger: dedupe([...danger, ...action.danger]),
+      ...("transaction" in plan ? { transaction: plan.transaction } : { simulationSkipped: plan.skipped }),
       ...(selected.length === 0
         ? {
             localNote:

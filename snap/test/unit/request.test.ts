@@ -21,7 +21,7 @@ import {
 import { DRAINER, MAX_UINT256, RECIPIENT, REACTOR, USDC, USER, calldata, permitSingle, uniswapXOrder, utf8Hex } from '../helpers';
 import { decodeTypedData as decodeTyped } from '../../src/decode';
 
-const ALLOWED_KEYS = ['chain', 'context', 'domain', 'interaction', 'payment', 'wallet'];
+const ALLOWED_KEYS = ['chain', 'context', 'domain', 'interaction', 'payment', 'transaction', 'wallet'];
 
 describe('originHost', () => {
   it('returns the hostname of web origins only', () => {
@@ -48,6 +48,7 @@ describe('buildRiskCheckBody', () => {
       context: expect.any(String),
       payment: { network: 'eip155:1', pay_to: DRAINER, amount: MAX_UINT256.toString(), asset: USDC },
       interaction: { type: 'token_approval', unlimited: true },
+      transaction: { from: USER, to: USDC, value: '0x0', data: calldata('095ea7b3', DRAINER, MAX_UINT256) },
     });
     expect(Object.keys(body ?? {}).every((key) => ALLOWED_KEYS.includes(key))).toBe(true);
     expect(Object.keys(body?.interaction ?? {}).sort()).toStrictEqual(['type', 'unlimited']);
@@ -101,6 +102,11 @@ describe('response handling', () => {
     expect(classifyResponse(200, undefined)).toStrictEqual({ kind: 'invalid_response' });
     expect(classifyResponse(200, { score: 3 })).toStrictEqual({ kind: 'invalid_response' });
     expect(classifyResponse(200, { checked: false, score: 1, tier: 'low' })).toStrictEqual({ kind: 'unverified' });
+    expect(classifyResponse(200, { checked: false, reason: 'invalid_subject' })).toStrictEqual({ kind: 'unverified', reason: 'invalid_subject' });
+    expect(classifyBatchResponse(200, { results: [{ checked: false, reason: 'model_unavailable' }] }, 1)).toStrictEqual({
+      kind: 'batch',
+      items: [{ status: 'unverified', reason: 'model_unavailable' }],
+    });
     expect(classifyResponse(200, { checked: true, score: 10, tier: 'low' })).toStrictEqual({
       kind: 'ok',
       verdict: { checked: true, score: 10, tier: 'low', categories: [] },

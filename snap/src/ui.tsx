@@ -18,6 +18,8 @@ import {
 
 import type { BatchItem, CheckOutcome, Evidence, FeedEvidence, Tier, Verdict } from "./request";
 import { API_ORIGIN, JWKS_URL } from "./request";
+import type { AssetMovement, SimulationEvidence } from "./simulation";
+import { accountKind, approvalText, isIncomplete, midAddress, movementText, simulationFindingLines } from "./simulation";
 import type { Candidate, Decoded, InteractionType, Role } from "./util";
 import { capText, shortAddress } from "./util";
 
@@ -81,7 +83,31 @@ const CATEGORY_LABELS = new Map<string, string>([
   ["known_scam_address", "Known scam address"],
   ["sanctioned_address", "Sanctioned address"],
   ["new_address", "New address (no history)"],
+  ["known_drainer_code", "Known drainer code (same code as listed wallet drainers)"],
+  ["onchain_unavailable", "Spender could not be classified (on-chain lookup failed) — not fully verified"],
+  ["simulation_unavailable", "Transaction simulation failed — not fully verified"],
 ]);
+
+/** Categories meaning part of the check could not be completed. */
+const INCOMPLETE_CATEGORIES = new Set(["onchain_unavailable", "simulation_unavailable"]);
+
+const UNVERIFIED_REASONS = new Map<string, string>([
+  ["invalid_subject", "the checked address was rejected as invalid"],
+  ["model_unconfigured", "the risk model is not configured"],
+  ["model_malformed_answers", "the risk model returned malformed answers"],
+  ["model_unavailable", "the risk model was unavailable"],
+]);
+
+/**
+ * Readable reason for a `checked: false` response.
+ *
+ * @param reason - The provider's reason id.
+ * @returns The text, or undefined when there is no reason.
+ */
+export function unverifiedReason(reason: string | undefined): string | undefined {
+  if (!reason) return undefined;
+  return UNVERIFIED_REASONS.get(reason) ?? reason.replace(/_+/gu, " ");
+}
 
 /**
  * Human-readable category label ("known_scam_address" -> "Known scam address").
@@ -100,16 +126,37 @@ const FEED_HIT_LABELS = new Map<string, string>([
   ["metamask-phishing-detect", "Listed on MetaMask phishing list"],
   ["scamsniffer-addresses", "Known scam address (ScamSniffer)"],
   ["scamsniffer-domains", "Listed phishing domain (ScamSniffer)"],
+  ["forta-phishing-code", "Runs known wallet-drainer code (Forta drainer code fingerprints)"],
+  ["scamsniffer-code", "Runs known wallet-drainer code (ScamSniffer drainer code fingerprints)"],
+]);
+
+const FEED_NAMES = new Map<string, string>([
+  ["metamask-phishing-detect", "MetaMask phishing list"],
+  ["scamsniffer-addresses", "ScamSniffer scam addresses"],
+  ["scamsniffer-domains", "ScamSniffer phishing domains"],
+  ["forta-phishing-code", "Forta drainer code fingerprints"],
+  ["scamsniffer-code", "ScamSniffer drainer code fingerprints"],
 ]);
 
 /**
- * Loud line for a threat-feed hit.
+ * Loud line for a threat-feed hit. A code-feed hit means the checked address
+ * itself runs known wallet-drainer code.
  *
  * @param feed - The feed evidence with status "hit".
  * @returns The label.
  */
 export function feedHitLabel(feed: FeedEvidence): string {
   return FEED_HIT_LABELS.get(feed.source) ?? `Listed by ${feed.source}${feed.kind ? ` (${feed.kind})` : ""}`;
+}
+
+/**
+ * Readable name of a threat feed ("Forta drainer code fingerprints").
+ *
+ * @param source - The feed source id.
+ * @returns The name.
+ */
+export function feedName(source: string): string {
+  return FEED_NAMES.get(source) ?? source;
 }
 
 function compact(children: Child[]): JSXElement[] {
@@ -297,6 +344,13 @@ function evidenceRows(evidence: Evidence | undefined, subject: Subject): Child[]
           </Row>,
         );
       }
+      if (onchain.code?.kind === "delegated" && onchain.code.delegate) {
+        rows.push(
+          <Row label="Account">
+            <Text>{`EIP-7702 delegated account → ${midAddress(onchain.code.delegate)}`}</Text>
+          </Row>,
+        );
+      }
     } else {
       rows.push(
         <Row label="On-chain">
@@ -323,10 +377,15 @@ function attestation(verdict: Verdict): Child[] {
 function feedLines(feeds: FeedEvidence[] | undefined): { hits: FeedEvidence[]; summary?: string } {
   if (!feeds) return { hits: [] };
   const hits = feeds.filter((feed) => feed.status === "hit");
-  const clear = feeds.filter((feed) => feed.status === "clear").length;
-  const unavailable = feeds.filter((feed) => feed.status === "unavailable").length;
-  const parts = [clear > 0 ? `${clear} clear` : "", unavailable > 0 ? `${unavailable} unavailable` : ""].filter(Boolean);
-  return { hits, summary: parts.length > 0 ? `Threat feeds: ${parts.join(", ")}` : undefined };
+  const names = (status: FeedEvidence["status"]) =>
+    feeds.filter((feed) => feed.status === status).map((feed) => feedName(feed.source));
+  const clear = names("clear");
+  const unavailable = names("unavailable");
+  const counts = [clear.length > 0 ? `${clear.length} clear` : "", unavailable.length > 0 ? `${unavailable.length} unavailable` : ""].filter(Boolean);
+  const detail = [clear.length > 0 ? `clear: ${clear.join(", ")}` : "", unavailable.length > 0 ? `unavailable: ${unavailable.join(", ")}` : ""]
+    .filter(Boolean)
+    .join("; ");
+  return { hits, summary: counts.length > 0 ? capText(`Threat feeds: ${counts.join(", ")} (${detail})`, 400) : undefined };
 }
 
 /** Sanctions or threat-feed hit, or a high/critical tier. */
@@ -337,6 +396,11 @@ function isAlarming(verdict: Verdict): boolean {
     verdict.evidence?.sanctions?.status === "listed" ||
     (verdict.evidence?.feeds ?? []).some((feed) => feed.status === "hit")
   );
+}
+
+/** The provider could not complete part of this check (a lookup or the simulation failed). */
+function incompleteVerdict(verdict: Verdict): boolean {
+  return verdict.categories.some((category) => INCOMPLETE_CATEGORIES.has(category));
 }
 
 /** Higher = worse: list hits, then tier (unknown counts as medium), then lower score. */
@@ -359,16 +423,167 @@ function alsoCheckedSection(entries: Also[]): Child {
       {entries.map(({ candidate, item }) => (
         <Row
           label={`Also checked: ${ROLE_LABEL[candidate.role]}`}
-          variant={item.status !== "ok" ? "warning" : isAlarming(item.verdict) ? "critical" : "default"}
+          variant={
+            item.status !== "ok" ? "warning" : isAlarming(item.verdict) ? "critical" : incompleteVerdict(item.verdict) ? "warning" : "default"
+          }
         >
-          <Text>{`${shortAddress(candidate.address)} · ${item.status === "ok" ? verdictLine(item.verdict) : "NOT verified"}`}</Text>
+          <Text>{`${shortAddress(candidate.address)} · ${
+            item.status === "ok"
+              ? `${verdictLine(item.verdict)}${incompleteVerdict(item.verdict) ? " · not fully verified" : ""}`
+              : `NOT verified${item.status === "unverified" && item.reason ? ` (${unverifiedReason(item.reason)})` : ""}`
+          }`}</Text>
         </Row>
       ))}
     </Section>
   );
 }
 
-function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undefined, subject: Subject, also: Also[] = []): InsightResult {
+/** Rows shown per simulated list before "and N more". */
+const MAX_SIMULATION_ROWS = 5;
+const SIMULATION_TITLE = "What this transaction does (simulated)";
+
+function hasStrongFinding(simulation: SimulationEvidence | undefined): boolean {
+  return simulation ? simulationFindingLines(simulation).some((line) => line.strong) : false;
+}
+
+/** Findings as prominent banners: drainer-like ones as danger, the rest as cautions. */
+function simulationBanners(simulation: SimulationEvidence | undefined): Child[] {
+  if (!simulation) return [];
+  const findings = simulationFindingLines(simulation);
+  const strong = findings.filter((finding) => finding.strong);
+  const other = findings.filter((finding) => !finding.strong);
+  return [
+    strong.length > 0 ? (
+      <Banner title="Simulation: likely wallet drainer — do not proceed" severity="danger">
+        {strong.slice(0, 4).map((finding) => (
+          <Text>{finding.text}</Text>
+        ))}
+      </Banner>
+    ) : null,
+    other.length > 0 ? (
+      <Banner title="Simulation warnings" severity="warning">
+        {other.slice(0, 4).map((finding) => (
+          <Text>{finding.text}</Text>
+        ))}
+      </Banner>
+    ) : null,
+  ];
+}
+
+function notSimulated(reason: string): JSXElement {
+  return (
+    <Section>
+      <Heading size="sm">{SIMULATION_TITLE}</Heading>
+      <Text color="warning">
+        <Bold>NOT simulated:</Bold> {reason}
+      </Text>
+    </Section>
+  );
+}
+
+function moreRow(total: number): Child {
+  return total > MAX_SIMULATION_ROWS ? <Text color="muted">{`and ${total - MAX_SIMULATION_ROWS} more`}</Text> : null;
+}
+
+function movementRows(label: string, movements: AssetMovement[], chain: string | undefined, arrow: "→" | "from"): Child[] {
+  return [
+    ...movements.slice(0, MAX_SIMULATION_ROWS).map((movement) => {
+      const where = movement.counterparty
+        ? `${arrow === "→" ? " → " : " from "}${midAddress(movement.counterparty)}${accountKind(movement.counterparty_is_contract)}`
+        : "";
+      return (
+        <Row label={label}>
+          <Text>{`${movementText(movement, chain)}${where}`}</Text>
+        </Row>
+      );
+    }),
+    moreRow(movements.length),
+  ];
+}
+
+/**
+ * What the transaction does according to the provider's simulation, or an
+ * explicit statement that its effects were NOT simulated (never an all-clear).
+ *
+ * @param decoded - The decoded request.
+ * @param simulation - Simulation evidence from the verdict, if any.
+ * @param kind - Only transactions are simulated.
+ * @returns The section, or null for signatures.
+ */
+function simulationSection(decoded: Decoded, simulation: SimulationEvidence | undefined, kind: RequestKind): Child {
+  if (kind !== "transaction") return null;
+  if (!simulation) {
+    return notSimulated(
+      decoded.simulationSkipped
+        ? sentence(decoded.simulationSkipped)
+        : "the risk service did not return a simulation, so this transaction's effects are unknown.",
+    );
+  }
+  if (simulation.status === "unavailable") {
+    return notSimulated("the simulation service was unavailable, so this transaction's effects are unknown.");
+  }
+  if (simulation.status === "unsupported") {
+    return notSimulated(
+      `simulation is not available on ${simulation.network ?? decoded.chain ?? "this network"}, so this transaction's effects are unknown.`,
+    );
+  }
+  if (simulation.status === "reverted") {
+    return (
+      <Section>
+        <Heading size="sm">{SIMULATION_TITLE}</Heading>
+        <Text color="error">
+          <Bold>This transaction would revert (fail) if sent as is.</Bold>
+        </Text>
+      </Section>
+    );
+  }
+  const chain = simulation.network ?? decoded.chain;
+  const approvals = simulation.approvals;
+  const rows: Child[] = [
+    ...movementRows("You send", simulation.outflows, chain, "→"),
+    ...movementRows("You receive", simulation.inflows, chain, "from"),
+    ...approvals.slice(0, MAX_SIMULATION_ROWS).map((approval) => (
+      <Row label="Grants" variant={approval.unlimited || approval.spender_is_contract === false ? "critical" : "warning"}>
+        <Text>{`${approvalText(approval, chain)} to ${midAddress(approval.spender)}${accountKind(approval.spender_is_contract)}`}</Text>
+      </Row>
+    )),
+    moreRow(approvals.length),
+  ];
+  const empty = simulation.outflows.length + simulation.inflows.length + approvals.length === 0;
+  return (
+    <Section>
+      {compact([
+        <Heading size="sm">{SIMULATION_TITLE}</Heading>,
+        ...rows,
+        empty && !isIncomplete(simulation) ? <Text>No asset movements or approvals were detected in the simulation.</Text> : null,
+        isIncomplete(simulation) ? (
+          <Text color="warning">The simulation was incomplete, so the effects listed here may not be everything.</Text>
+        ) : null,
+        simulation.dropped > 0 ? <Text color="muted">{`${simulation.dropped} simulated effect(s) could not be displayed.`}</Text> : null,
+      ])}
+    </Section>
+  );
+}
+
+/** Simulation evidence of a batch: the primary item carries the transaction. */
+function batchSimulation(items: BatchItem[]): SimulationEvidence | undefined {
+  for (const item of items) {
+    if (item.status === "ok" && item.verdict.evidence?.simulation) return item.verdict.evidence.simulation;
+  }
+  return undefined;
+}
+
+type VerdictOptions = {
+  host: string | undefined;
+  subject: Subject;
+  kind: RequestKind;
+  simulation: SimulationEvidence | undefined;
+  also?: Also[];
+};
+
+function verdictContent(decoded: Decoded, verdict: Verdict, options: VerdictOptions): InsightResult {
+  const { host, subject, kind, simulation } = options;
+  const also = options.also ?? [];
   const sanctions = verdict.evidence?.sanctions;
   const sanctioned = sanctions?.status === "listed";
   const feeds = feedLines(verdict.evidence?.feeds);
@@ -376,7 +591,15 @@ function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undef
   const localDanger = decoded.danger.length > 0;
   // An unknown or missing tier never gets the "no significant risk" copy, and a
   // sanctions / threat-feed hit or locally proven danger gets the critical copy.
-  const copyTier: Tier = sanctioned || listedInFeed || localDanger ? "critical" : (verdict.tier ?? "medium");
+  const drainerSimulation = hasStrongFinding(simulation);
+  // Incomplete checks are never an all-clear: at least the "review" copy. In a
+  // batch, one address that was not fully verified makes the whole check so.
+  const notFullyVerified =
+    isIncomplete(simulation) ||
+    incompleteVerdict(verdict) ||
+    also.some((entry) => entry.item.status === "ok" && incompleteVerdict(entry.item.verdict));
+  const baseTier: Tier = verdict.tier === "low" && notFullyVerified ? "medium" : (verdict.tier ?? "medium");
+  const copyTier: Tier = sanctioned || listedInFeed || localDanger || drainerSimulation ? "critical" : baseTier;
   const copy = TIER_COPY[copyTier];
   const categories = verdict.categories.length > 0 ? verdict.categories.map(categoryLabel).join(", ") : undefined;
   const alarmingOther = also.some((entry) => entry.item.status === "ok" && isAlarming(entry.item.verdict));
@@ -400,11 +623,16 @@ function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undef
       </Banner>
     ) : null,
     dangerBanner(decoded.danger),
+    ...simulationBanners(simulation),
     <Heading>{`x402check · ${verdictLine(verdict)}`}</Heading>,
     <Text>
       <Bold>{copy.verdict}</Bold> {copy.advice}
     </Text>,
+    notFullyVerified ? (
+      <Text color="warning">Not fully verified: part of this check could not be completed. Treat it with caution.</Text>
+    ) : null,
     subjectSection(decoded, subject, host, true),
+    simulationSection(decoded, simulation, kind),
     also.length > 0 ? <Text color="muted">{`${also.length + 1} addresses were checked; the worst verdict is shown.`}</Text> : null,
     alsoCheckedSection(also),
     signerNote(subject),
@@ -421,7 +649,7 @@ function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undef
   ];
   if (compact(facts).length > 0) children.push(<Section>{compact(facts)}</Section>);
   children.push(<Divider />, ...attestation(verdict));
-  const critical = isAlarming(verdict) || alarmingOther || localDanger;
+  const critical = isAlarming(verdict) || alarmingOther || localDanger || drainerSimulation;
   return {
     content: <Box>{compact(children)}</Box>,
     ...(critical ? { severity: "critical" as const } : {}),
@@ -431,9 +659,11 @@ function verdictContent(decoded: Decoded, verdict: Verdict, host: string | undef
 function failureContent(
   decoded: Decoded,
   host: string | undefined,
+  kind: RequestKind,
   title: string,
   explanation: string,
   also: Also[] = [],
+  simulation?: SimulationEvidence,
 ): InsightResult {
   const localDanger = decoded.danger.length > 0;
   const alarming = also.some((entry) => entry.item.status === "ok" && isAlarming(entry.item.verdict));
@@ -442,16 +672,18 @@ function failureContent(
       <Box>
         {compact([
           dangerBanner(decoded.danger),
+          ...simulationBanners(simulation),
           <Heading>{`x402check · ${title}`}</Heading>,
           <Text>{explanation}</Text>,
           subjectSection(decoded, primarySubject(decoded), host, false),
+          simulationSection(decoded, simulation, kind),
           alsoCheckedSection(also),
           signerNote(primarySubject(decoded)),
           warningsBanner(decoded.warnings),
         ])}
       </Box>
     ),
-    ...(localDanger || alarming ? { severity: "critical" as const } : {}),
+    ...(localDanger || alarming || hasStrongFinding(simulation) ? { severity: "critical" as const } : {}),
   };
 }
 
@@ -484,18 +716,21 @@ function renderBatch(decoded: Decoded, items: BatchItem[], kind: RequestKind, ho
     if (a1 > b1 || (a1 === b1 && a2 > b2)) worst = entry as Also & { item: { status: "ok"; verdict: Verdict } };
   }
   const failed = entries.filter((entry) => entry.item.status !== "ok");
+  const simulation = batchSimulation(items);
   if (!worst || (failed.length > 0 && !isAlarming(worst.item.verdict))) {
     // Fail closed: an address that could not be verified is never an all-clear.
     return failureContent(
       decoded,
       host,
+      kind,
       "verification failed — NOT verified",
       `${failed.length} of ${entries.length} addresses in this ${kind} could not be verified, so it was NOT verified.`,
       entries,
+      simulation,
     );
   }
   const others = entries.filter((entry) => entry !== worst);
-  return verdictContent(decoded, worst.item.verdict, host, candidateSubject(worst.candidate), others);
+  return verdictContent(decoded, worst.item.verdict, { host, subject: candidateSubject(worst.candidate), kind, simulation, also: others });
 }
 
 /**
@@ -510,13 +745,19 @@ function renderBatch(decoded: Decoded, items: BatchItem[], kind: RequestKind, ho
 export function renderOutcome(decoded: Decoded, outcome: CheckOutcome, kind: RequestKind, host?: string): InsightResult {
   switch (outcome.kind) {
     case "ok":
-      return verdictContent(decoded, outcome.verdict, host, primarySubject(decoded));
+      return verdictContent(decoded, outcome.verdict, {
+        host,
+        subject: primarySubject(decoded),
+        kind,
+        simulation: outcome.verdict.evidence?.simulation,
+      });
     case "batch":
       return renderBatch(decoded, outcome.items, kind, host);
     case "network_error":
       return failureContent(
         decoded,
         host,
+        kind,
         "unavailable — NOT verified",
         `The risk service could not be reached${outcome.timedOut ? " in time" : ""}, so this ${kind} was NOT checked. This is not an all-clear: proceed only if you fully trust the counterparty.`,
       );
@@ -524,6 +765,7 @@ export function renderOutcome(decoded: Decoded, outcome: CheckOutcome, kind: Req
       return failureContent(
         decoded,
         host,
+        kind,
         "free daily checks used up — this was NOT checked",
         `This install has used all of its free daily risk checks, so this ${kind} was NOT checked. The free quota resets daily.`,
       );
@@ -531,19 +773,23 @@ export function renderOutcome(decoded: Decoded, outcome: CheckOutcome, kind: Req
       return failureContent(
         decoded,
         host,
+        kind,
         "check failed — NOT verified",
         `The risk service returned an error (HTTP ${outcome.status}), so this ${kind} was NOT verified.`,
       );
     case "invalid_response":
-      return failureContent(decoded, host, "check failed — NOT verified", `The risk service returned an unreadable response, so this ${kind} was NOT verified.`);
+      return failureContent(decoded, host, kind, "check failed — NOT verified", `The risk service returned an unreadable response, so this ${kind} was NOT verified.`);
     case "unverified":
-    default:
+    default: {
+      const reason = outcome.kind === "unverified" ? unverifiedReason(outcome.reason) : undefined;
       return failureContent(
         decoded,
         host,
+        kind,
         "verification failed — NOT verified",
-        `The provider could not evaluate this request and failed closed. This ${kind} was NOT verified.`,
+        `The provider could not evaluate this request and failed closed${reason ? ` (${reason})` : ""}. This ${kind} was NOT verified.`,
       );
+    }
   }
 }
 
@@ -633,6 +879,11 @@ export function disclosureContent(): JSXElement {
       <Text>
         - a decoded, human-readable summary of the transaction or signature (for example: "approve UNLIMITED token 0x… to spender
         0x…"), with secret-looking strings removed
+      </Text>
+      <Text>
+        - for transactions only: the full transaction (from, to, value and calldata). x402check simulates it on a public RPC node
+        of that chain to show what it would do, and may look up contract source verification on Blockscout. Signatures are never
+        simulated.
       </Text>
       <Text>
         Purpose: score the counterparty and site for drainer, fraud, sanctions and impersonation risk, and show you a signed verdict
