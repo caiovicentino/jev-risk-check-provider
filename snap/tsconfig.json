@@ -3,11 +3,14 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@metamask/snaps-sdk",
     "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": []
   },
-  "include": ["index.tsx", "test/**/*.ts"]
+  "include": ["index.tsx", "src/**/*.ts", "src/**/*.tsx"]
 }

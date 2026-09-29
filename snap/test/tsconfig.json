@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["../index.tsx", "../src/**/*.ts", "../src/**/*.tsx", "./**/*.ts", "./**/*.tsx"]
+}

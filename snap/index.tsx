@@ -1,227 +1,100 @@
-import {
-  OnTransactionHandler,
-  OnSignatureHandler,
+/**
+ * x402check MetaMask Snap.
+ *
+ * Decodes every transaction and signature locally, risk-checks the real
+ * counterparty (recipient / spender / operator / contract) with x402check
+ * before the user signs, and renders the signed verdict.
+ *
+ * Runtime: only the `snap` and `ethereum` globals exist in the Snap sandbox
+ * (plus the granted endowments such as `fetch`), so every Snap API call goes
+ * through `snap.request(...)`.
+ */
+import type {
+  Component,
   OnInstallHandler,
+  OnSignatureHandler,
+  OnSignatureResponse,
+  OnTransactionHandler,
+  OnTransactionResponse,
+  OnUpdateHandler,
 } from "@metamask/snaps-sdk";
-import {
-  Section,
-  Text,
-  Heading,
-  Divider,
-  Row,
-  Link,
-  Copyable,
-} from "@metamask/snaps-sdk/jsx";
 
-const ENDPOINT = "https://x402check.xyz/v1/risk-check";
-const JWK_URL = "https://x402check.xyz/.well-known/jwks.json";
+import type { Decoded } from "./src/decode";
+import { decodeSignature, decodeTransaction } from "./src/decode";
+import { buildRiskCheckBody, originHost, postRiskCheck } from "./src/request";
+import { clearLegacyState, getInstallIdSafe, isDisclosureShown, markDisclosureShown } from "./src/state";
+import type { InsightResult, RequestKind } from "./src/ui";
+import { disclosureContent, renderLocalOnly, renderOutcome } from "./src/ui";
 
-type Verdict = {
-  checked?: boolean;
-  score?: number;
-  tier?: string;
-  categories?: string[];
-  jws?: string;
-};
-
-type SnapState = { clientId?: string } | null;
-
-async function getClientId(): Promise<string> {
-  const state = (await snap_manageState({ operation: "get" })) as SnapState;
-  if (state?.clientId) return state.clientId;
-  const entropy = await snap_getEntropy("x402check-client-id");
-  const cid = entropy.slice(0, 16);
-  await snap_manageState({
-    operation: "update",
-    newState: { clientId: cid } as SnapState,
-  });
-  return cid;
+async function runCheck(decoded: Decoded, origin: string | undefined, kind: RequestKind): Promise<InsightResult> {
+  const host = originHost(origin);
+  const body = buildRiskCheckBody(decoded, origin);
+  if (!body) {
+    // Nothing to check (e.g. contract deployment): no network request at all.
+    return renderLocalOnly(decoded, host);
+  }
+  const installId = await getInstallIdSafe();
+  const outcome = await postRiskCheck(body, installId, async (input, init) => fetch(input, init));
+  return renderOutcome(decoded, outcome, kind, host);
 }
 
-async function check(
-  body: Record<string, unknown>,
-  clientId: string,
-): Promise<Verdict | null> {
+async function showDisclosure(): Promise<void> {
+  await snap.request({
+    method: "snap_dialog",
+    params: { type: "alert", content: disclosureContent() },
+  });
   try {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Risk-Check-Client": clientId,
-      },
-      body: JSON.stringify(body),
-    });
-    if (res.status !== 200) return null;
-    return (await res.json()) as Verdict;
+    await markDisclosureShown();
   } catch {
-    return null;
+    // Not persisted: it is simply shown again on the next update.
   }
 }
 
-const TIER_COPY: Record<string, { verdict: string; advice: string }> = {
-  low: {
-    verdict: "No significant risk signals",
-    advice: "As always, verify the recipient before confirming.",
-  },
-  medium: {
-    verdict: "Some risk signals present",
-    advice: "Review carefully before confirming.",
-  },
-  high: {
-    verdict: "High risk detected",
-    advice: "We recommend NOT proceeding. Check the categories below.",
-  },
-  critical: {
-    verdict: "Critical risk detected",
-    advice: "Do NOT proceed. This matches fraud or laundering patterns.",
-  },
+export const onTransaction: OnTransactionHandler = async ({ transaction, chainId, transactionOrigin }) => {
+  const decoded = decodeTransaction(transaction, chainId);
+  const result = await runCheck(decoded, transactionOrigin, "transaction");
+  const response: OnTransactionResponse = result.severity
+    ? { content: result.content, severity: result.severity }
+    : { content: result.content };
+  return response;
 };
 
-function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max)}…`;
-}
-
-function shortAddress(value: string): string {
-  return value.length <= 14 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
-}
-
-function shortJws(jws: string): string {
-  const parts = jws.split(".");
-  if (parts.length !== 3) return "present";
-  return `${parts[0].slice(0, 20)}…${parts[2].slice(0, 12)}…`;
-}
-
-function unavailableContent(subject: string) {
-  return (
-    <Section>
-      <Heading>x402check · unavailable</Heading>
-      <Text>
-        The risk check could not be run (network or provider error). This is
-        NOT a clean bill of health — the payment was simply not verified.
-        Proceed with caution.
-      </Text>
-      <Text>Attempted subject: {truncate(subject, 90)}</Text>
-    </Section>
-  );
-}
-
-function unverifiedContent(subject: string) {
-  return (
-    <Section>
-      <Heading>x402check · verification failed</Heading>
-      <Text>
-        The risk check could not be evaluated (provider refused the request).
-        This is a fail-closed result: this payment was NOT verified. Proceeding
-        is at your own risk.
-      </Text>
-      <Text>Attempted subject: {truncate(subject, 90)}</Text>
-    </Section>
-  );
-}
-
-function verdictContent(v: Verdict, subject: string) {
-  const tier = v.tier ?? "unknown";
-  // Unknown/missing tier must never render the "no significant risk" copy.
-  const copy = TIER_COPY[tier] ?? TIER_COPY.medium;
-  const children = [
-    <Heading>x402check · score {v.score ?? "?"}/100 · {tier}</Heading>,
-    <Text>{copy.verdict}. Checked: {truncate(subject, 90)}</Text>,
-    <Text>{copy.advice}</Text>,
-  ];
-  if (v.categories && v.categories.length > 0) {
-    children.push(
-      <Text>Categories: {v.categories.join(", ")}</Text>,
-    );
-  }
-  children.push(<Divider />);
-  if (v.jws) {
-    children.push(<Copyable value={v.jws} />);
-    children.push(
-      <Text>
-        Verdict is signed (ES256, kid jev-attest-v1) and independently
-        verifiable: {shortJws(v.jws)}
-      </Text>,
-    );
-  }
-  children.push(<Link href={JWK_URL}>Public key set (JWKS)</Link>);
-  return (
-    <Section>
-      {children}
-    </Section>
-  );
-}
-
-function extractDomains(payload: string): string[] {
-  const urls = payload.match(/https?:\/\/[^\s"'<>)\]]+/g) ?? [];
-  const domains = urls.map((u) => {
-    try {
-      return new URL(u).hostname;
-    } catch {
-      return "";
-    }
-  });
-  return [...new Set(domains.filter(Boolean))].slice(0, 3);
-}
-
-export const onTransaction: OnTransactionHandler = async ({
-  transaction,
-  chainId,
-  transactionOrigin,
-}) => {
-  const clientId = await getClientId();
-  const to = String((transaction as { to?: unknown }).to ?? "unknown");
-  const value = String((transaction as { value?: unknown }).value ?? "");
-  const context = `direct wallet transfer${transactionOrigin ? ` initiated on ${transactionOrigin}` : ""}${value ? ` with value ${value} wei` : ""}`;
-  const body: Record<string, unknown> = {
-    wallet: to,
-    chain: chainId,
-    context,
-  };
-  if (transactionOrigin) body.domain = transactionOrigin;
-  const v = await check(body, clientId);
-  const subject = `${shortAddress(to)} on ${chainId}${transactionOrigin ? ` via ${transactionOrigin}` : ""}`;
-  const content = !v
-    ? unavailableContent(subject)
-    : v.checked === false
-      ? unverifiedContent(subject)
-      : verdictContent(v, subject);
-  const severity = v?.tier === "high" || v?.tier === "critical" ? "critical" : undefined;
-  return severity ? { content, severity } : { content };
-};
-
-export const onSignature: OnSignatureHandler = async ({
-  signature,
-  signatureOrigin,
-}) => {
-  const clientId = await getClientId();
-  const raw = String((signature as { data?: unknown }).data ?? "");
-  const from = String((signature as { from?: unknown }).from ?? "unknown");
-  // The signer's own address is not the risk subject. If the payload names an
-  // EVM counterparty (permit2 spender, approve target, calldata address), check
-  // that instead; fall back to the signer only when no counterparty is present.
-  const candidates = (raw.match(/0x[a-fA-F0-9]{40}/g) ?? []).filter(
-    (a) => a.toLowerCase() !== from.toLowerCase(),
-  );
-  const counterparty = candidates.length > 0 ? candidates[0] : from;
-  const domains = extractDomains(raw);
-  const context = `signature request${domains.length ? ` referencing ${domains.join(", ")}` : ""}: ${truncate(raw, 220)}`;
-  const body: Record<string, unknown> = {
-    wallet: counterparty,
-    context,
-  };
-  if (signatureOrigin) body.domain = signatureOrigin;
-  const v = await check(body, clientId);
-  const subject = `${shortAddress(counterparty)}${counterparty !== from ? " (counterparty)" : ""} signing${signatureOrigin ? ` on ${signatureOrigin}` : ""}`;
-  const content = !v
-    ? unavailableContent(subject)
-    : v.checked === false
-      ? unverifiedContent(subject)
-      : verdictContent(v, subject);
-  const severity = v?.tier === "high" || v?.tier === "critical" ? "critical" : undefined;
-  return severity ? { content, severity } : { content };
+export const onSignature: OnSignatureHandler = async ({ signature, signatureOrigin }) => {
+  const decoded = decodeSignature(signature, originHost(signatureOrigin));
+  const result = await runCheck(decoded, signatureOrigin, "signature");
+  // snaps-sdk 8.x types `OnSignatureResponse.content` as the legacy `Component`,
+  // but the runtime validates it with the same struct as transaction insights,
+  // which accepts JSX elements.
+  const content = result.content as unknown as Component;
+  const response: OnSignatureResponse = result.severity
+    ? { content, severity: result.severity }
+    : { content };
+  return response;
 };
 
 export const onInstall: OnInstallHandler = async () => {
-  await getClientId();
+  // Creates and persists the random install id; never blocks the disclosure.
+  await getInstallIdSafe();
+  await showDisclosure();
+  return null;
+};
+
+export const onUpdate: OnUpdateHandler = async () => {
+  // 0.1.x stored an SRP-derived id in the encrypted state; drop it.
+  try {
+    await clearLegacyState();
+  } catch {
+    // Best effort: the random install id below supersedes it either way.
+  }
+  await getInstallIdSafe();
+  let shown = false;
+  try {
+    shown = await isDisclosureShown();
+  } catch {
+    shown = false;
+  }
+  if (!shown) {
+    await showDisclosure();
+  }
   return null;
 };

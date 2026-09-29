@@ -1,13 +1,13 @@
 {
-  "version": "0.1.0",
-  "description": "x402check: signed-intent risk checks on every transaction and signature, before you sign.",
+  "version": "0.2.0",
+  "description": "Decodes each transaction and signature, then risk-checks the real counterparty (spender, recipient, operator) before you sign.",
   "proposedName": "x402check",
   "repository": {
     "type": "git",
     "url": "https://github.com/caiovicentino/jev-risk-check-provider"
   },
   "source": {
-    "shasum": "VXda+LqC66SvlKlJI1/PBGl9oCzWJJs1AfSjeae9AwM=",
+    "shasum": "or/zuGUovuWKMbGNUnMpsDpZU8Pqc2E2MlQWDp05ABw=",
     "location": {
       "npm": {
         "filePath": "dist/bundle.js",
@@ -23,13 +23,12 @@
       "maxRequestTime": 10000
     },
     "endowment:signature-insight": {
-      "allowSignatureOrigin": true,
-      "maxRequestTime": 10000
+      "allowSignatureOrigin": true
     },
     "endowment:network-access": {},
+    "endowment:lifecycle-hooks": {},
     "snap_manageState": {},
-    "snap_getEntropy": {},
-    "endowment:lifecycle-hooks": {}
+    "snap_dialog": {}
   },
   "platformVersion": "8.1.0",
   "manifestVersion": "0.1"
