@@ -133,6 +133,7 @@ const PAGE = `<!doctype html>
     <nav>
       <a href="#evidence">Evidence</a>
       <a href="#integrate">Integration</a>
+      <a href="#wallets">Wallets</a>
       <a href="/.well-known/risk-check.json">Discovery</a>
       <a href="https://github.com/caiovicentino/jev-risk-check-provider">Source</a>
     </nav>
@@ -239,8 +240,22 @@ curl https://x402check.xyz/.well-known/jwks.json
     </pre>
   </section>
 
+  <section id="wallets">
+    <div class="sec-head"><span class="sec-no">05</span><h2>Wallets: check before signing</h2></div>
+    <div class="cols">
+      <div class="item"><h3>One call before the signature</h3>
+        <p>Wallets, extensions and dApps gate every outgoing payment: score the counterparty wallet (and domain, if any) with one CORS-open fetch. No signup, no API keys.</p></div>
+      <div class="item"><h3>Fail-closed UX, tiered copy</h3>
+        <p>Check unavailable &rarr; hold the transaction. Tiered warnings out of the box: badge, amber caution, red warning, hard block with user override. Batch endpoint scans up to 25 counterparties in one call.</p></div>
+      <div class="item"><h3>Free for end users</h3>
+        <p>The 100/day free tier per caller covers wallet traffic. Heavy integrations pay per check over x402 in the same wallets they already manage.</p></div>
+      <div class="item"><h3>Verifiable, not vibes</h3>
+        <p>Every warning ships as an ES256 attestation. Users and auditors verify it against did:web:x402check.xyz without trusting the wallet &mdash; or us.</p></div>
+    </div>
+  </section>
+
   <section id="pricing">
-    <div class="sec-head"><span class="sec-no">05</span><h2>Pricing &amp; identity</h2></div>
+    <div class="sec-head"><span class="sec-no">06</span><h2>Pricing &amp; identity</h2></div>
     <table>
       <tr><th></th><th></th></tr>
       <tr><td>Free tier</td><td>100 evaluations per day, per caller — enough for an integration build-out</td></tr>
@@ -253,7 +268,7 @@ curl https://x402check.xyz/.well-known/jwks.json
   </section>
 
   <section id="demo">
-    <div class="sec-head"><span class="sec-no">06</span><h2>Demo</h2></div>
+    <div class="sec-head"><span class="sec-no">07</span><h2>Demo</h2></div>
     <div class="video-frame">
       <iframe src="https://www.youtube-nocookie.com/embed/MCOWk7nh5r8" title="x402check demo" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
     </div>
