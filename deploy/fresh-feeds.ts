@@ -73,7 +73,11 @@ export function saneDate(d: unknown, now = Date.now()): d is string {
 async function get(base: string, name: string, fetchImpl: typeof fetch): Promise<ArrayBuffer> {
   // Edge-cache successes for an hour; never cache a miss (a 404 before the first publish would otherwise stick).
   const init = { signal: AbortSignal.timeout(8000), cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": 3600, "300-599": 0 } } } as RequestInit;
-  const res = await fetchImpl(new URL(name, base).toString(), init);
+  // An hourly cache key: the edge never serves a copy older than the refresh interval,
+  // even if an older response was cached under different settings.
+  const url = new URL(name, base);
+  url.searchParams.set("h", String(Math.floor(Date.now() / 3_600_000)));
+  const res = await fetchImpl(url.toString(), init);
   if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
   return res.arrayBuffer();
 }

@@ -34,7 +34,7 @@ function published(opts: { mmAsOf?: string; mmHosts?: string[]; ofacDate?: strin
     "ofac-sdn.json": ofacJson,
   };
   return (async (url: string) => {
-    const name = url.slice(BASE.length);
+    const name = new URL(url).pathname.slice(1); // the hourly ?h= cache key is ignored
     const body = files[name];
     return body === undefined ? new Response("nope", { status: 404 }) : new Response(typeof body === "string" ? body : new Uint8Array(body));
   }) as unknown as typeof fetch;
