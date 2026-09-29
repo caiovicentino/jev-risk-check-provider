@@ -2,8 +2,12 @@
   "version": "0.1.0",
   "description": "x402check: signed-intent risk checks on every transaction and signature, before you sign.",
   "proposedName": "x402check",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/caiovicentino/jev-risk-check-provider"
+  },
   "source": {
-    "shasum": "lqF/WsF1ajG2+lAGnaARq/O3E34eLdvxddBOoVAI0zU=",
+    "shasum": "VXda+LqC66SvlKlJI1/PBGl9oCzWJJs1AfSjeae9AwM=",
     "location": {
       "npm": {
         "filePath": "dist/bundle.js",

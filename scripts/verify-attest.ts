@@ -15,14 +15,20 @@ if (!res.ok) {
   process.exit(3);
 }
 const jwks = (await res.json()) as { keys: Array<Record<string, unknown>> };
-const jwk = jwks.keys.find((k) => k.kid === header.kid) ?? jwks.keys[0];
-const key = createPublicKey({ key: jwk as never, format: "jwk" });
-const sig = Buffer.from(s, "base64url");
-const ok = createVerify("SHA256").update(`${h}.${p}`).verify({ key, dsaEncoding: "ieee-p1363" }, sig);
+// No fallback key and no algorithm other than ES256: a verdict is only valid if its
+// kid is published, the signature checks out, and it has not expired.
+const jwk = jwks.keys.find((k) => k.kid === header.kid);
+const sigOk =
+  header.alg === "ES256" && !!jwk &&
+  createVerify("SHA256").update(`${h}.${p}`).verify({ key: createPublicKey({ key: jwk as never, format: "jwk" }), dsaEncoding: "ieee-p1363" }, Buffer.from(s, "base64url"));
+const expired = typeof payload.exp !== "number" || payload.exp <= Math.floor(Date.now() / 1000);
+const ok = sigOk && !expired;
 console.log(
   JSON.stringify(
     {
       valid: ok,
+      signature_valid: sigOk,
+      expired,
       alg: header.alg,
       kid: header.kid,
       iss: payload.iss,
@@ -30,6 +36,7 @@ console.log(
       score: payload.score,
       tier: payload.tier,
       input_hash: payload.input_hash,
+      asserted: payload.asserted,
       expires: payload.exp ? new Date(payload.exp * 1000).toISOString() : undefined,
     },
     null,

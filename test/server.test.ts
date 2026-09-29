@@ -10,6 +10,7 @@ const CANNED: Record<string, Answer> = {
   sanctions_concern: { type: "noul", noul: 0.02 },
   laundering_pattern: { type: "noul", noul: 0.03 },
   risky_domain: { type: "noul", noul: 0.01 },
+  guard_bypass_attempt: { type: "noul", noul: 0.01 },
   risk_class: {
     type: "choice",
     choice: "benign",

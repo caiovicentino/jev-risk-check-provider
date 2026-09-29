@@ -59,6 +59,7 @@ export type JwsClaims = {
   aud?: string | undefined;
   categories?: string[] | undefined;
   input_hash?: string | undefined;
+  asserted?: { screening?: string; pre_authorized?: boolean } | undefined;
 };
 
 export function signJws(claims: JwsClaims, kid: string, privatePem: string): string {

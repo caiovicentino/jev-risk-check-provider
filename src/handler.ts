@@ -4,6 +4,9 @@ import { landingPage, OG_PNG_B64 } from "./landing.js";
 import type { RiskCheckRequest } from "./types.js";
 
 const MAX_BATCH = 25;
+// Every string field is forwarded into the model state; cap each one so a single
+// paid/free call cannot amplify model cost or smuggle a long injection payload.
+const MAX_FIELD_LEN = { chain: 64, domain: 253, context: 4096, aud: 256, source: 128 } as const;
 
 export type HandlerDeps = {
   provider: Provider;
@@ -17,8 +20,13 @@ function validateRequest(body: unknown): RiskCheckRequest | null {
   if (trimmed.length > 96) return null;
   if (obj.wallet !== trimmed) return null;
   if (/[\u0000-\u001f\u007f\u200b-\u200f\u2060\u202a-\u202e]/.test(trimmed)) return null;
+  // The wallet is copied into the model state, so restrict it to address-shaped
+  // characters only: 0x-hex (EVM/aptos), base58 (Solana), CAIP ids, no prose.
+  if (!/^[A-Za-z0-9:+_-]{20,96}$/.test(trimmed)) return null;
   for (const field of ["chain", "domain", "context", "aud"] as const) {
-    if (obj[field] !== undefined && typeof obj[field] !== "string") return null;
+    if (obj[field] === undefined) continue;
+    if (typeof obj[field] !== "string") return null;
+    if ((obj[field] as string).length > MAX_FIELD_LEN[field]) return null;
   }
   let screening: RiskCheckRequest["screening"];
   if (obj.screening && typeof obj.screening === "object") {
@@ -31,6 +39,7 @@ function validateRequest(body: unknown): RiskCheckRequest | null {
   if (obj.authorization && typeof obj.authorization === "object") {
     const a = obj.authorization as Record<string, unknown>;
     if (typeof a.pre_authorized === "boolean") {
+      if (typeof a.source === "string" && a.source.length > MAX_FIELD_LEN.source) return null;
       authorization = { pre_authorized: a.pre_authorized, source: typeof a.source === "string" ? a.source : undefined };
     }
   }
@@ -118,11 +127,17 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       if (!body || typeof body !== "object" || !Array.isArray((body as { requests?: unknown }).requests)) {
         return json(422, { error: "invalid_request" });
       }
-      const requests = (body as { requests: unknown[] }).requests
-        .map((r) => validateRequest(r))
-        .filter((r): r is RiskCheckRequest => r !== null);
-      if (requests.length === 0) return json(422, { error: "invalid_request" });
-      if (requests.length > MAX_BATCH) return json(413, { error: "batch_too_large", max: MAX_BATCH });
+      const raw = (body as { requests: unknown[] }).requests;
+      if (raw.length === 0) return json(422, { error: "invalid_request" });
+      if (raw.length > MAX_BATCH) return json(413, { error: "batch_too_large", max: MAX_BATCH });
+      // All-or-nothing: results carry no wallet field, so silently dropping an invalid
+      // item would shift results[i] onto the wrong request.
+      const requests: RiskCheckRequest[] = [];
+      for (let i = 0; i < raw.length; i++) {
+        const r = validateRequest(raw[i]);
+        if (!r) return json(422, { error: "invalid_request", index: i });
+        requests.push(r);
+      }
       const results = await Promise.all(requests.map((r) => deps.provider.evaluate(r)));
       return json(200, { results: results.map((e) => e.result) });
     }

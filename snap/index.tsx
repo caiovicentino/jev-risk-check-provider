@@ -121,8 +121,8 @@ function unverifiedContent(subject: string) {
 
 function verdictContent(v: Verdict, subject: string) {
   const tier = v.tier ?? "unknown";
-  const copy = TIER_COPY[tier] ?? TIER_COPY.low;
-  const risky = tier === "high" || tier === "critical";
+  // Unknown/missing tier must never render the "no significant risk" copy.
+  const copy = TIER_COPY[tier] ?? TIER_COPY.medium;
   const children = [
     <Heading>x402check · score {v.score ?? "?"}/100 · {tier}</Heading>,
     <Text>{copy.verdict}. Checked: {truncate(subject, 90)}</Text>,
@@ -196,15 +196,22 @@ export const onSignature: OnSignatureHandler = async ({
   const clientId = await getClientId();
   const raw = String((signature as { data?: unknown }).data ?? "");
   const from = String((signature as { from?: unknown }).from ?? "unknown");
+  // The signer's own address is not the risk subject. If the payload names an
+  // EVM counterparty (permit2 spender, approve target, calldata address), check
+  // that instead; fall back to the signer only when no counterparty is present.
+  const candidates = (raw.match(/0x[a-fA-F0-9]{40}/g) ?? []).filter(
+    (a) => a.toLowerCase() !== from.toLowerCase(),
+  );
+  const counterparty = candidates.length > 0 ? candidates[0] : from;
   const domains = extractDomains(raw);
   const context = `signature request${domains.length ? ` referencing ${domains.join(", ")}` : ""}: ${truncate(raw, 220)}`;
   const body: Record<string, unknown> = {
-    wallet: from,
+    wallet: counterparty,
     context,
   };
   if (signatureOrigin) body.domain = signatureOrigin;
   const v = await check(body, clientId);
-  const subject = `${shortAddress(from)} signing${signatureOrigin ? ` on ${signatureOrigin}` : ""}`;
+  const subject = `${shortAddress(counterparty)}${counterparty !== from ? " (counterparty)" : ""} signing${signatureOrigin ? ` on ${signatureOrigin}` : ""}`;
   const content = !v
     ? unavailableContent(subject)
     : v.checked === false

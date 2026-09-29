@@ -52,6 +52,7 @@ export class RateCounter {
       day: string;
       daily?: number;
       countTotal?: boolean;
+      admit?: { key: string; daily: number }[];
     };
     const day = body.day;
     this.init(day);
@@ -63,6 +64,19 @@ export class RateCounter {
     }
     const key = String(body.key ?? "unknown");
     const daily = Number(body.daily ?? 25);
+    // First sighting of `key` today must also fit every admission budget (e.g. the
+    // global new-client budget). DO requests run serially, so check-then-charge is atomic.
+    if (body.admit?.length && sql.exec(`SELECT 1 FROM counters WHERE k = ?`, key).toArray().length === 0) {
+      for (const b of body.admit) {
+        const rows = sql.exec(`SELECT used FROM counters WHERE k = ?`, b.key).toArray();
+        if (rows.length && Number((rows[0] as { used: number }).used) >= b.daily) {
+          return Response.json({ allowed: false, remaining: 0, total: 0 });
+        }
+      }
+      for (const b of body.admit) {
+        sql.exec(`INSERT INTO counters (k, used, day) VALUES (?, 1, ?) ON CONFLICT(k) DO UPDATE SET used = counters.used + 1`, b.key, day);
+      }
+    }
     const upd = sql.exec(
       `INSERT INTO counters (k, used, day) VALUES (?, 1, ?)
        ON CONFLICT(k) DO UPDATE SET used = counters.used + 1
@@ -139,17 +153,31 @@ function buildStack(env: WorkerEnv): Stack {
   resourceServer.register(SOLANA_MAINNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL_MAINNET ?? "https://api.mainnet-beta.solana.com" }));
   resourceServer.register(SOLANA_DEVNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL ?? "https://api.devnet.solana.com" }));
 
+  // Dynamic pricing (SDK v2 DynamicPrice): single = unit price; batch = per item,
+  // so 25 checks cannot be bought for the price of one.
+  const makePrice = (unit: number) => (ctx: HTTPRequestContext): string => {
+    if (!ctx.path.endsWith("/batch")) return `$${unit.toFixed(3)}`;
+    let n = 1;
+    try {
+      const body = ctx.adapter.getBody?.() as { requests?: unknown } | undefined;
+      if (body && Array.isArray(body.requests)) n = body.requests.length;
+    } catch {
+      n = 1;
+    }
+    const count = Math.min(25, Math.max(1, n));
+    return `$${(unit * count).toFixed(3)}`;
+  };
   const accepts: PaymentOption[] = [
-    { scheme: "exact", network: BASE_MAINNET, payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: "eip155:137", payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: "eip155:42161", payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: "eip155:43114", payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: "eip155:143", payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: "eip155:1329", payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: "$0.002" },
-    { scheme: "exact", network: BASE_SEPOLIA, payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: "eip155:421614", payTo: payToEvm, price: "$0.001" },
-    { scheme: "exact", network: SOLANA_DEVNET, payTo: payToSol, price: "$0.001" },
+    { scheme: "exact", network: BASE_MAINNET, payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: "eip155:137", payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: "eip155:42161", payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: "eip155:43114", payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: "eip155:143", payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: "eip155:1329", payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: SOLANA_MAINNET, payTo: payToSol, price: makePrice(0.002) },
+    { scheme: "exact", network: BASE_SEPOLIA, payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: "eip155:421614", payTo: payToEvm, price: makePrice(0.001) },
+    { scheme: "exact", network: SOLANA_DEVNET, payTo: payToSol, price: makePrice(0.001) },
   ];
   const routes = {
     "POST /v1/risk-check": {
@@ -159,7 +187,7 @@ function buildStack(env: WorkerEnv): Stack {
     },
     "POST /v1/risk-check/batch": {
       accepts,
-      description: "Batch risk check (up to 25 requests per call)",
+      description: "Batch risk check (up to 25 requests per call, priced per item)",
       mimeType: "application/json",
     },
   };
@@ -209,26 +237,25 @@ function instructionsToResponse(instr: HTTPResponseInstructions): Response {
 }
 
 const NEW_CLIENT_BUDGET_DAILY = 1000;
+// Caps how many fresh client ids one IP can mint per day, so a single caller cannot
+// rotate X-Risk-Check-Client to drain the global new-client budget.
+const NEW_CLIENTS_PER_IP_DAILY = 10;
 
 type ConsumeResult = { allowed: boolean; remaining: number };
 
-let lastCounterError = "";
-let dbgCounter = "";
-async function doConsume(env: WorkerEnv, key: string, daily: number, countTotal = true): Promise<ConsumeResult | null> {
-  if (!env.COUNTER) { lastCounterError = "no-binding"; return null; }
+async function doConsume(env: WorkerEnv, key: string, daily: number, countTotal = true, admit?: { key: string; daily: number }[]): Promise<ConsumeResult | null> {
+  if (!env.COUNTER) return null;
   const day = new Date().toISOString().slice(0, 10);
   try {
     const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
     const res = await stub.fetch("https://counter/consume", {
       method: "POST",
-      body: JSON.stringify({ op: "consume", key, day, daily, countTotal }),
+      body: JSON.stringify({ op: "consume", key, day, daily, countTotal, ...(admit ? { admit } : {}) }),
     });
-    if (!res.ok) { lastCounterError = `status-${res.status}`; return null; }
+    if (!res.ok) return null;
     const data = (await res.json()) as { allowed: boolean; remaining: number };
-    lastCounterError = "";
     return { allowed: data.allowed, remaining: data.remaining };
-  } catch (err) {
-    lastCounterError = String(err).slice(0, 140);
+  } catch {
     return null;
   }
 }
@@ -258,12 +285,13 @@ async function freeQuota(env: WorkerEnv, ip: string): Promise<number> {
   return 0;
 }
 
-async function clientQuota(env: WorkerEnv, clientId: string): Promise<number> {
+async function clientQuota(env: WorkerEnv, clientId: string, ip: string): Promise<number> {
   const daily = Number(env.FREE_TIER_DAILY ?? "25");
   if (!Number.isFinite(daily) || daily <= 0) return 0;
-  const known = await doConsume(env, `client-known:${clientId}`, NEW_CLIENT_BUDGET_DAILY, false);
-  if (known && !known.allowed) return 0;
-  const viaDo = await doConsume(env, `client:${clientId}`, daily);
+  const viaDo = await doConsume(env, `client:${clientId}`, daily, true, [
+    { key: "client-new:global", daily: NEW_CLIENT_BUDGET_DAILY },
+    { key: `client-new-ip:${ip}`, daily: NEW_CLIENTS_PER_IP_DAILY },
+  ]);
   if (viaDo) return viaDo.allowed ? viaDo.remaining : 0;
   return 0;
 }
@@ -271,17 +299,15 @@ async function clientQuota(env: WorkerEnv, clientId: string): Promise<number> {
 async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
   const paymentHeader = request.headers.get("PAYMENT-SIGNATURE") ?? request.headers.get("X-PAYMENT");
   const forcePaid = (request.headers.get("X-Risk-Check-Paid") ?? "").trim().length > 0;
-  dbgCounter = "";
   if (!paymentHeader && !forcePaid) {
     const clientId = (request.headers.get("X-Risk-Check-Client") ?? "").trim();
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     const remaining = clientId
-      ? await clientQuota(env, clientId.slice(0, 64))
-      : await freeQuota(env, request.headers.get("CF-Connecting-IP") ?? "unknown");
-    dbgCounter = lastCounterError;
+      ? await clientQuota(env, clientId.slice(0, 64), ip)
+      : await freeQuota(env, ip);
     if (remaining > 0) {
       const res = await serve(request);
       res.headers.set("X-Risk-Check-Free", "true");
-      res.headers.set("X-Quota-Debug", dbgCounter);
       return res;
     }
   }
@@ -294,27 +320,30 @@ async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, s
   let result: HTTPProcessResult;
   try {
     result = await stack.http.processHTTPRequest(ctx);
-  } catch (err) {
-    return Response.json({ error: "payment_processing_failed", detail: String(err) }, { status: 500 });
+  } catch {
+    return Response.json({ error: "payment_processing_failed" }, { status: 500 });
   }
   if (result.type === "payment-error") return instructionsToResponse(result.response);
   if (result.type === "no-payment-required") {
     return Response.json({ error: "payment_required" }, { status: 402 });
   }
   const res = await serve(request);
-  if (res.status === 200) {
-    try {
-      const settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
-      if (settle.success) {
-        for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
-      } else {
-        res.headers.set("X-Payment-Error", settle.errorReason ?? "settlement_failed");
-      }
-    } catch (err) {
-      res.headers.set("X-Payment-Error", String(err));
+  if (res.status !== 200) return res;
+  // Settle before releasing the result: a payload that verifies but cannot settle
+  // (replayed authorization, funds moved between verify and settle) must not
+  // receive a signed attestation.
+  let reason = "settlement_failed";
+  try {
+    const settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
+    if (settle.success) {
+      for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
+      return res;
     }
+    reason = settle.errorReason ?? reason;
+  } catch {
+    // fall through to 402
   }
-  return res;
+  return Response.json({ error: "payment_settlement_failed" }, { status: 402, headers: { "X-Payment-Error": reason } });
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -333,23 +362,6 @@ export default {
     const stack = await ensureStack(env);
     const path = new URL(request.url).pathname;
     let res: Response;
-    if (request.method === "GET" && path === "/debug-quota") {
-      let out: Record<string, unknown> = { hasCounter: !!env.COUNTER };
-      if (env.COUNTER) {
-        const day = new Date().toISOString().slice(0, 10);
-        try {
-          const stub = env.COUNTER.get(env.COUNTER.idFromName("quota"));
-          const res = await stub.fetch("https://counter/total", {
-            method: "POST",
-            body: JSON.stringify({ op: "total", day }),
-          });
-          out = { ...out, status: res.status, body: await res.text() };
-        } catch (err) {
-          out = { ...out, error: String(err).slice(0, 300) };
-        }
-      }
-      return Response.json(out);
-    }
     if (request.method === "GET" && path === "/healthz") {
       const viaDo = await doTotal(env);
       if (viaDo !== null) return Response.json({ ok: true, freeEvalsToday: viaDo });

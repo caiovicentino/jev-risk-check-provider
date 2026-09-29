@@ -1,5 +1,5 @@
 import { inputHash, signJws, type KeyPair } from "./jws.js";
-import { buildQuestions, buildState, QUESTION_SET_VERSION, type JevAnswers, type JevLike, type Usage } from "./jev.js";
+import { buildQuestions, buildState, QUESTION_SET_VERSION, type JevAnswers, type JevLike, type JevQuestions, type Usage } from "./jev.js";
 import { categoriesFor, computeScore, extractInputs } from "./scoring.js";
 import type {
   Answer,
@@ -50,6 +50,26 @@ export function schemeForHost(host: string): string {
   return host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
 }
 
+function isUnit(v: unknown): boolean {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+}
+
+// Scoring treats a missing answer as "no risk" (noul→0, trust→2), so a partial or
+// malformed model response would otherwise yield a signed low-risk attestation.
+// Require every question to be answered with the expected, in-range type.
+export function answersComplete(answers: unknown, questions: JevQuestions): answers is JevAnswers {
+  if (!answers || typeof answers !== "object") return false;
+  const a = answers as Record<string, Answer | undefined>;
+  for (const [id, q] of Object.entries(questions)) {
+    const ans = a[id];
+    if (!ans || ans.type !== q.type) return false;
+    if (ans.type === "noul" && !isUnit(ans.noul)) return false;
+    if (ans.type === "choice" && (typeof ans.choice !== "string" || !ans.probabilities || typeof ans.probabilities !== "object")) return false;
+    if (ans.type === "score" && !(typeof ans.score === "number" && Number.isFinite(ans.score) && ans.score >= 0 && ans.score <= 4)) return false;
+  }
+  return true;
+}
+
 export class Provider {
   constructor(private readonly config: ProviderConfig) {}
 
@@ -96,6 +116,16 @@ export class Provider {
       };
     }
 
+    if (!answersComplete(answers, questions)) {
+      return {
+        result: { checked: false },
+        answers: null,
+        latencyMs: Date.now() - started,
+        usage,
+        error: "jev_malformed_answers",
+      };
+    }
+
     const inputs = extractInputs(req, answers as Record<string, Answer>);
     const breakdown = computeScore(inputs, undefined, req.screening?.sanctions === "clean", req.authorization?.pre_authorized === true);
     const now = Date.now();
@@ -107,8 +137,17 @@ export class Provider {
       chain: req.chain ?? "unknown",
       domain: req.domain ?? null,
       context: req.context ?? null,
+      aud: req.aud ?? null,
+      screening: req.screening?.sanctions ?? null,
+      pre_authorized: req.authorization?.pre_authorized ?? null,
       questions: Object.keys(questions),
     });
+    // Caller-supplied screening/authorization lower the score; surface them in the
+    // signed claims so a relying party can tell self-asserted mitigations apart.
+    const asserted = {
+      ...(req.screening ? { screening: req.screening.sanctions } : {}),
+      ...(req.authorization ? { pre_authorized: req.authorization.pre_authorized } : {}),
+    };
 
     const claims = {
       iss: `${PROVIDER_DID_PREFIX}${this.config.host}`,
@@ -119,6 +158,7 @@ export class Provider {
       exp: Math.floor((now + ATTESTATION_TTL_MS) / 1000),
       categories: categoriesFor(inputs),
       input_hash: hash,
+      ...(Object.keys(asserted).length ? { asserted } : {}),
       ...(req.aud ? { aud: req.aud } : {}),
     };
 
