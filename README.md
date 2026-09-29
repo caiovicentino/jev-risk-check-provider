@@ -17,7 +17,7 @@ Aligned with the `risk-check` extension spec proposed in
 
 Between "the agent decided to pay" and "the payment settles" there is one instant where intent can be checked. x402check lives in that instant — and proves every verdict with a signature, not a promise.
 
-[![x402check demo](https://i.ytimg.com/vi/fOCCHCicxT8/hqdefault.jpg)](https://youtu.be/fOCCHCicxT8)
+[![x402check demo](https://i.ytimg.com/vi/MCOWk7nh5r8/hqdefault.jpg)](https://youtu.be/MCOWk7nh5r8)
 
 ## Payments (live, mainnet)
 

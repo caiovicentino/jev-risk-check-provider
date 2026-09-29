@@ -255,9 +255,9 @@ curl https://x402check.xyz/.well-known/jwks.json
   <section id="demo">
     <div class="sec-head"><span class="sec-no">06</span><h2>Demo</h2></div>
     <div class="video-frame">
-      <iframe src="https://www.youtube-nocookie.com/embed/fOCCHCicxT8" title="x402check demo" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+      <iframe src="https://www.youtube-nocookie.com/embed/MCOWk7nh5r8" title="x402check demo" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
     </div>
-    <div class="video-cap">Live product walkthrough &middot; <a href="https://youtu.be/fOCCHCicxT8">watch on YouTube</a></div>
+    <div class="video-cap">Live product walkthrough &middot; <a href="https://youtu.be/MCOWk7nh5r8">watch on YouTube</a></div>
   </section>
 
   <footer>
