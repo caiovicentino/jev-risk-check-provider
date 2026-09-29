@@ -1,3 +1,5 @@
+import { base58Check, cashaddrHash20 } from "./address-codec.js";
+
 // Subject address parsing. The wallet is the only field every verdict is keyed on,
 // so it must be an address and nothing else: no prose, no padding, no unicode.
 export type AddressFormat = "evm" | "base58" | "bech32" | "cashaddr";
@@ -35,8 +37,28 @@ export function parseSubject(raw: string): Subject | null {
     return { address, canonical: lower, format: "bech32", ...(caip2 ? { caip2 } : {}) };
   }
   if ((address === lower || address === address.toUpperCase()) && CASHADDR.test(lower)) {
+    // Checksum must verify: a corrupted cashaddr is a different (unowned) address.
+    if (!cashaddrHash20(lower)) return null;
     return { address, canonical: lower.replace(/^bitcoincash:/, ""), format: "cashaddr", ...(caip2 ? { caip2 } : {}) };
   }
-  if (BASE58.test(address)) return { address, canonical: address, format: "base58", ...(caip2 ? { caip2 } : {}) };
+  if (BASE58.test(address)) {
+    // Base58Check formats (BTC/LTC/DOGE/DASH/BCH legacy/TRX/ZEC t-addr) must carry a
+    // valid checksum, so a case-flipped variant of a listed address is rejected
+    // instead of being screened as a "different", unlisted address.
+    const check = base58Check(address);
+    if (check.checksummed && !check.valid) return null;
+    return { address, canonical: address, format: "base58", ...(caip2 ? { caip2 } : {}) };
+  }
   return null;
+}
+
+/**
+ * Whether two address strings denote the same subject. EVM, bech32 and cashaddr
+ * compare case-insensitively (via their canonical form); base58 (Solana, Tron, BTC
+ * legacy) is case-SENSITIVE: a case-flipped base58 string is a different address.
+ */
+export function sameSubject(a: string, b: string): boolean {
+  const x = parseSubject(a);
+  const y = parseSubject(b);
+  return !!x && !!y && x.canonical === y.canonical;
 }

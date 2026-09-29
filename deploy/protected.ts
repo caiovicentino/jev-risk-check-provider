@@ -237,12 +237,50 @@ export function json(status: number, body: unknown, headers: Record<string, stri
   return Response.json(body, { status, headers });
 }
 
+async function readCapped(request: Request, max: number): Promise<Uint8Array | null> {
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+}
+
+async function allChecked(res: Response): Promise<boolean> {
+  try {
+    const body = (await res.json()) as { checked?: unknown; results?: Array<{ checked?: unknown }> };
+    if (Array.isArray(body.results)) return body.results.length > 0 && body.results.every((r) => r.checked === true);
+    return body.checked === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
   const path = new URL(request.url).pathname;
   // 1. Read and validate before any quota or payment work: invalid input never
-  //    costs the caller a free slot and is never priced.
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
+  //    costs the caller a free slot and is never priced. The cap is in BYTES and is
+  //    enforced while streaming, so an oversized body is never fully buffered.
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
+  const bytes = await readCapped(request, MAX_BODY_BYTES);
+  if (!bytes) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
+  const text = new TextDecoder().decode(bytes);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -259,8 +297,11 @@ export async function handleProtected(request: Request, env: WorkerEnv, stack: S
   const units = unitsFor(path, parsed);
   const replay = () => new Request(request.url, { method: "POST", headers: request.headers, body: text });
 
-  // 2. Free tier: charged per evaluation (a batch of n costs n slots).
-  const paymentHeader = request.headers.get("PAYMENT-SIGNATURE") ?? request.headers.get("X-PAYMENT");
+  // 2. Free tier: charged per evaluation (a batch of n costs n slots). Only the x402 v2
+  //    PAYMENT-SIGNATURE header counts as a payment attempt: the SDK in use does not read
+  //    X-PAYMENT, so honouring it here would skip the free tier for a payment that can
+  //    never be processed.
+  const paymentHeader = request.headers.get("PAYMENT-SIGNATURE");
   const forcePaid = (request.headers.get("X-Risk-Check-Paid") ?? "").trim().length > 0;
   if (!paymentHeader && !forcePaid) {
     const clientId = (request.headers.get("X-Risk-Check-Client") ?? "").trim().slice(0, 64);
@@ -291,6 +332,10 @@ export async function handleProtected(request: Request, env: WorkerEnv, stack: S
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
   const res = await serve(replay());
   if (res.status !== 200) return res;
+  // Never charge for a verdict that was not produced: every result must be checked.
+  if (!(await allChecked(res.clone()))) {
+    return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5" });
+  }
   // Settle before releasing the result: a payload that verifies but cannot settle
   // (replayed authorization, funds moved between verify and settle) must not
   // receive a signed attestation.

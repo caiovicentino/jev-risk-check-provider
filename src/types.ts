@@ -18,6 +18,8 @@ export type SanctionsEvidence = {
   status: "listed" | "not_listed";
   entity?: string;
   ticker?: string;
+  match?: "exact" | "same_key";
+  listed_address?: string;
 };
 
 export type DomainEvidence = {

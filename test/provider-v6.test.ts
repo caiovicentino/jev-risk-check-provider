@@ -135,7 +135,7 @@ test("claims separate provider checks from caller assertions and bind payment + 
     aud: "https://merchant.example/resource",
     screening: { sanctions: "clean" },
     authorization: { pre_authorized: true, source: "user session" },
-    payment: { network: "base", pay_to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", amount: "1000", asset: "USDC", resource: "https://merchant.example/resource" },
+    payment: { network: "solana", pay_to: "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X", amount: "1000", asset: "USDC", resource: "https://merchant.example/resource" },
     interaction: { type: "token_transfer" },
   };
   const e = await p.evaluate(req(body));
@@ -144,7 +144,7 @@ test("claims separate provider checks from caller assertions and bind payment + 
   assert.equal(c.checks?.domain?.host, "api.merchant-labs.com");
   assert.equal(c.checks?.model, "jev-wallet-risk/v6");
   assert.deepEqual(c.asserted, { screening: "clean", pre_authorized: true });
-  assert.deepEqual(c.payment, { network: "eip155:8453", pay_to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", amount: "1000", asset: "USDC", resource: "https://merchant.example/resource" });
+  assert.deepEqual(c.payment, { network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", pay_to: "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X", amount: "1000", asset: "USDC", resource: "https://merchant.example/resource" });
   assert.equal(c.interaction, "token_transfer");
   assert.equal(c.aud, "https://merchant.example/resource");
   assert.match(String(c.jti), /^[0-9a-f-]{36}$/);

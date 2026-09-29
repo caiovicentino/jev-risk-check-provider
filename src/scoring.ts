@@ -49,6 +49,16 @@ function trustCalibrated(answer: Answer | undefined): boolean {
   return false;
 }
 
+const RISK_CLASSES = new Set(["benign", "automated_abuse", "fraud_signal", "unclassifiable"]);
+
+function riskClassOf(answer: Answer | undefined): string {
+  return answer?.type === "choice" && RISK_CLASSES.has(answer.choice) ? answer.choice : "unclassifiable";
+}
+
+function unit(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
+}
+
 export function extractInputs(req: RiskCheckRequest, answers: Record<string, Answer>): ScoringInputs {
   return {
     knownThreat: asNumber(answers["known_threat"], 0),
@@ -56,10 +66,10 @@ export function extractInputs(req: RiskCheckRequest, answers: Record<string, Ans
     launderingPattern: asNumber(answers["laundering_pattern"], 0),
     riskyDomain: asNumber(answers["risky_domain"], 0),
     guardBypassAttempt: asNumber(answers["guard_bypass_attempt"], 0),
-    riskClass: answers["risk_class"]?.type === "choice" ? answers["risk_class"].choice : "unclassifiable",
+    riskClass: riskClassOf(answers["risk_class"]),
     riskClassProbability:
-      answers["risk_class"]?.type === "choice"
-        ? (answers["risk_class"].probabilities[answers["risk_class"].choice] ?? 0)
+      answers["risk_class"]?.type === "choice" && RISK_CLASSES.has(answers["risk_class"].choice)
+        ? unit(answers["risk_class"].probabilities[answers["risk_class"].choice])
         : 0,
     trust: trustScore(answers["trust"]),
     trustConfidence: trustConfidence(answers["trust"]),
@@ -68,8 +78,6 @@ export function extractInputs(req: RiskCheckRequest, answers: Record<string, Ans
 }
 
 export type ScoreOptions = {
-  /** Caller-asserted structured pre-authorization (recorded in the attestation as asserted). */
-  preAuthorized?: boolean;
   /** Caller-asserted screening result "flagged" — can only raise risk. */
   callerFlagged?: boolean;
   /** Provider-side domain analysis verdict. */
@@ -83,7 +91,7 @@ export type ScoreOptions = {
 // penalty by 0.2, which let any caller mint a low-risk attestation for a context
 // that described a sanctions listing).
 export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DEFAULT_WEIGHTS, opts: ScoreOptions = {}): ScoreBreakdown {
-  const riskClassPenalty = weights.riskClass[inputs.riskClass] ?? weights.riskClass["unclassifiable"] ?? 10;
+  const riskClassPenalty = Object.hasOwn(weights.riskClass, inputs.riskClass) ? (weights.riskClass[inputs.riskClass] as number) : (weights.riskClass["unclassifiable"] ?? 10);
   const riskClassScaled = riskClassPenalty * inputs.riskClassProbability;
 
   let penalty =
@@ -93,8 +101,9 @@ export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DE
     weights.riskyDomain * inputs.riskyDomain +
     weights.guardBypassAttempt * inputs.guardBypassAttempt +
     riskClassScaled;
-  const trust = opts.preAuthorized ? Math.max(inputs.trust, 3) : inputs.trust;
-  penalty -= (trust - 2) * weights.trustPerLevel;
+  // Caller assertions (screening "clean", authorization.pre_authorized) never raise
+  // trust deterministically; the model sees them as unverified caller claims.
+  penalty -= (inputs.trust - 2) * weights.trustPerLevel;
 
   let score = Math.round(100 - penalty);
   let cappedByLowConfidence = false;
@@ -114,7 +123,8 @@ export function computeScore(inputs: ScoringInputs, weights: ScoringWeights = DE
   if (opts.impersonation === "strong") score = Math.min(score, 40);
   if (opts.evidenceCap !== undefined) score = Math.min(score, opts.evidenceCap);
 
-  score = Math.max(0, Math.min(100, score));
+  // Last-resort guard: a non-finite score fails closed to 0 rather than signing NaN.
+  score = Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 0;
   return { score, tier: tierFor(score, inputs), cappedByLowConfidence, signals: inputs };
 }
 

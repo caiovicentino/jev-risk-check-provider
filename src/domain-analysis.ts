@@ -130,13 +130,19 @@ export function normalizeHost(input: string): string | null {
   return host;
 }
 
-// RFC 3492 punycode decoder (labels starting with "xn--").
+// RFC 3492 punycode decoder (labels starting with "xn--"). Returns null on any
+// malformed input: bad digits, arithmetic overflow, or an out-of-range code point.
 function punycodeDecode(input: string): string | null {
-  const base = 36, tMin = 1, tMax = 26, skew = 38, damp = 700;
+  const base = 36, tMin = 1, tMax = 26, skew = 38, damp = 700, maxInt = 0x7fffffff;
   const output: number[] = [];
   let n = 128, i = 0, bias = 72;
-  const basic = input.lastIndexOf("-");
-  for (let j = 0; j < Math.max(basic, 0); j++) output.push(input.charCodeAt(j));
+  const basic = Math.max(input.lastIndexOf("-"), 0);
+  for (let j = 0; j < basic; j++) {
+    const c = input.charCodeAt(j);
+    if (c >= 0x80) return null;
+    output.push(c);
+  }
+  const digitOf = (c: number): number => (c >= 48 && c <= 57 ? c - 22 : c >= 65 && c <= 90 ? c - 65 : c >= 97 && c <= 122 ? c - 97 : base);
   const adapt = (delta: number, numPoints: number, first: boolean): number => {
     delta = first ? Math.floor(delta / damp) : delta >> 1;
     delta += Math.floor(delta / numPoints);
@@ -151,17 +157,20 @@ function punycodeDecode(input: string): string | null {
     const oldi = i;
     for (let w = 1, k = base; ; k += base) {
       if (idx >= input.length) return null;
-      const c = input.charCodeAt(idx++);
-      const digit = c - 48 < 10 ? c - 22 : c - 65 < 26 ? c - 65 : c - 97 < 26 ? c - 97 : base;
-      if (digit >= base) return null;
+      const digit = digitOf(input.charCodeAt(idx++));
+      if (digit >= base || digit > Math.floor((maxInt - i) / w)) return null;
       i += digit * w;
       const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
       if (digit < t) break;
+      if (w > Math.floor(maxInt / (base - t))) return null;
       w *= base - t;
     }
-    bias = adapt(i - oldi, output.length + 1, oldi === 0);
-    n += Math.floor(i / (output.length + 1));
-    i %= output.length + 1;
+    const len = output.length + 1;
+    bias = adapt(i - oldi, len, oldi === 0);
+    if (Math.floor(i / len) > maxInt - n) return null;
+    n += Math.floor(i / len);
+    i %= len;
+    if (n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return null;
     output.splice(i++, 0, n);
   }
   return String.fromCodePoint(...output);

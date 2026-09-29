@@ -40,7 +40,10 @@ export class RateCounter {
     } catch {
       return Response.json({ error: "bad_request" }, { status: 400 });
     }
-    const day = String(body.day);
+    // Monotonic day: around midnight isolates may disagree on the date; a request
+    // stamped with an older day must not wipe the current day's counters.
+    const requested = String(body.day);
+    const day = this.day !== null && requested < this.day ? this.day : requested;
     this.roll(day);
     if (body.op === "total") return Response.json({ total: this.total(day) });
 

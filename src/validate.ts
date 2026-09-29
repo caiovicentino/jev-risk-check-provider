@@ -67,12 +67,16 @@ function validateInteraction(raw: unknown): Interaction | Invalid {
 export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invalid {
   if (!body || typeof body !== "object" || Array.isArray(body)) return invalid("body");
   const obj = body as Record<string, unknown>;
-  if (typeof obj.wallet !== "string" || !parseSubject(obj.wallet)) return invalid("wallet");
+  const subject = typeof obj.wallet === "string" ? parseSubject(obj.wallet) : null;
+  if (typeof obj.wallet !== "string" || !subject) return invalid("wallet");
   const req: RiskCheckRequest = { wallet: obj.wallet };
 
   if (obj.chain !== undefined) {
     const chain = typeof obj.chain === "string" ? normalizeChain(obj.chain) : null;
     if (!chain) return invalid("chain");
+    // A CAIP-10 wallet carries its own chain; a disagreeing `chain` would let the caller
+    // pick which chain's on-chain facts are consulted.
+    if (subject.caip2 && subject.caip2 !== chain.caip2) return invalid("chain");
     req.chain = chain.caip2;
   }
   if (obj.domain !== undefined) {
@@ -103,6 +107,8 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
   if (obj.payment !== undefined) {
     const payment = validatePayment(obj.payment);
     if (isInvalid(payment)) return payment;
+    const effective = subject.caip2 ?? req.chain;
+    if (payment.network && effective && payment.network !== effective) return invalid("payment.network");
     req.payment = payment;
   }
   if (obj.interaction !== undefined) {

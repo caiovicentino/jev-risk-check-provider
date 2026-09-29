@@ -39,11 +39,18 @@ export type DerivedChecks = {
 
 export function deriveChecks(req: RiskCheckRequest): DerivedChecks {
   const subject = parseSubject(req.wallet);
-  return {
-    subject,
-    sanctions: subject ? screenSubject(subject) : null,
-    domain: req.domain ? analyzeDomain(req.domain) : null,
-  };
+  // Sanctions first and isolated: nothing about the domain may stop a listed subject
+  // from getting its deterministic critical verdict.
+  const sanctions = subject ? screenSubject(subject) : null;
+  let domain: DomainAnalysis | null = null;
+  if (req.domain) {
+    try {
+      domain = analyzeDomain(req.domain);
+    } catch {
+      domain = { host: req.domain, registrable: req.domain, official: false, impersonation: "weak", signals: ["analysis_error"] };
+    }
+  }
+  return { subject, sanctions, domain };
 }
 
 export function buildState(req: RiskCheckRequest, checks: DerivedChecks = deriveChecks(req), feeds: FeedResult[] = []): object {

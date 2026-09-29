@@ -5,6 +5,7 @@
 // Trust is pinned to the ISSUER you expect: the key is resolved from that issuer's
 // did:web document, never from a URL carried in the response or the token.
 import { createPublicKey, createVerify, type JsonWebKey } from "node:crypto";
+import { sameSubject } from "../src/address.js";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -66,7 +67,11 @@ async function main(): Promise<void> {
   const aud = arg("aud");
   if (aud !== undefined && payload.aud !== aud) failures.push("audience_mismatch");
   const sub = arg("sub");
-  if (sub !== undefined && String(payload.sub).toLowerCase() !== sub.toLowerCase()) failures.push("subject_mismatch");
+  if (sub !== undefined) {
+    // Canonical comparison: EVM/bech32/cashaddr are case-insensitive, base58 (Solana,
+    // Tron, BTC legacy) is case-SENSITIVE — a case-flipped base58 string is another address.
+    if (!sameSubject(sub, String(payload.sub))) failures.push("subject_mismatch");
+  }
   const valid = failures.length === 0;
   console.log(
     JSON.stringify(

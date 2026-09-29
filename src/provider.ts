@@ -91,7 +91,10 @@ export function answersComplete(answers: unknown, questions: JevQuestions): answ
     const ans = a[id];
     if (!ans || ans.type !== q.type) return false;
     if (ans.type === "noul" && !isUnit(ans.noul)) return false;
-    if (ans.type === "choice" && (typeof ans.choice !== "string" || !ans.probabilities || typeof ans.probabilities !== "object")) return false;
+    if (ans.type === "choice") {
+      const allowed = q.criteria && !Array.isArray(q.criteria) ? Object.keys(q.criteria) : [];
+      if (typeof ans.choice !== "string" || !allowed.includes(ans.choice) || !ans.probabilities || typeof ans.probabilities !== "object") return false;
+    }
     if (ans.type === "score" && !(typeof ans.score === "number" && Number.isFinite(ans.score) && ans.score >= 0 && ans.score <= 4)) return false;
   }
   return true;
@@ -183,7 +186,6 @@ export class Provider {
       req.interaction !== undefined && GRANTING_INTERACTIONS.has(req.interaction.type) && onchain.status === "ok" && onchain.is_contract === false;
     if (approvalToEoa) caps.push(onchain.activity === "none" ? APPROVAL_TO_FRESH_EOA_CAP : APPROVAL_TO_EOA_CAP);
     const breakdown = computeScore(inputs, undefined, {
-      preAuthorized: req.authorization?.pre_authorized === true,
       callerFlagged,
       impersonation,
       ...(caps.length ? { evidenceCap: Math.min(...caps) } : {}),
