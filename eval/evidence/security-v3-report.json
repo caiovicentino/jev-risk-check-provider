@@ -1,25 +1,25 @@
 {
-  "timestamp": "2026-09-29T19:37:32.389Z",
+  "timestamp": "2026-09-29T19:52:06.142Z",
   "base": "https://x402check.xyz",
   "receipts": [
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0x737dbba55f9268c522452bfc8b7bac483eb174df0b774e0e7acd7fb789496fbf",
+      "transaction": "0xef8f2a11284eeb78ce70571070f3514c36e7cf09455751ebfd122d3b808621e4",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     },
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0xee4055b469747755bc49bcab6b682c5abe1edbb5735b67f9beccef4cea53e838",
+      "transaction": "0x07fd7d59034c182e23258653befc74244d35f8769b62f033b5ffb47e2e1e7994",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     },
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0xeb082bc5f324b4e298703efe0a9f43b6c9f07eb176f9eef7c3802ec1028e8447",
+      "transaction": "0x729c0b2272f7ab5d27a873c6a1e6f72de178de2fa6d95e3c4bd40965e4da4eed",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     }
@@ -31,7 +31,7 @@
     {
       "id": "discovery_v03",
       "status": "PASS",
-      "detail": "version=0.3.0 signals=ofac_sdn_address,threat_feeds,domain_impersonation,onchain_activity,transaction_simulation,contract_verification,drainer_code_fingerprint,operation_context_intent"
+      "detail": "version=0.3.2 signals=ofac_sdn_address,threat_feeds,domain_impersonation,onchain_activity,transaction_simulation,contract_verification,drainer_code_fingerprint,operation_context_intent"
     },
     {
       "id": "status_freshness",
