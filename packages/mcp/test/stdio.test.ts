@@ -11,6 +11,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const BIN = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+// A throwaway key (never funded): the stdio server only needs a well-formed payer.
+const PAYER_KEY = `0x${"42".repeat(32)}`;
 
 test("the bin has a node shebang and answers --version / --help without starting a server", () => {
   assert.match(readFileSync(BIN, "utf8"), /^#!\/usr\/bin\/env node\n/);
@@ -37,7 +39,7 @@ test("stdio: tools are served over stdin/stdout, configured from the environment
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [BIN],
-    env: { X402CHECK_BASE_URL: `http://127.0.0.1:${port}`, X402CHECK_CLIENT_ID: "stdio-e2e" },
+    env: { X402CHECK_BASE_URL: `http://127.0.0.1:${port}`, X402CHECK_PAYER_KEY: PAYER_KEY },
     stderr: "pipe",
   });
   const client = new Client({ name: "stdio-e2e", version: "0.0.0" });
@@ -54,9 +56,9 @@ test("stdio: tools are served over stdin/stdout, configured from the environment
     assert.match(result.content[0]?.text ?? "", /field "wallet"/);
     assert.equal(hits.length, 1);
     assert.equal(hits[0]?.url, "/v1/risk-check");
-    assert.equal(hits[0]?.headers["x-risk-check-client"], "stdio-e2e");
     assert.equal(hits[0]?.headers["content-type"], "application/json");
     assert.deepEqual(JSON.parse(hits[0]?.body ?? ""), { wallet: "definitely-not-an-address" });
+    assert.equal(hits[0]?.headers["x-risk-check-client"], undefined, "no client id header any more");
   } finally {
     await client.close();
     await new Promise<void>((resolve) => api.close(() => resolve()));
@@ -67,12 +69,14 @@ test("an invalid configuration fails fast on stderr with a non-zero exit", () =>
   const cases: Array<[Record<string, string>, RegExp]> = [
     [{ X402CHECK_BASE_URL: "ftp://nope" }, /x402check-mcp: baseUrl must be http\(s\)/],
     [{ X402CHECK_ISSUER: "https://x402check.xyz" }, /x402check-mcp: issuer must be a did:web DID/],
-    [{ X402CHECK_CLIENT_ID: "has spaces" }, /x402check-mcp: clientId must be/],
+    [{ X402CHECK_PAYER_KEY: `0x${"ab".repeat(31)}zz` }, /x402check-mcp: X402CHECK_PAYER_KEY must be an EVM private key/],
+    [{ X402CHECK_PAYER_KEY: PAYER_KEY, X402CHECK_BUDGET_USD: "lots" }, /x402check-mcp: X402CHECK_BUDGET_USD must be a USD amount/],
   ];
   for (const [env, message] of cases) {
     const run = spawnSync(process.execPath, [BIN], { encoding: "utf8", env: { ...process.env, ...env }, input: "" });
     assert.notEqual(run.status, 0, JSON.stringify(env));
     assert.equal(run.stdout, "", "stdout is reserved for MCP messages");
     assert.match(run.stderr, message);
+    assert.ok(!run.stderr.toLowerCase().includes("abababababab") && !run.stderr.toLowerCase().includes(PAYER_KEY.slice(2).toLowerCase()), "the key is never echoed");
   }
 });

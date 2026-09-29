@@ -13,13 +13,15 @@ export interface ClientOptions {
   /** Default "https://x402check.xyz". */
   baseUrl?: string | undefined;
   /**
-   * Stable, random per-install id sent as `X-Risk-Check-Client`: gives the install its own daily
-   * free allowance instead of sharing its IP's. Printable ASCII, at most 64 characters.
+   * Default `globalThis.fetch`. Every evaluation is paid via x402: pass an x402-paying fetch
+   * (e.g. `wrapFetchWithPayment(fetch, x402Client)` from `@x402/fetch`). Without one, a check
+   * rejects with a 402 `X402CheckError` whose `paymentRequired` lists the payment options.
    */
-  clientId?: string | undefined;
-  /** Default `globalThis.fetch`. Pass an x402-paying fetch to pay past the free tier. */
   fetch?: FetchLike | undefined;
-  /** Per request, including reading the body. Default 10000. */
+  /**
+   * Per request, including reading the body. Default 10000. A paid call is two round trips plus
+   * on-chain settlement: allow more (e.g. 30000) with a paying fetch.
+   */
   timeoutMs?: number | undefined;
 }
 
@@ -30,11 +32,10 @@ export interface CallOptions {
 /** Response metadata. */
 export interface ResponseInfo {
   status: number;
-  /** Served from the free tier (`X-Risk-Check-Free: true`). */
-  free: boolean;
-  /** Free evaluations left today for this caller (`X-Risk-Check-Free-Remaining`). */
-  freeRemaining: number | undefined;
-  /** Decoded x402 `PAYMENT-RESPONSE` settlement receipt, when the call was paid. */
+  /**
+   * Decoded x402 `PAYMENT-RESPONSE` settlement receipt, when the call was paid:
+   * `{ success, transaction, network, payer, … }`.
+   */
   paymentResponse: Record<string, unknown> | undefined;
 }
 
@@ -44,7 +45,7 @@ export interface X402CheckClient {
   check(request: RiskCheckRequest, options?: CallOptions): Promise<RiskCheckResult>;
   /** Up to 25 checks, all-or-nothing validation; results are in request order. */
   checkBatch(requests: RiskCheckRequest[], options?: CallOptions): Promise<RiskCheckResult[]>;
-  /** `check` plus response metadata (free-tier usage, settlement receipt). */
+  /** `check` plus response metadata (the settlement receipt of a paid call). */
   checkWithInfo(request: RiskCheckRequest, options?: CallOptions): Promise<{ result: RiskCheckResult; info: ResponseInfo }>;
   /** `checkBatch` plus response metadata. */
   checkBatchWithInfo(requests: RiskCheckRequest[], options?: CallOptions): Promise<{ results: RiskCheckResult[]; info: ResponseInfo }>;
@@ -61,10 +62,6 @@ function normalizeBaseUrl(raw: string): string {
   if (raw.includes("?") || raw.includes("#")) throw new TypeError(`baseUrl must not carry a query or fragment: ${raw}`);
   if (url.username || url.password) throw new TypeError("baseUrl must not carry credentials");
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
-}
-
-function validClientId(id: string): boolean {
-  return /^[\x21-\x7e]{1,64}$/.test(id);
 }
 
 /** Validates the shape of one result. Anything off is a protocol error, never a verdict. */
@@ -111,12 +108,8 @@ function retryAfterSeconds(header: string | null): number | undefined {
 }
 
 function responseInfo(res: FetchResponseLike): ResponseInfo {
-  const remaining = res.headers.get("x-risk-check-free-remaining");
-  const n = remaining === null ? Number.NaN : Number(remaining);
   return {
     status: res.status,
-    free: (res.headers.get("x-risk-check-free") ?? "").toLowerCase() === "true",
-    freeRemaining: Number.isInteger(n) && n >= 0 ? n : undefined,
     paymentResponse: decodeBase64Json(res.headers.get("payment-response") ?? res.headers.get("x-payment-response")),
   };
 }
@@ -151,7 +144,7 @@ function httpError(res: FetchResponseLike, body: unknown): X402CheckError {
         code: "payment_required",
         paymentRequired,
         paymentError,
-        message: `payment required: the free tier is exhausted or the payment failed${detail ? ` (${detail})` : ""}`,
+        message: `payment required: every evaluation is paid via x402${detail ? ` (${detail})` : ""}`,
       });
     }
     case 413:
@@ -177,16 +170,12 @@ function httpError(res: FetchResponseLike, body: unknown): X402CheckError {
  * Creates a client for the x402check API.
  *
  * @example
- * const x402check = createClient({ clientId: installId });
+ * const x402check = createClient({ fetch: payingFetch }); // an x402-paying fetch, see the README
  * const result = await x402check.check({ wallet: spender, chain: "base", interaction: { type: "permit_signature" } });
  * const { action } = interpret(result); // "allow" | "warn" | "block" | "not_verified"
  */
 export function createClient(options: ClientOptions = {}): X402CheckClient {
   const baseUrl = normalizeBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL);
-  const clientId = options.clientId?.trim() || undefined;
-  if (clientId !== undefined && !validClientId(clientId)) {
-    throw new TypeError("clientId must be 1-64 printable ASCII characters without spaces");
-  }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   // setTimeout clamps anything above 2^31−1 ms to 1 ms: reject instead of timing out every call.
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) throw new TypeError("timeoutMs must be between 1 and 2147483647");
@@ -194,7 +183,6 @@ export function createClient(options: ClientOptions = {}): X402CheckClient {
 
   async function post(path: string, payload: unknown, call: CallOptions | undefined): Promise<{ body: unknown; info: ResponseInfo }> {
     const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
-    if (clientId) headers["X-Risk-Check-Client"] = clientId;
     let res: FetchResponseLike;
     let text: string;
     try {

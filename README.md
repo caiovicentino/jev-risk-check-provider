@@ -241,10 +241,13 @@ Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deplo
 - **[`@x402check/client`](packages/client)** is a typed TypeScript client with zero runtime dependencies. It runs on Node ≥ 20, browsers, Cloudflare Workers, Deno and Bun.
   - `verifyAttestation` checks the signature against the issuer's `did:web` key and binds it to the request you made, including `request_hash`.
   - `interpret` applies the fail-closed policy. Its verdicts come from the **signed** claims only, never from the unsigned body.
-- **[`@x402check/mcp`](packages/mcp)** is an MCP server for any agent (Claude Code, Claude Desktop, other MCP clients), with the tools `x402check_check`, `x402check_verify_attestation` and `x402check_methodology`. Every verdict is verified before the agent sees an action.
+- **[`@x402check/mcp`](packages/mcp)** is an MCP server for any agent (Claude Code, Claude Desktop, other MCP clients), with the tools `x402check_check`, `x402check_verify_attestation` and `x402check_methodology`.
+  - Every verdict is verified before the agent sees an action.
+  - It pays each check itself via x402 (USDC on Base, gasless for the payer), with a per-payment cap and a total budget.
 
 ```bash
-claude mcp add x402check -- npx -y @x402check/mcp      # once published to npm
+# once published to npm; use a dedicated wallet with a small USDC balance on Base
+claude mcp add x402check -e X402CHECK_PAYER_KEY=0x… -e X402CHECK_BUDGET_USD=1 -- npx -y @x402check/mcp
 ```
 
 Both packages are ready to publish, but not yet published.

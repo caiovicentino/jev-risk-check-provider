@@ -3,7 +3,7 @@ import type { PaymentRequired } from "./types.js";
 export type X402CheckErrorCode =
   /** 422: the request is malformed; `field` (and `index` for batches) names the offending input. */
   | "invalid_request"
-  /** 402: free tier exhausted (25/day) or a payment failed; see `paymentRequired` / `paymentError`. */
+  /** 402: the call was not paid (every evaluation is paid via x402), or the payment failed; see `paymentRequired` / `paymentError`. */
   | "payment_required"
   /** 413: body over 64 KiB, or more than 25 batch items. */
   | "too_large"

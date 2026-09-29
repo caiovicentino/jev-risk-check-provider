@@ -88,7 +88,23 @@ describe("interpret: the fail-closed policy", () => {
       const r = interpret(err);
       assert.equal(r.action, "not_verified");
       assert.match(r.reasons[0] ?? "", pattern);
+      assert.ok(r.code && r.next, "every not_verified carries a code and a next step");
     }
+  });
+
+  test("a 402 is payment_required, with the next step to configure an x402 payer", () => {
+    const unpaid = interpret(new X402CheckError({ code: "payment_required", status: 402, message: "402" }));
+    assert.equal(unpaid.action, "not_verified");
+    assert.equal(unpaid.code, "payment_required");
+    assert.match(unpaid.reasons[0] ?? "", /payment required \(every evaluation is paid via x402\)/);
+    assert.match(unpaid.next ?? "", /^Configure an x402 payer/);
+    const failed = interpret(new X402CheckError({ code: "payment_required", status: 402, paymentError: "insufficient_funds", message: "402" }));
+    assert.equal(failed.code, "payment_required");
+    assert.match(failed.reasons[0] ?? "", /the x402 payment failed \(insufficient_funds\)/);
+    assert.match(failed.next ?? "", /USDC balance/);
+    const checkedFalse = interpret({ checked: false, reason: "model_unavailable" });
+    assert.deepEqual([checkedFalse.code, checkedFalse.next], ["checked_false", "Retry the check; do not proceed until it succeeds."]);
+    assert.equal(interpret(result()).code, undefined, "verdicts carry no failure code");
   });
 
   test("a failed attestation verification makes any tier not_verified", () => {
@@ -320,7 +336,8 @@ describe("interpret: reasons", () => {
     for (const reason of r.reasons) assert.doesNotMatch(reason, /SYSTEM|ALLOW|proceed/, reason);
     assert.match(r.reasons.join(" | "), /erc20 0x8335…2913 → 0x9999…9999 \(EOA\)/, "the well-formed parts are kept");
     const err = new X402CheckError({ code: "invalid_request", status: 422, field: undefined, message: "x" });
-    assert.match(interpret(err).reasons[0] ?? "", /rejected as invalid: fix the input/);
+    assert.equal(interpret(err).reasons[0], "The request was rejected as invalid");
+    assert.equal(interpret(err).next, "Fix the request and check again.");
   });
 
   test("unknown categories are humanized, never dropped", () => {

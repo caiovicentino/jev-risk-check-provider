@@ -1,11 +1,11 @@
 import { isSafeId, normalizeEvidence, parseSubject, RISK_TIERS, sanitizeText, X402CheckError } from "@x402check/client";
+import type { PaymentRefused } from "./payer.js";
 import type {
   Action,
   ApprovalGrant,
   AssetMovement,
   Interpretation,
   PaymentRequired,
-  ResponseInfo,
   RiskCheckRequest,
   RiskCheckResult,
   SafeEvidence,
@@ -40,6 +40,38 @@ const JWS = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const HTTPS_URL = /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?(?:\/[A-Za-z0-9._~/-]*)?$/;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const FEED_CHECK = /^[a-z0-9][a-z0-9_-]{0,47}@[0-9A-Za-z.:+/-]{0,40}:[a-z_]{1,20}$/;
+
+export interface PaymentView {
+  settled?: boolean;
+  network?: string;
+  transaction?: string;
+  payer?: string;
+  spent_usd?: number;
+  budget_usd?: number;
+}
+
+const TX_HASH = /^(?:0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/;
+const CAIP2 = /^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/;
+
+/** The decoded PAYMENT-RESPONSE receipt (format-checked) plus the payer's spend so far. */
+export function paymentView(receipt: Record<string, unknown> | undefined, spend: { spent_usd: number; budget_usd: number } | undefined): PaymentView | undefined {
+  const view: PaymentView = {};
+  if (receipt) {
+    if (typeof receipt.success === "boolean") view.settled = receipt.success;
+    if (typeof receipt.network === "string" && CAIP2.test(receipt.network)) view.network = receipt.network;
+    if (typeof receipt.transaction === "string" && TX_HASH.test(receipt.transaction)) view.transaction = receipt.transaction;
+    if (typeof receipt.payer === "string" && parseSubject(receipt.payer)) view.payer = receipt.payer;
+  }
+  if (spend) {
+    view.spent_usd = spend.spent_usd;
+    view.budget_usd = spend.budget_usd;
+  }
+  return Object.keys(view).length > 0 ? view : undefined;
+}
+
+function dollars(n: number): string {
+  return `$${n.toFixed(n < 0.1 ? 3 : 2)}`;
+}
 
 /** The x402 payment challenge reduced to its format-checked payment options (no free text). */
 export function safePaymentRequired(pr: PaymentRequired | undefined): Record<string, unknown> | undefined {
@@ -170,6 +202,31 @@ function attestationLine(result: RiskCheckResult | undefined, v: VerificationRes
   return `Attestation: NOT VERIFIED (${v.failures.join(", ")})${jti ? ` · unverified jti ${jti}` : ""}`;
 }
 
+type PayerInfo = { address: string; maxPaymentUsd: number; budgetUsd: number; spentUsd: number };
+
+const NO_PAYER =
+  "Next: every check is paid via x402 ($0.001 in USDC). Set X402CHECK_PAYER_KEY to the private key of a dedicated, low-balance wallet funded with a little USDC on Base (the x402 exact scheme is gasless for the payer), then restart this server. Do not proceed without a check.";
+
+function paymentNextStep(refusal: PaymentRefused | undefined, error: unknown, payer: PayerInfo | undefined): string | undefined {
+  if (refusal) {
+    switch (refusal.kind) {
+      case "budget_exhausted":
+        return `Next: this server's payment budget is used up (${dollars(payer?.spentUsd ?? 0)} of ${dollars(payer?.budgetUsd ?? 0)}; X402CHECK_BUDGET_USD). Ask the operator to raise it or restart the server. Do not proceed without a check.`;
+      case "over_max_payment":
+        return `Next: the price exceeds this server's per-payment cap (${dollars(payer?.maxPaymentUsd ?? 0)}; X402CHECK_MAX_PAYMENT_USD). Do not proceed without a check.`;
+      case "no_payable_option":
+        return "Next: this server can only pay USDC on EVM networks (Base first), and none was offered. Do not proceed without a check.";
+      default:
+        return "Next: the payment could not be created; ask the operator to check X402CHECK_PAYER_KEY. Do not proceed without a check.";
+    }
+  }
+  if (error instanceof X402CheckError && error.code === "payment_required") {
+    if (!payer) return NO_PAYER;
+    return `Next: the payment was not accepted${error.paymentError ? ` (${error.paymentError})` : ""}. Check the USDC balance of the payer ${payer.address} on Base. Do not proceed without a check.`;
+  }
+  return undefined;
+}
+
 function nextStep(error: unknown, result: RiskCheckResult | undefined): string | undefined {
   if (error === undefined && result && result.checked !== true) {
     return result.reason === "invalid_subject"
@@ -180,8 +237,6 @@ function nextStep(error: unknown, result: RiskCheckResult | undefined): string |
   switch (error.code) {
     case "invalid_request":
       return `Next: fix ${error.field ? `"${clean(error.field, 64)}"` : "the input"} and call x402check_check again.`;
-    case "payment_required":
-      return "Next: the free tier (25 checks/day per caller) is used up and this server does not pay. Tell the user; do not proceed without a check. Paid checks cost $0.001 via x402.";
     case "too_large":
       return "Next: shorten the request (context ≤ 4096 characters, body ≤ 64 KiB).";
     default:
@@ -194,8 +249,12 @@ export interface CheckRendering {
   verdict: Interpretation;
   result?: RiskCheckResult | undefined;
   error?: unknown;
+  /** A payment this server refused or could not make. */
+  refusal?: PaymentRefused | undefined;
   verification?: VerificationResult | undefined;
-  info?: ResponseInfo | undefined;
+  /** The configured payer (public data only). */
+  payer?: PayerInfo | undefined;
+  payment?: PaymentView | undefined;
 }
 
 /** The concise, human-readable verdict an agent reads. */
@@ -218,8 +277,13 @@ export function renderCheck(r: CheckRendering): string {
   }
   const attestation = attestationLine(r.result, r.verification);
   if (attestation) lines.push(attestation);
-  if (r.info?.freeRemaining !== undefined) lines.push(`Free checks left today: ${r.info.freeRemaining}`);
-  const next = nextStep(r.error, r.result);
+  const p = r.payment;
+  if (p?.transaction || p?.settled !== undefined) {
+    const where = p.network ? ` on ${p.network}` : "";
+    lines.push(`Payment: ${p.settled === false ? "NOT settled" : "settled"}${where}${p.transaction ? ` · tx ${p.transaction}` : ""}`);
+  }
+  if (p?.spent_usd !== undefined && p.budget_usd !== undefined) lines.push(`Payer budget: ${dollars(p.spent_usd)} of ${dollars(p.budget_usd)} spent by this server`);
+  const next = paymentNextStep(r.refusal, r.error, r.payer) ?? nextStep(r.error, r.result);
   if (next) lines.push(next);
   lines.push(POLICY);
   return lines.join("\n");

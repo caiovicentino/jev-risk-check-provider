@@ -86,8 +86,8 @@ describe("x402check_check", () => {
         request_hash: await requestHash(args),
       },
     });
-    const { fetch, calls } = router(issuer, () => json(200, result, { "X-Risk-Check-Free": "true", "X-Risk-Check-Free-Remaining": "24" }));
-    const session = await connect({ fetch, clientId: "mcp-install-1" });
+    const { fetch, calls } = router(issuer, () => json(200, result));
+    const session = await connect({ fetch });
     try {
       const r = await callTool(session.client, "x402check_check", args);
       assert.equal(r.isError, undefined);
@@ -96,19 +96,18 @@ describe("x402check_check", () => {
       assert.match(r.text, /No check fired/);
       assert.match(r.text, /Evidence: OFAC SDN not listed \(list as of 2026-09-23\) · on-chain: contract, verified source, active \(1200 tx\) on eip155:8453/);
       assert.match(r.text, /Attestation: signature verified against did:web:x402check\.xyz · jti 7d0f3a52-1c4b-4e8a-9f6d-2b3c4d5e6f70/);
-      assert.match(r.text, /Free checks left today: 24/);
       const sc = r.structuredContent!;
       assert.equal(sc.action, "allow");
       assert.equal(sc.tier, "low");
       assert.equal(sc.score, 88);
       assert.equal(sc.jti, "7d0f3a52-1c4b-4e8a-9f6d-2b3c4d5e6f70");
       assert.deepEqual(sc.attestation, { verified: true, failures: [], issuer: "did:web:x402check.xyz", expires_at: result.expires_at });
-      assert.deepEqual(sc.usage, { free: true, free_remaining: 24 });
+      assert.equal(sc.payment, undefined, "no payer configured and nothing paid: no payment block");
       assert.deepEqual(sc.result, result, "the full API result is returned (well-formed evidence passes normalization unchanged)");
       assert.deepEqual(r.json, sc, "the JSON text block mirrors structuredContent");
       const apiCall = calls.find((c) => c.url === API)!;
       assert.deepEqual(JSON.parse(apiCall.init.body ?? ""), args, "the request is forwarded verbatim");
-      assert.equal(apiCall.init.headers["X-Risk-Check-Client"], "mcp-install-1");
+      assert.deepEqual(Object.keys(apiCall.init.headers).sort(), ["Accept", "Content-Type"], "no client id header any more");
       assert.deepEqual(calls.map((c) => c.url), [API, DID_URL], "the key comes from did.json, never jwks_url");
     } finally {
       await session.close();
@@ -234,7 +233,7 @@ describe("x402check_check", () => {
     }
   });
 
-  test("402 (free tier exhausted) → NOT VERIFIED, with the decoded x402 challenge", async () => {
+  test("402 without a payer → NOT VERIFIED, with the decoded x402 challenge", async () => {
     const challenge = {
       x402Version: 2,
       resource: { url: API },
@@ -246,8 +245,8 @@ describe("x402check_check", () => {
       const r = await callTool(session.client, "x402check_check", { wallet: SPENDER });
       assert.equal(r.isError, true);
       assert.match(r.text, /^x402check: NOT VERIFIED/);
-      assert.match(r.text, /payment required \(free tier of 25 checks\/day exhausted/);
-      assert.match(r.text, /this server does not pay\. Tell the user; do not proceed without a check/);
+      assert.match(r.text, /payment required \(every evaluation is paid via x402\)/);
+      assert.match(r.text, /Next: every check is paid via x402 \(\$0\.001 in USDC\)\. Set X402CHECK_PAYER_KEY/);
       const error = r.structuredContent?.error as { code: string; status: number; payment_required: typeof challenge };
       assert.equal(error.code, "payment_required");
       assert.equal(error.status, 402);
@@ -589,6 +588,10 @@ describe("x402check_methodology", () => {
       const r = await callTool(session.client, "x402check_methodology");
       assert.match(r.text, /Unknown drainers receiving a plain transfer are NOT detectable from the address alone \(0\/30/);
       assert.match(r.text, /Unlisted phishing domains are mostly NOT caught without a feed \(0 to 3 of 60\)/);
+      assert.match(r.text, /real drainer transactions on Ethereum 18\/25 flagged when assets move \(72%\), against 0\/84 legitimate transactions to 19 well-known contracts/);
+      assert.match(r.text, /43\/100 listed contracts at creation from earlier deployments \(15\/100 cross-source from Forta 2023\), with 0 collisions among 9,625 legitimate contracts/);
+      assert.match(r.text, /Price: \$0\.001 per evaluation \(\$0\.002 on Solana\), paid per call with x402 \(USDC\); there is no free tier/);
+      assert.doesNotMatch(r.text, /per day|free tier:/i);
       assert.match(r.text, /Transaction simulation \(eth_simulateV1 on Ethereum, Base, Polygon, Arbitrum, Optimism and BSC; not Avalanche\)/);
       assert.match(r.text, /hidden recipients.*exceeds-declared.*unverified sinks/s);
       assert.match(r.text, /Drainer-kit code fingerprints.*EIP-7702 delegation or proxy/s);
@@ -606,22 +609,28 @@ describe("x402check_methodology", () => {
 
 describe("configuration", () => {
   test("configFromEnv reads X402CHECK_* (blank values ignored)", () => {
-    assert.deepEqual(configFromEnv({ X402CHECK_BASE_URL: " http://localhost:8787 ", X402CHECK_CLIENT_ID: "abc", X402CHECK_ISSUER: "", X402CHECK_TIMEOUT_MS: "2500" }), {
-      baseUrl: "http://localhost:8787",
-      clientId: "abc",
-      issuer: undefined,
-      timeoutMs: 2500,
-    });
-    assert.deepEqual(configFromEnv({}), { baseUrl: undefined, clientId: undefined, issuer: undefined, timeoutMs: undefined });
+    const key = `0x${"1".repeat(64)}`;
+    assert.deepEqual(
+      configFromEnv({
+        X402CHECK_BASE_URL: " http://localhost:8787 ",
+        X402CHECK_ISSUER: "",
+        X402CHECK_TIMEOUT_MS: "2500",
+        X402CHECK_PAYER_KEY: ` ${key} `,
+        X402CHECK_MAX_PAYMENT_USD: "0.01",
+        X402CHECK_BUDGET_USD: "2.5",
+        X402CHECK_CLIENT_ID: "ignored",
+      }),
+      { baseUrl: "http://localhost:8787", issuer: undefined, timeoutMs: 2500, payerKey: key, maxPaymentUsd: 0.01, budgetUsd: 2.5 },
+    );
+    assert.deepEqual(configFromEnv({}), { baseUrl: undefined, issuer: undefined, timeoutMs: undefined, payerKey: undefined, maxPaymentUsd: undefined, budgetUsd: undefined });
   });
 
-  test("the base URL and client id from the environment are used", async () => {
+  test("the base URL from the environment is used", async () => {
     const { fetch, calls } = router(issuer, () => json(200, { checked: false }));
-    const session = await connect({ ...configFromEnv({ X402CHECK_BASE_URL: "http://localhost:8787/", X402CHECK_CLIENT_ID: "env-install-7" }), fetch });
+    const session = await connect({ ...configFromEnv({ X402CHECK_BASE_URL: "http://localhost:8787/" }), fetch });
     try {
       await callTool(session.client, "x402check_check", { wallet: SPENDER });
       assert.equal(calls[0]?.url, "http://localhost:8787/v1/risk-check");
-      assert.equal(calls[0]?.init.headers["X-Risk-Check-Client"], "env-install-7");
     } finally {
       await session.close();
     }

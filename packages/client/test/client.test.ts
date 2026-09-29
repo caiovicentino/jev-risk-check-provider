@@ -41,9 +41,9 @@ async function rejection(p: Promise<unknown>): Promise<X402CheckError> {
 }
 
 describe("createClient: requests", () => {
-  test("posts the request as JSON with the client id header to /v1/risk-check", async () => {
-    const { fetch, calls } = mockFetch(() => json(200, RESULT, { "X-Risk-Check-Free": "true", "X-Risk-Check-Free-Remaining": "17" }));
-    const client = createClient({ fetch, clientId: "install-3f9a" });
+  test("posts the request as JSON to /v1/risk-check", async () => {
+    const { fetch, calls } = mockFetch(() => json(200, RESULT));
+    const client = createClient({ fetch });
     const request = {
       wallet: EVM,
       chain: "base",
@@ -56,20 +56,19 @@ describe("createClient: requests", () => {
     };
     const { result, info } = await client.checkWithInfo(request);
     assert.deepEqual(result, RESULT);
-    assert.deepEqual(info, { status: 200, free: true, freeRemaining: 17, paymentResponse: undefined });
+    assert.deepEqual(info, { status: 200, paymentResponse: undefined });
     assert.equal(calls.length, 1);
     const call = calls[0]!;
     assert.equal(call.url, "https://x402check.xyz/v1/risk-check");
     assert.equal(call.init.method, "POST");
     assert.equal(call.init.headers["Content-Type"], "application/json");
     assert.equal(call.init.headers["Accept"], "application/json");
-    assert.equal(call.init.headers["X-Risk-Check-Client"], "install-3f9a");
     assert.ok(call.init.signal, "every request is bounded by an AbortSignal");
     const { aud: _aud, ...sent } = request;
     assert.deepEqual(JSON.parse(call.init.body ?? ""), sent, "undefined fields are dropped");
   });
 
-  test("only CORS-allowed headers are sent (browser-safe), no client id when unset", async () => {
+  test("only CORS-allowed headers are sent (browser-safe)", async () => {
     const { fetch, calls } = mockFetch(() => json(200, RESULT));
     await createClient({ fetch }).check({ wallet: EVM });
     assert.deepEqual(Object.keys(calls[0]!.init.headers).sort(), ["Accept", "Content-Type"]);
@@ -82,8 +81,6 @@ describe("createClient: requests", () => {
     assert.equal(createClient({ fetch }).baseUrl, "https://x402check.xyz");
     assert.throws(() => createClient({ baseUrl: "ftp://x402check.xyz" }), TypeError);
     assert.throws(() => createClient({ baseUrl: "not a url" }), TypeError);
-    assert.throws(() => createClient({ clientId: "has spaces in it" }), TypeError);
-    assert.throws(() => createClient({ clientId: "x".repeat(65) }), TypeError);
     assert.throws(() => createClient({ timeoutMs: 0 }), TypeError);
     assert.throws(() => createClient({ timeoutMs: 2 ** 31 }), TypeError, "setTimeout would clamp it to 1 ms");
     for (const bad of ["https://x402check.xyz/?", "https://x402check.xyz/#", "https://x402check.xyz/?a=1", "https://user:pw@x402check.xyz"]) {
@@ -96,14 +93,14 @@ describe("createClient: requests", () => {
 
   test("checkBatch posts { requests } and returns results in order", async () => {
     const low: RiskCheckResult = { ...RESULT, score: 88, tier: "low", categories: ["intent_risk", "behavioral"] };
-    const { fetch, calls } = mockFetch(() => json(200, { results: [RESULT, low, { checked: false }] }, { "X-Risk-Check-Free": "true", "X-Risk-Check-Free-Remaining": "4" }));
+    const { fetch, calls } = mockFetch(() => json(200, { results: [RESULT, low, { checked: false }] }));
     const client = createClient({ fetch });
     const requests = [{ wallet: EVM }, { wallet: SOL, chain: "solana" }, { wallet: EVM, chain: "base" }];
     const { results, info } = await client.checkBatchWithInfo(requests);
     assert.equal(calls[0]!.url, "https://x402check.xyz/v1/risk-check/batch");
     assert.deepEqual(JSON.parse(calls[0]!.init.body ?? ""), { requests });
     assert.deepEqual(results.map((r) => r.tier ?? "unchecked"), ["high", "low", "unchecked"]);
-    assert.equal(info.freeRemaining, 4);
+    assert.equal(info.status, 200);
     assert.deepEqual(await client.checkBatch(requests), results);
   });
 
@@ -120,9 +117,26 @@ describe("createClient: requests", () => {
     const receipt = { success: true, transaction: "0xabc", network: "eip155:8453", payer: EVM };
     const { fetch } = mockFetch(() => json(200, RESULT, { "PAYMENT-RESPONSE": Buffer.from(JSON.stringify(receipt)).toString("base64") }));
     const { info } = await createClient({ fetch }).checkWithInfo({ wallet: EVM });
+    assert.deepEqual(info, { status: 200, paymentResponse: receipt });
+  });
+
+  test("an x402-paying fetch is used as-is: 402, then the paid retry, then the receipt", async () => {
+    // What wrapFetchWithPayment does, reduced to its HTTP shape.
+    const receipt = { success: true, transaction: `0x${"ab".repeat(32)}`, network: "eip155:8453" };
+    const upstream = mockFetch((_url, init) =>
+      init.headers["PAYMENT-SIGNATURE"]
+        ? json(200, RESULT, { "PAYMENT-RESPONSE": Buffer.from(JSON.stringify(receipt)).toString("base64") })
+        : json(402, {}, { "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(PAYMENT_REQUIRED)).toString("base64") }),
+    );
+    const paying: typeof upstream.fetch = async (url, init) => {
+      const first = await upstream.fetch(url, init);
+      if (first.status !== 402) return first;
+      return upstream.fetch(url, { ...init, headers: { ...init.headers, "PAYMENT-SIGNATURE": "signed" } });
+    };
+    const { result, info } = await createClient({ fetch: paying }).checkWithInfo({ wallet: EVM });
+    assert.equal(result.tier, "high");
     assert.deepEqual(info.paymentResponse, receipt);
-    assert.equal(info.free, false);
-    assert.equal(info.freeRemaining, undefined);
+    assert.equal(upstream.calls.length, 2);
   });
 });
 

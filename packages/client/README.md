@@ -9,7 +9,7 @@ Typed client and attestation verifier for [x402check](https://x402check.xyz). x4
 - a simulation of the transaction (API v0.3);
 - a typed model that reads the content the agent acted on.
 
-Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`.
+Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. Every evaluation is paid per call with [x402](#paying-x402): $0.001 in USDC ($0.002 on Solana). There is no free tier.
 
 - **Zero runtime dependencies.** ESM with bundled `.d.ts` types.
 - **Runs anywhere WebCrypto and `fetch` exist:** Node ≥ 20, browsers, Cloudflare Workers, Deno and Bun.
@@ -28,7 +28,7 @@ Call the check **before** the agent sends funds, signs an approval, permit or or
 ```ts
 import { createClient, interpret, verifyAttestation, type Interpretation } from "@x402check/client";
 
-const x402check = createClient({ clientId: process.env.X402CHECK_CLIENT_ID }); // optional, see "Free tier"
+const x402check = createClient({ fetch: payingFetch, timeoutMs: 30_000 }); // an x402-paying fetch, see "Paying (x402)"
 
 async function guardPayment(p: { payTo: string; network: string; amount: string; asset: string; resource: string; actedOn: string }) {
   let verdict: Interpretation;
@@ -102,6 +102,7 @@ The simulated flows are rendered in the same reason.
 | a sanctions listing, known scam address, known phishing domain, known drainer code, or a simulated overpayment to a named payee (`outflow_exceeds_declared`), whatever the tier | `block` |
 | a check that did not fully run (`onchain_unavailable`, `simulation_unavailable`, `simulation_incomplete`) or `unverified_contract` on a `low` tier | at least `warn`, never an unremarked `allow` |
 | `checked: false` (the `reason` is stated: `invalid_subject`, `model_unavailable`, …) | `not_verified` |
+| a 402: the call was not paid, or the payment failed | `not_verified`, `code: "payment_required"`, `next`: configure an x402 payer |
 | any thrown error: 402, 422, 413, 503, network error, timeout | `not_verified` |
 | a malformed verdict, or one past `expires_at` | `not_verified` |
 | `options.verification` given and not `valid` | `not_verified` |
@@ -223,7 +224,6 @@ DID documents are cached in memory for 5 minutes, per `fetch` implementation. Co
 | Option | Default | |
 |---|---|---|
 | `baseUrl` | `https://x402check.xyz` | API origin |
-| `clientId` | none | Sent as `X-Risk-Check-Client`. It gives this install its own free allowance. Use a stable random id, 1–64 printable ASCII characters. |
 | `fetch` | `globalThis.fetch` | any fetch-compatible function |
 | `timeoutMs` | `10000` | per request, body included; it also bounds a `fetch` that ignores `AbortSignal` |
 
@@ -231,7 +231,7 @@ The client has four methods. Each also accepts `{ signal }` as a last argument.
 
 - **`check(request)`** resolves to a `RiskCheckResult`, possibly `checked: false`.
 - **`checkBatch(requests)`** resolves to `RiskCheckResult[]` in request order. A batch takes at most 25 requests, and validation is all-or-nothing.
-- **`checkWithInfo(request)`** and **`checkBatchWithInfo(requests)`** also return `info`: `{ status, free, freeRemaining, paymentResponse }`.
+- **`checkWithInfo(request)`** and **`checkBatchWithInfo(requests)`** also return `info`: `{ status, paymentResponse }`. `paymentResponse` is the decoded x402 settlement receipt (`{ success, transaction, network, payer }`) of a paid call.
 
 A request has the following fields. `wallet` is required.
 
@@ -282,7 +282,7 @@ In the simulation evidence, an outflow's `counterparty` is the **final beneficia
 
 ### Other exports
 
-- `interpret(resultOrError, { verification?, now? })` returns `{ action, reasons, tier?, score? }`.
+- `interpret(resultOrError, { verification?, now? })` returns `{ action, reasons, tier?, score? }`. With `not_verified` it adds `code` (e.g. `payment_required`) and `next`, the step to take.
 - `describeCategory(category)` and `describeFailureReason(reason)` return human-readable text.
 - `requestHash(request)`, `canonicalJson(value)` and `REQUEST_HASH_FIELDS` compute the signed `request_hash`, identical to the provider's.
 - `sameSubject(a, b)` and `parseSubject(address)` implement the canonical address rules.
@@ -290,25 +290,43 @@ In the simulation evidence, an outflow's `counterparty` is the **final beneficia
 - `normalizeEvidence(evidence)`, `sanitizeText(text)` and `isSafeId(id)` prepare response data for display.
 - `INTERACTION_TYPES` and `RISK_TIERS` are the enumerations, and every wire type is exported.
 
-## Free tier and paying
+## Paying (x402)
 
-The free tier allows 25 evaluations per day per caller. A batch of *n* uses *n*. An install that sends `clientId` gets its own allowance; otherwise the IP's allowance is used. `checkWithInfo` reports `info.freeRemaining`.
+Every evaluation is paid per call with x402 v2: $0.001 in USDC on Base, Polygon, Arbitrum, Avalanche, Monad or Sei, or $0.002 on Solana. A batch of *n* costs *n* times the unit price. There is no free tier.
 
-After that, a check costs $0.001 in USDC via x402 ($0.002 on Solana), and the API answers `402`. To pay automatically, pass an x402-paying fetch:
+Without payment, the API answers `402`, and the client rejects with an `X402CheckError`: `code: "payment_required"`, with the decoded challenge in `paymentRequired.accepts`. `interpret()` turns that into `not_verified` with the next step to configure a payer.
 
-```ts
-import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
-import { ExactEvmScheme } from "@x402/evm/exact/client";
+The client stays dependency-free and takes any fetch. To pay, pass an x402-paying fetch from the x402 SDK:
 
-const paying = wrapFetchWithPayment(fetch, new x402Client().register("eip155:*", new ExactEvmScheme(signer)));
-const x402check = createClient({ fetch: paying });
+```bash
+npm install @x402/fetch@2.27 @x402/evm@2.27 viem
 ```
 
-A paid result is released only after settlement. `info.paymentResponse` carries the settlement receipt.
+```ts
+import { createClient } from "@x402check/client";
+import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
+import { ExactEvmScheme } from "@x402/evm/exact/client";
+import { privateKeyToAccount } from "viem/accounts";
+
+const payer = new x402Client()
+  .register("eip155:*", new ExactEvmScheme(privateKeyToAccount(process.env.PAYER_KEY as `0x${string}`)))
+  .setSpendControls({ maxAmountPerPayment: "$0.05" }); // refuse anything above 5 cents per call
+
+const x402check = createClient({ fetch: wrapFetchWithPayment(fetch, payer), timeoutMs: 30_000 });
+const { result, info } = await x402check.checkWithInfo({ wallet: "0x…", chain: "base" });
+info.paymentResponse; // { success: true, transaction: "0x…", network: "eip155:8453", payer: "0x…" }
+```
+
+Things to know:
+
+- **The payment is gasless for the payer.** The x402 "exact" scheme signs a USDC transfer authorization (EIP-3009), and the facilitator settles it on-chain.
+- **Use a dedicated wallet with a small USDC balance.** The key signs payments without asking; spend controls cap each payment, not the total.
+- **Settlement happens before release.** The provider releases the result only after settlement, which is why a paid call needs a longer `timeoutMs`.
+- **Other networks work the same way.** For Solana, register `ExactSvmScheme` from `@x402/svm` for `solana:*` instead.
 
 ## Browsers
 
-The client sends only `Content-Type`, `Accept` and `X-Risk-Check-Client`, which are the headers the API allows cross-origin. It never reads `jwks_url`.
+The client itself sends only `Content-Type` and `Accept`. An x402-paying fetch adds `PAYMENT-SIGNATURE`, which the API allows cross-origin and whose `PAYMENT-RESPONSE` receipt it exposes. The client never reads `jwks_url`.
 
 In browsers, `retryAfter` on a 503 is currently always `undefined`, because the API does not expose `Retry-After` to cross-origin callers. Retry with your own backoff.
 

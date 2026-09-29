@@ -29,7 +29,7 @@ Published limits (measured):
 - Laundering and other transaction-graph behaviour are not analyzed.
 - A clean verdict means "none of these checks fired", not "safe".
 
-Measured results (v0.3.0, externally labelled): OFAC addresses 24/24 critical; feed-listed phishing domains 40/40 and drainer addresses 30/30; drainer permits with the drainer feed switched off 27/30; real drainer transactions on Ethereum 19/26 flagged when assets move, against 0/37 legitimate ones; drainer-kit fingerprints recognize 43/100 listed contracts from earlier deployments, with 0 collisions among 8,719 contracts; 0 high or critical on 22 well-known contracts and 40 top dApp domains.
+Measured results (v0.3.0, externally labelled): OFAC addresses 24/24 critical; feed-listed phishing domains 40/40 and drainer addresses 30/30; drainer permits with the drainer feed switched off 27/30; real drainer transactions on Ethereum 18/25 flagged when assets move (72%), against 0/84 legitimate transactions to 19 well-known contracts; drainer-kit fingerprints recognize 43/100 listed contracts at creation from earlier deployments (15/100 cross-source from Forta 2023), with 0 collisions among 9,625 legitimate contracts (following 7702 delegations and proxies); 0 high or critical on 22 well-known contracts and 40 top dApp domains.
 
 Policy for agents: call x402check_check BEFORE sending funds, signing approvals, permits or orders, or paying an x402 invoice. Pass the transaction when you have it.
 - allow: proceed (still not a guarantee of safety)
@@ -37,7 +37,7 @@ Policy for agents: call x402check_check BEFORE sending funds, signing approvals,
 - block: do not proceed
 - not_verified: the check did not complete or could not be verified. STOP; it is never an all-clear.
 
-Free tier: 25 checks per day per caller; then $0.001 per check via x402 (USDC; $0.002 on Solana).
+Price: $0.001 per evaluation ($0.002 on Solana), paid per call with x402 (USDC); there is no free tier. This server pays from its configured payer (X402CHECK_PAYER_KEY), within its per-payment cap and budget.
 
 Evidence: ${EVIDENCE_URL}
 Methodology: ${METHODOLOGY_URL}

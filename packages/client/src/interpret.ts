@@ -17,6 +17,14 @@ export interface Interpretation {
   reasons: string[];
   tier?: RiskTier;
   score?: number;
+  /**
+   * With `not_verified`: a stable code for why. An `X402CheckError` code ("payment_required",
+   * "invalid_request", "network_error", "timeout", …), or "checked_false", "malformed_verdict",
+   * "invalid_time", "attestation_invalid", "attestation_mismatch", "expired", "error".
+   */
+  code?: string;
+  /** With `not_verified`: what to do next. */
+  next?: string;
 }
 
 export interface InterpretOptions {
@@ -173,30 +181,50 @@ function detailFor(category: string, evidence: SafeEvidence | undefined): string
   }
 }
 
-function describeError(err: unknown): string {
+const RETRY = "Retry the check; do not proceed until it succeeds.";
+const UNTRUSTED = "Do not proceed: this verdict cannot be trusted. Retry the check over a direct connection to the provider.";
+
+type Failure = { reason: string; code: string; next: string };
+
+function describeError(err: unknown): Failure {
   if (err instanceof X402CheckError) {
+    const code = err.code;
     switch (err.code) {
       case "invalid_request":
-        return `The request was rejected as invalid${err.field ? ` (field "${err.field}"${err.index !== undefined ? `, batch index ${err.index}` : ""})` : ""}: fix the input and check again`;
+        return {
+          code,
+          reason: `The request was rejected as invalid${err.field ? ` (field "${err.field}"${err.index !== undefined ? `, batch index ${err.index}` : ""})` : ""}`,
+          next: `Fix ${err.field ? `"${err.field}"` : "the request"} and check again.`,
+        };
       case "payment_required":
-        return `The check did not run: payment required (free tier of 25 checks/day exhausted, or the payment failed${err.paymentError ? `: ${err.paymentError}` : ""})`;
+        return err.paymentError
+          ? {
+              code,
+              reason: `The check did not run: the x402 payment failed (${err.paymentError})`,
+              next: "Check the payer's USDC balance on the network it pays on, then check again.",
+            }
+          : {
+              code,
+              reason: "The check did not run: payment required (every evaluation is paid via x402)",
+              next: "Configure an x402 payer: pass an x402-paying fetch (e.g. wrapFetchWithPayment from @x402/fetch) to createClient, then check again.",
+            };
       case "too_large":
-        return "The request was too large (64 KiB body, 25 batch items)";
+        return { code, reason: "The request was too large", next: "Shorten the request (context up to 4096 characters, body up to 64 KiB, at most 25 batch items)." };
       case "evaluation_unavailable":
-        return `The provider could not complete the evaluation${err.retryAfter !== undefined ? ` (retry in ${err.retryAfter}s)` : ""}`;
+        return { code, reason: `The provider could not complete the evaluation${err.retryAfter !== undefined ? ` (retry in ${err.retryAfter}s)` : ""}`, next: RETRY };
       case "timeout":
-        return "No response from the provider in time";
+        return { code, reason: "No response from the provider in time", next: RETRY };
       case "aborted":
-        return "The check was aborted";
+        return { code, reason: "The check was aborted", next: RETRY };
       case "network_error":
-        return "The provider could not be reached (network error)";
+        return { code, reason: "The provider could not be reached (network error)", next: RETRY };
       case "invalid_response":
-        return "The provider's response was malformed";
+        return { code, reason: "The provider's response was malformed", next: RETRY };
       default:
-        return `The check failed (HTTP ${err.status})`;
+        return { code, reason: `The check failed (HTTP ${err.status})`, next: RETRY };
     }
   }
-  return "The check failed (unexpected error)";
+  return { code: "error", reason: "The check failed (unexpected error)", next: RETRY };
 }
 
 const FAILURE_TEXT: Record<string, string> = {
@@ -212,8 +240,8 @@ export function describeFailureReason(reason: unknown): string | undefined {
   return FAILURE_TEXT[reason] ?? (isSafeId(reason) ? `reason: ${reason}` : "reason unrecognized");
 }
 
-function notVerified(reason: string): Interpretation {
-  return { action: "not_verified", reasons: [sanitizeText(reason), "Not verified is never an all-clear: do not proceed"] };
+function notVerified(reason: string, code: string, next: string): Interpretation {
+  return { action: "not_verified", reasons: [sanitizeText(reason), "Not verified is never an all-clear: do not proceed"], code, next };
 }
 
 function epochMs(now: Date | number | undefined): number {
@@ -238,29 +266,33 @@ function matchesClaims(result: RiskCheckResult, claims: AttestationClaims): bool
  */
 export function interpret(input: RiskCheckResult | unknown, options?: InterpretOptions | null): Interpretation {
   const opts: InterpretOptions = options ?? {};
-  if (input instanceof Error) return notVerified(describeError(input));
+  if (input instanceof Error) {
+    const f = describeError(input);
+    return notVerified(f.reason, f.code, f.next);
+  }
   if (!isRecord(input) || input.checked !== true) {
     const why = isRecord(input) ? describeFailureReason(input.reason) : undefined;
-    return notVerified(`The provider could not complete the check (checked: false${why ? `: ${why}` : ""})`);
+    const next = isRecord(input) && input.reason === "invalid_subject" ? "Check the address and try again." : RETRY;
+    return notVerified(`The provider could not complete the check (checked: false${why ? `: ${why}` : ""})`, "checked_false", next);
   }
   const result = input as unknown as RiskCheckResult;
   const { tier, score } = result;
   if (!tier || !(RISK_TIERS as readonly string[]).includes(tier) || typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 100) {
-    return notVerified("The verdict is malformed (missing or out-of-range tier or score)");
+    return notVerified("The verdict is malformed (missing or out-of-range tier or score)", "malformed_verdict", RETRY);
   }
   const nowMs = epochMs(opts.now);
-  if (!Number.isFinite(nowMs)) return notVerified("Invalid evaluation time");
+  if (!Number.isFinite(nowMs)) return notVerified("Invalid evaluation time", "invalid_time", "Pass a valid `now` (a Date or epoch milliseconds).");
   const v = opts.verification;
-  if (v && !v.valid) return notVerified(`The attestation failed verification (${v.failures.join(", ") || "unknown"})`);
+  if (v && !v.valid) return notVerified(`The attestation failed verification (${v.failures.join(", ") || "unknown"})`, "attestation_invalid", UNTRUSTED);
   // The response body is unsigned: with a verified attestation, the signed claims are the
   // verdict, and a body that disagrees with them (e.g. a downgraded tier) is not trusted.
   if (v?.valid && !matchesClaims(result, v.claims)) {
-    return notVerified("The response does not match its signed attestation (tier, score or categories differ)");
+    return notVerified("The response does not match its signed attestation (tier, score or categories differ)", "attestation_mismatch", UNTRUSTED);
   }
   if (result.expires_at !== undefined) {
     const expires = typeof result.expires_at === "string" ? Date.parse(result.expires_at) : Number.NaN;
-    if (!Number.isFinite(expires)) return notVerified("The verdict is malformed (unreadable expires_at)");
-    if (expires <= nowMs) return notVerified(`The verdict expired at ${new Date(expires).toISOString()}: run a fresh check`);
+    if (!Number.isFinite(expires)) return notVerified("The verdict is malformed (unreadable expires_at)", "malformed_verdict", RETRY);
+    if (expires <= nowMs) return notVerified(`The verdict expired at ${new Date(expires).toISOString()}`, "expired", "Run a fresh check.");
   }
 
   const evidence = normalizeEvidence(result.evidence);
