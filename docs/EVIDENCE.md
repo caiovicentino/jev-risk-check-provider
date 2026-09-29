@@ -1,84 +1,112 @@
-# Evidence — consolidated master document
+# Evidence — x402check v0.2.0
 
-All numbers below come from a single `npm run eval:suite` execution (2026-09-28, question-set `jev-wallet-risk/v5` with signal-driven review tiers (v5.1), backend: Vercel AI Gateway `typesafe-ai/jev`). Reproduce with the same command; corpora are seeded and deterministic. The deployed provider at `https://x402check.xyz` is additionally evaluated in production (layer 6) and probed by a security suite (layer 7).
+All numbers come from commit `6caf5a4`:
 
-## Consolidated table (one suite run)
+- the consolidated suite (`npm run eval:suite -- --seed 200`, 2026-09-29, question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, ~$0.15 of model calls, 261 s);
+- the production deployment `https://x402check.xyz`. `security:v2` ran on Worker `76bc1051`, and the other production suites on `2c3937fa`, which differs only in the Solana on-chain RPC default and the 2 s lookup ceiling.
 
-| Layer | n | Accuracy | FN | FP | p50 | p95 | Cost |
-|---|---|---|---|---|---|---|---|
-| synthetic (offline plumbing) | 53 | 100.0% | 0 | 0 | — | — | $0 |
-| shadow (live, screening-integrated) | 53 | 100.0% | 0 | 0 | 388ms | 592ms | $0.0028 |
-| scale (7 categories × 60 + 24×5 stability) | 420 | 99.8% | 1 | 0 | 390ms | 575ms | $0.0286 |
-| red-team (adversarial v5) | 1,419 | 99.7% | 0 | 4 | 387ms | 526ms | $0.0805 |
-| benchmark: gpt-4.1-mini as judge | 293 | 99.3% | 0 | 2 | 819ms | 1090ms | $0.0174 |
-| benchmark: JEV provider | 293 | **100.0%** | 0 | 0 | 396ms | 572ms | $0.0157 |
-| **production (live x402check.xyz)** | 53 | **100.0%** | 0 | 0 | 385ms | 640ms | $0 (free tier) |
-| **security suite (live endpoint)** | 20 probes | 100% pass | — | — | — | — | $0 |
-| **security-full suite (live endpoint, paid)** | 56 probes | 100% pass (0 FAIL, 0 SKIP) | — | — | — | — | ~$0.16 |
+Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not. Every rate carries a Wilson 95% interval.
 
-**Totals: 2,237 provider decisions in one suite run · $0.11 · 173s — plus 53 live production checks (JWS 53/53 verified, every call a real mainnet settlement) and a 56-probe adversarial security suite (56/56 PASS, 0 FAIL, 0 SKIP, paid mode).** Zero false positives on benign traffic across every live layer (4 FP on the adversarial FP-probe family only — the documented SLA-urgency boundary).
+v0.2.0 follows an independent review. Its findings changed how the earlier (v5) evidence reads, so this document leads with measurements whose labels this project did **not** author. v5 numbers are kept as historical records in `EVIDENCE-SCALE.md`, `EVIDENCE-REDTEAM.md` and `EVIDENCE-SECURITY.md`, with correction notes.
 
-## What each layer proves
+## 1. Externally grounded labels (`eval/grounded.ts`)
 
-1. **synthetic** — pipeline integrity without API access (mock JEV): scoring math, JWS, wire format, gate derivation.
-2. **shadow** — the fixed labeled regression set against the live model; feeds the scoreboard (`npm run board`).
-3. **scale** — distribution-level evidence: risky mean 36.8 vs safe mean 90.5; threshold sweep says min_score 65–75 buys 4 fewer FNs at 0 FP cost; **stability 83% unanimous tier across 24×5 repeats, 100% majority decision agreement** — the threshold is robust to sampling variance.
-4. **red-team** — the hardening story, not just the final number: five question-set versions driven by failure data (docs/EVIDENCE-REDTEAM.md). Adversarial mutations and distributed/encoded attacks: 100%. The design principle that emerged: claims of legitimacy require structured evidence (`screening`, `authorization`); prose claims are unverified by default — and 81 prose-only clearance claims were correctly held in the block band as a separate dual-use class.
-5. **benchmark** — same 293-case sample through `gpt-4.1-mini` as a chat judge: JEV wins on accuracy (100% vs 99.3%), latency (~2x), cost, and — decisive for this spec — outputs **typed, calibrated, ES256-signable verdicts** the chat judge cannot produce.
+Positives and negatives come from third-party sources. Held-out layers use a sampling seed never inspected during development: seeds 0–99 were looked at while tuning the domain heuristics, so the canonical run uses seed 200.
 
-## Key numbers for the x402 issue (one-liners)
+| Layer | Source of truth | Result | Rate (95% CI) |
+|---|---|---|---|
+| A · sanctioned addresses | OFAC SDN list (ETH, SOL, TRX, XBT) | 24/24 critical | 100% (86–100%) |
+| B · feed coverage: phishing domains | MetaMask eth-phishing-detect | 40/40 flagged | 100% (91–100%) |
+| B · feed coverage: drainer addresses | ScamSniffer | 30/30 flagged | 100% (89–100%) |
+| B · feed coverage: ScamSniffer-only domains | ScamSniffer (not in MetaMask) | 60/60 flagged | 100% (94–100%) |
+| **C · held-out: drainer permits, feed OFF** | ScamSniffer addresses, feed disabled | **27/30** | **90% (74–97%)** |
+| **C · held-out: plain transfer to drainer, feed OFF** | same addresses, `native_transfer` | **0/30** | **0% (0–11%)** |
+| **C · held-out: unlisted phishing domain** | ScamSniffer-only domains, MetaMask feed only | **0/60** | **0% (0–6%)** |
+| D · legit contracts and wallets (22) | Uniswap, Permit2, 1inch, Aave, Seaport, USDC/USDT/WETH, Jupiter, Raydium… | 22/22 passed, 0 high/critical | 100% (85–100%) |
+| D · top dApp domains (40) | curated list (app.uniswap.org, jup.ag, wallet.coinbase.com…) | 40/40 passed, 0 high/critical | 100% (91–100%) |
+| D · Tranco top 200k (deterministic only) | popularity list, no model calls | 5 capped / 199,999 | 0.003% (0.001–0.006%) |
 
-- 99.76% accuracy at min_score 65–75 with **0 false positives** across 540+ benign/ambiguous cases
-- 100% adversarial accuracy after a published 5-iteration red-team loop; 1.3% FP on legitimate-lookalike patterns
-- ~$0.00005/decision, p50 ~400ms at concurrency 10-12 — compatible with x402 sub-cent micropayments
-- Every verdict is a compact JWS (ES256) verifiable against a public JWKS: `iss`, `sub`, `score`, `tier`, `iat`, `exp`, `aud`, `input_hash`
-- Fail-closed: no key or model error → `{"checked": false}` — never a fabricated score
+What this supports:
 
-## Honest limitations
+- **Feeds and the OFAC screen do the detection of known bad actors.** The deterministic caps are independent of model sampling.
+- **The approval-to-EOA rule generalizes.** 27/30 drainer spenders are plain wallets; the 3 misses are drainer *contracts*.
+- **Unknown drainers receiving a plain transfer are not detectable** from the address alone (0/30).
+- **Look-alike analysis plus the model does not replace a phishing feed.** It caught 0–3 of 60 unlisted phishing domains across two fresh samples; those domains mostly do not imitate a known brand.
+- **False-positive pressure is low.** On the Tranco top 200k, the 5 capped hosts are `temporary.site` and `tornadoeth.cash` (MetaMask list) and `ss:07789dc83cb686a1`, `ss:a227373b500b8020` and one IDN host (ScamSniffer, corroborated). Most are genuine abuse.
 
-- Review routing (tier `medium`) measures the screening-integrated deployment mode (1.9% review share). Unscreened traffic — no `screening` field — pays the documented fail-closed cost: ~26% of safe decisions route to review. The block threshold is identical in both modes.
-- Single backend so far (gateway); the direct TypeSafe API returns native calibrated confidence and needs its own scale run.
-- Synthetic corpora exercise the question set's coverage, not real-world distribution. The next evidence tier is real facilitator traffic in shadow mode.
-- JEV sampling is non-deterministic (±3 points p95 on repeated calls) — all thresholds carry margin, and the logs accumulate runs for longitudinal statistics.
+## 2. Attacker-realistic context (`eval/realistic.ts`)
 
-## Evidence files
+The same risky scale cases were run with three kinds of context: the self-describing context of the legacy corpus, the benign context an attacker would send, and no context. A fourth variant uses raw injected content, as an agent-side gate would pass it.
 
-- `eval/evidence/consolidated-report.json` — this run, machine-readable
-- `eval/evidence/scale-report.json`, `eval/evidence/redteam-report.json`, `eval/evidence/benchmark-report.json` — per-layer detail
-- `eval/evidence/shadow-log.jsonl`, `scale-log.jsonl`, `redteam-log.jsonl` — raw per-call logs (append-only across runs)
-- `eval/evidence/prod-report.json` + `prod-log.jsonl` — production eval against the live endpoint (`npm run prod`), JWS verified per response
-- `eval/evidence/security-report.json` + `docs/EVIDENCE-SECURITY.md` — security probe suite against the live endpoint (`npm run security`)
-- `eval/evidence/security-full-report.json` — 56-probe adversarial suite, paid mode, 56/56 (`PAID=1 npm run security:full`): injection (plain, base64-wrapped, pt-BR), authority spoof, input hardening (wallet whitespace/unicode → 422, wrong-type fields → 422), DoS (huge headers, 60 junk headers, long query, batch ceiling), payment hygiene (garbage/missing/duplicate/replayed payment headers), method/path (GET/HEAD semantics), error hygiene. Quota atomicity proven: 12 concurrent distinct-client requests → free-total advanced exactly +12 (Durable Object, SQLite-backed, fail-closed — no KV fallback).
-- `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md` — methodology and iteration stories
-- `docs/DISTRIBUTION.md` — ready-to-post drafts that reference these numbers
+| Category (n=20 each) | described | attacker-written benign | no context | raw agent content |
+|---|---|---|---|---|
+| impersonation (look-alike domain) | 20/20 | **20/20** | **20/20** | — |
+| injection | 20/20 | 0/20 | 0/20 | **40/40** |
+| laundering | 20/20 | 0/20 | 0/20 | — |
+| sanctions (described, not listed) | 20/20 | 0/20 | 0/20 | — |
+| abuse | 20/20 | 0/20 | 0/20 | — |
 
-## Meta-eval: JEV as independent judge (`npm run eval:audit`)
+Reading: the model detects risk that is **present in the content it is given**. That covers a look-alike domain, and injected instructions when the agent passes the content it acted on. It does not infer laundering, sanctions exposure or abuse from an address, because nothing in the request carries that information. Those categories need data (feeds, on-chain analytics), not prose.
 
-The provider's own model evaluates its verdicts through two differently-framed arms — this measures inter-rater reliability across framings and anchoring resistance, not just accuracy:
+## 3. Regression corpora (described scenarios — upper bounds, not real-world rates)
 
-| Arm | Design | Result (167 cases, 3 calls each) |
-|---|---|---|
-| Provider | full question-set battery | 100% vs authored labels |
-| **Blind judge** | single independent classification framing, verdict NOT shown | **98.7%** accuracy, 10 honest `uncertain` answers, 0 errors |
-| Blind ↔ provider agreement | two independent framings of the same judgment | **98.8%** (2 disagreements, both at documented boundaries) |
-| **Anchored judge** | sees the verdict, judges whether it is correct | **100% agreement** after probability gating (P(wrong) ≥ 0.6); raw argmax showed 5.2% false-flag rate from sampling noise |
+| Layer | n | Accuracy (95% CI) | FN | FP | Notes |
+|---|---|---|---|---|---|
+| synthetic (mock model) | 53 | 100% (93–100%) | 0 | 0 | plumbing only |
+| shadow, production regime → gate | 53 | 100% (93–100%) | 0 | 0 | no caller screening; review share **0.0%**; gate **READY** |
+| shadow, legacy label-derived screening | 53 | 100% | 0 | 0 | comparison only (label leaked into input); review 9.4% |
+| scale (7 categories × 60) | 420 | 100% (99.1–100%) | 0 | 0 | stability 91% unanimous tier (24×5) |
+| red-team v6 corpus | 1,439 (+1 unchecked) | 99.2% (98.6–99.6%) | 2 | 9 | 60 prose-only clearance claims held in the block band |
+| benchmark: provider | 225 | 99.6% (97.5–99.9%) | 0 | 1 | same described-scenario sample |
+| benchmark: gpt-4.1-mini chat judge | 225 | 98.7% (96.2–99.5%) | 1 | 2 | one-line prompt; **intervals overlap: no significant difference** |
 
-Two transferable findings: (1) the AI SDK's `evaluate` validation requires `choice` = argmax of probabilities and JEV occasionally samples out-of-sync distributions — production adapters must tolerate this (our provider already fails closed); (2) judge "flags" must be probability-gated, not argmax-read — a 74/25 split would otherwise be reported as a disagreement. Both are exactly the failure modes the LLM-as-judge literature predicts (position/order bias, sampling instability), handled here with typed probabilities rather than prompt patching.
+- The switch-over gate runs in the production regime: no caller `screening`, and the provider's own OFAC screen and feeds in the state. The v5 gate reached READY only in a "screening-integrated" simulation that derived the caller's screening field from the label. Unscreened, it failed at a 26% review share.
+- The 53 "human-verified" labels were applied by the project owner to cases the project authored. They confirm that the authored intent was captured. They are not an independent ground truth.
+- The v5 claim that the provider beats the chat judge on accuracy and cost did not survive the corrected corpus. Accuracy is within noise, and cost per decision is similar ($0.0152 vs $0.0135 on this sample). The provider's differentiators are typed, signable outputs and deterministic evidence, not accuracy.
 
-## Switch-over gate: READY (`npm run board report`)
+## 4. Production (`https://x402check.xyz`)
 
-The gate requires 50+ human-verified checks, ≥5 verified risky cases, 0 dismissed-real, 0 JEV false-confirms, and ≤20% review share.
+| Suite | Result |
+|---|---|
+| `npm run prod` — 53 cases against the live endpoint | **53/53** correct, **53/53** attestations verified (issuer pinned, `exp` checked), 0 mismatches |
+| `npm run security:v2` — v0.2.0 fixes | **12/12 PASS**: see the list below |
+| `npm run security` — v5 probe suite | **20/20 PASS** (422s now name the offending field) |
+| `npm run security:full` — 56 probes | **54 PASS · 0 FAIL · 2 SKIP**. The concurrency probe was skipped for lack of free allowance on the test IP after the other runs; it passes against the same code locally (below). |
 
-- **Suite expanded 24 → 53 cases** via a deterministic rule (documented in `eval/cases.ts`): first 16 benign cases by (context, domain) uniqueness, first 2 of each risky category, first 3 ambiguous — drawn from the same seeded scale corpus (seed 20260927). No score-peeking: selection depends only on corpus order.
-- **Human labels: 53/53 verified `real`, 100% agreement** with authored labels, applied by the project owner in two labeling sessions (24 + 29).
-- **Gate result: READY** — 53 verified checks, 25 risky-real, 0 dismissed-real, 0 false-confirms, review share 2%.
+The 12 `security:v2` probes:
 
-### Review-routing semantics (policy change, v5.1)
+- discovery lists no testnets;
+- the 402 challenge offers mainnets only;
+- a 25-item batch is priced 25× the unit on all 7 networks;
+- malformed input gets 422 or 413 with the field named;
+- the free tier is charged per item and invalid input is free;
+- `/healthz` is edge-cached;
+- an OFAC-listed address gets 0/critical with the model skipped;
+- a MetaMask-listed domain gets 20/critical;
+- a self-asserted "clean" gets 30/high;
+- a permit to a fresh EOA gets 40/high, while one to the Universal Router gets 85/low;
+- signed `checks`/`payment`/`aud`/`jti`;
+- **two IPv6 source addresses in one /64 share the quota**.
 
-The gate's review-share criterion exposed a real policy gap: the `medium` tier was triggered by score proximity alone, routing score-noise benign traffic (~28%) to human review. Tier routing is now **signal-driven** (`src/scoring.ts`): a safe decision routes to review only when there is a positive reason to look — an intent signal ≥ 0.3 (JEV's honest "no screening data" noise sits at 0.2–0.3 on benign-class cases) or an uncertain risk class (`unclassifiable`/`automated_abuse`/`fraud_signal` at probability ≥ 0.5, which is what keeps genuinely ambiguous cases in review). The **block threshold is untouched** (score-only); the safety decision is identical across the change.
+Per-key counter atomicity: 25 concurrent requests from one client id, run on workerd with the production code and a fresh Durable Object, received remaining values 24…0, all distinct and consecutive. The next 5 fell back to the IP allowance.
 
-### Screening-integrated simulation
+Not re-exercised: a real paid settlement. Both payer wallets are unfunded (0 USDC). The paywall was verified up to the 402 challenge: prices, networks, and settle-before-release in unit tests with a fake facilitator.
 
-Shadow runs support `--screening integrated`: benign/ambiguous requests get `screening: {sanctions: "clean"}`, risky requests get `"flagged"` — simulating an integrator that actually runs screening (an honest integrator cannot return clean on a sanctioned counterparty). Results on the 53-case suite: **53/53 correct, review share 1.9%** screened vs **26.4%** unscreened. Review load is a function of screening coverage; the fail-closed cost of not screening is the 26%, by design.
+## 5. What each number does NOT show
 
-Note: a screening-`clean` field submitted against a context that asserts a sanctions listing flips that case to safe (51 → 78) — correct under the integrator-trust threat model (the integrator's screening result overrides stale prose), and the attacker-controlled-input surface for `screening`/`authorization` is the integrator, not the paying client, whose prose remains untrusted.
+- Real x402 facilitator traffic has not been shadowed yet. All model-in-the-loop corpora are synthetic or curated.
+- ScamSniffer's public data lags 7 days. MetaMask's list is refreshed only when `npm run feeds:update` is run and deployed.
+- OFAC screening covers direct listing only; it does not detect funds received from listed addresses.
+- The MetaMask Snap was exercised in the official SES execution environment (snaps-jest), not in the MetaMask extension. It is not published or allowlisted.
+
+## Reproduce
+
+```bash
+npm test                                     # 63 unit tests
+npm --prefix snap test                       # 90 Snap tests (built bundle in SES)
+npm run eval:suite -- --seed 200             # needs AI_GATEWAY_API_KEY or TYPESAFE_API_KEY
+TRANCO_LIST=top-1m.txt npm run eval:grounded -- --seed 200 --tranco-n 200000
+npm run security:v2 && npm run prod          # against production (free tier: 25/day)
+```
+
+Historical meta-evaluations (`audit-report.json`, `crosslabel-report.json`, 2026-09-27) used the same model family to judge its own verdicts. They measure framing stability, not correctness, and are kept for the record.

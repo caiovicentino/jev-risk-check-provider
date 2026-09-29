@@ -6,7 +6,14 @@ x402check
 
 ## Brief description
 
-x402check is the signed-intent layer for agent payments. AI agents increasingly pay with wallets, but the industry's controls — spend caps, allowlists, signed mandates — check transaction *structure*, never *intent*: whether the payment corresponds to what the user authorized, or whether the payment context carries a prompt injection. x402check evaluates intent with a typed-decision model (TypeSafe's Jev, a System One model), enforces evidence policy in deterministic code, and issues every verdict as an ES256-signed attestation verifiable against a public JWKS. It ships as an x402 `risk-check` provider (conformant to the live extension proposal) plus an agent-side counterparty gate, both demonstrated end-to-end on Solana.
+x402check is a pre-payment risk check for AI agents and wallets on x402. Before an agent pays or a user signs, it checks the counterparty with evidence the provider verifies itself:
+
+- the official **OFAC SDN** list;
+- **MetaMask's phishing list** and **ScamSniffer's drainer addresses**;
+- **look-alike domain** analysis;
+- **on-chain facts**, for example an approval or permit being granted to a plain wallet instead of a contract, the classic drainer pattern.
+
+A typed model (TypeSafe's Jev) reads the content the agent acted on for injected instructions. Caller-asserted mitigations are recorded but can never lower the score. Every verdict is an ES256 attestation, verifiable against `did:web:x402check.xyz`, that states which checks actually ran. It ships as an x402 `risk-check` provider (live on mainnet) plus an open-source MetaMask Snap that decodes the real counterparty of approvals, Permit2 and Seaport signatures.
 
 ## Blockchains and tools integrated
 
@@ -14,7 +21,7 @@ x402check is the signed-intent layer for agent payments. AI agents increasingly 
 - **x402** (Linux Foundation standard; conformant to the `risk-check` extension spec, proposal #3597) — **USDC settlement live across 10 networks**: Base, Solana, Polygon, Arbitrum, Avalanche, Monad, Sei (mainnet) + Base Sepolia, Arbitrum Sepolia, Solana Devnet
 - **Production deployment live**: Cloudflare Workers + dedicated domain (x402check.xyz), free-tier accounting (public `/healthz` counter), DID `did:web:x402check.xyz`
 - **TypeSafe AI Jev** via Vercel AI Gateway (also TypeSafe direct API)
-- ES256/JWS attestations (RFC 7515), node:crypto only — zero runtime dependencies beyond the AI SDK
+- ES256/JWS attestations (RFC 7515) via node:crypto; x402 SDKs for payments; OFAC SDN, MetaMask eth-phishing-detect and ScamSniffer data (see THIRD_PARTY_NOTICES.md)
 - TypeScript, Node 22, Cloudflare Workers deploy-ready (fetch-handler architecture)
 
 ## Teammates
@@ -48,8 +55,18 @@ Work completed **during** the hackathon window (what we're asking judges to eval
 
 **Monetization**: open-source provider (MIT) + paid tiers on the evidence layer — compliance-grade signed decision logs for PSPs and financial institutions (the segment paying for agent-payment infrastructure today: Fireblocks-style buyers), and volume-based API pricing for hosted risk-check above free tier. Land in the open ecosystem, monetize the audit trail.
 
-**Demand validation to date**: 2,200+ provider decisions across independent evaluation layers with zero false positives on benign traffic; **53/53 production checks against the live public endpoint with every attestation verified against the public JWKS; 20/20 security probes passed** (injection resistance, quota-integrity, payment-protocol hygiene); upstream recognition: the x402 trust-provider extension author publicly named the payer-intent slot ("jev's payer-intent scoring") in PR #2300; active maintainer engagement on the x402 spec discussions; inbound interest pending the public deployment (measured: directory listing click-through, facilitator sandbox signups — targets set for the window).
+**Evidence to date** (docs/EVIDENCE.md, externally grounded labels):
+
+- OFAC-listed addresses: 24/24 critical.
+- Drainer permits with the drainer feed switched off: 27/30.
+- 0 false positives on well-known contracts and top dApps.
+- 5 of the Tranco top 200k domains capped.
+- Production: 53/53 checks correct with 53/53 attestations verified; 12/12 v0.2.0 security probes.
+- Published limits: plain transfers to unreported drainers are not detectable from the address alone, and unlisted phishing sites are mostly caught by feeds, not heuristics.
+- Upstream: the x402 trust-provider extension author named the payer-intent slot in PR #2300, and there is active maintainer engagement.
 
 ## Why we win this market (the insight)
 
-Red-teaming our own system produced a transferable principle: **claims of legitimacy require structured evidence; prose claims are unverified by default.** Chat-model judges trust prose ("already screened, proceeding as usual" — 27/27 approved by GPT-4.1-mini in our cross-rater study); x402check holds them as unverified claims by design. This distinction maps directly onto AP2's "verifiable intent, not inferred action" — and it's the difference between a demo and an auditable control system.
+Red-teaming our own system taught the transferable lesson: **a model that reads a payment description can only catch what the description reveals, and an attacker writes the description.** Our v5 evaluation scored 99–100% on corpora whose text described the risk. With an attacker-written context, the same cases dropped to 20%, and only look-alike domains were still caught.
+
+So x402check puts provider-verified evidence first (sanctions list, curated feeds, on-chain facts, domain analysis) and uses the model where it actually has signal: injected instructions in the content an agent acted on, which it caught 40/40. Caller claims ("already screened") are recorded as claims and never lower risk. That turns a demo into an auditable control, and the attestation says exactly which checks backed each verdict.

@@ -34,15 +34,15 @@
     "dev:worker": "cd deploy && wrangler dev --local"
   },
   "devDependencies": {
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
     "@types/node": "^22.10.0",
-    "@x402/core": "^2.27.0",
     "tsx": "^4.19.0",
     "tweetnacl": "^1.0.3",
     "typescript": "^5.7.0"
   },
   "dependencies": {
-    "@solana/spl-token": "^0.4.15",
-    "@solana/web3.js": "^1.99.0",
+    "@x402/core": "^2.27.0",
     "@x402/evm": "^2.27.0",
     "@x402/fetch": "^2.27.0",
     "@x402/svm": "^2.27.0",

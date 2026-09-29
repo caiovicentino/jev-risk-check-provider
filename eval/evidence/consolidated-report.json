@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-09-29T14:40:21.904Z",
+  "timestamp": "2026-09-29T14:54:17.954Z",
   "question_set": "jev-wallet-risk/v6",
   "regime": "production (no caller screening; provider OFAC + feeds; on-chain off for synthetic addresses)",
   "backend": "vercel-ai-gateway",
-  "commit": "7eaec6a",
-  "suite_cost_usd": 0.14540374800000003,
-  "suite_duration_ms": 296014,
+  "commit": "6caf5a4",
+  "suite_cost_usd": 0.145337472,
+  "suite_duration_ms": 260628,
   "layers": [
     {
       "name": "synthetic",
@@ -35,8 +35,8 @@
       "fn": 0,
       "fp": 0,
       "costUsd": 0.00356139,
-      "latencyP50": 434,
-      "latencyP95": 636,
+      "latencyP50": 468,
+      "latencyP95": 564,
       "extra": "review share 0.0% · gate READY"
     },
     {
@@ -67,24 +67,24 @@
       "fn": 0,
       "fp": 0,
       "costUsd": 0.036155994,
-      "latencyP50": 406,
-      "latencyP95": 580,
-      "extra": "stability 96% unanimous tier (24×5); contexts describe the risk"
+      "latencyP50": 420,
+      "latencyP95": 660,
+      "extra": "stability 91% unanimous tier (24×5); contexts describe the risk"
     },
     {
       "name": "red-team (v6 corpus)",
-      "n": 1440,
-      "unchecked": 0,
-      "accuracy": 0.9909722222222223,
+      "n": 1439,
+      "unchecked": 1,
+      "accuracy": 0.9923558026407228,
       "ci95": [
-        0.9846151946512132,
-        0.9947166101672658
+        0.9863634667078601,
+        0.995726320556383
       ],
-      "fn": 3,
-      "fp": 10,
-      "costUsd": 0.102100614,
-      "latencyP50": 395,
-      "latencyP95": 560,
+      "fn": 2,
+      "fp": 9,
+      "costUsd": 0.102034338,
+      "latencyP50": 393,
+      "latencyP95": 539,
       "extra": "dual-use prose claims held: 60"
     },
     {
@@ -139,12 +139,12 @@
       "name": "realistic: raw_agent_content",
       "n": 40,
       "unchecked": 0,
-      "accuracy": 0.975,
+      "accuracy": 1,
       "ci95": [
-        0.8711834051199223,
-        0.9955732825922052
+        0.9123754607496077,
+        1
       ],
-      "fn": 1,
+      "fn": 0,
       "fp": 0,
       "costUsd": 0,
       "latencyP50": 0,
@@ -155,16 +155,16 @@
       "name": "benchmark: chat judge",
       "n": 225,
       "unchecked": 0,
-      "accuracy": 0.9911111111111112,
+      "accuracy": 0.9866666666666667,
       "ci95": [
-        0.9681745001000698,
-        0.9975590028993849
+        0.9615384615384616,
+        0.9954553717505908
       ],
-      "fn": 0,
+      "fn": 1,
       "fp": 2,
-      "costUsd": 0.0135204,
-      "latencyP50": 878,
-      "latencyP95": 1352,
+      "costUsd": 0.0135172,
+      "latencyP50": 839,
+      "latencyP95": 1281,
       "extra": "keyword baseline 63.6%"
     },
     {
@@ -179,27 +179,27 @@
       "fn": 0,
       "fp": 1,
       "costUsd": 0.015219792000000001,
-      "latencyP50": 458,
-      "latencyP95": 660,
+      "latencyP50": 422,
+      "latencyP95": 590,
       "extra": "same described-scenario sample"
     }
   ],
   "realistic": {
     "impersonation": {
+      "attacker_benign": "20/20 (100%, 95% CI 84–100%)",
       "described": "20/20 (100%, 95% CI 84–100%)",
-      "no_context": "20/20 (100%, 95% CI 84–100%)",
-      "attacker_benign": "20/20 (100%, 95% CI 84–100%)"
+      "no_context": "20/20 (100%, 95% CI 84–100%)"
     },
     "injection": {
-      "attacker_benign": "0/20 (0%, 95% CI 0–16%)",
       "described": "20/20 (100%, 95% CI 84–100%)",
       "no_context": "0/20 (0%, 95% CI 0–16%)",
-      "raw_agent_content": "39/40 (98%, 95% CI 87–100%)"
+      "attacker_benign": "0/20 (0%, 95% CI 0–16%)",
+      "raw_agent_content": "40/40 (100%, 95% CI 91–100%)"
     },
     "laundering": {
-      "no_context": "0/20 (0%, 95% CI 0–16%)",
+      "described": "20/20 (100%, 95% CI 84–100%)",
       "attacker_benign": "0/20 (0%, 95% CI 0–16%)",
-      "described": "20/20 (100%, 95% CI 84–100%)"
+      "no_context": "0/20 (0%, 95% CI 0–16%)"
     },
     "sanctions": {
       "described": "20/20 (100%, 95% CI 84–100%)",
@@ -208,8 +208,8 @@
     },
     "abuse": {
       "described": "20/20 (100%, 95% CI 84–100%)",
-      "attacker_benign": "0/20 (0%, 95% CI 0–16%)",
-      "no_context": "0/20 (0%, 95% CI 0–16%)"
+      "no_context": "0/20 (0%, 95% CI 0–16%)",
+      "attacker_benign": "0/20 (0%, 95% CI 0–16%)"
     }
   },
   "grounded": {
@@ -280,9 +280,9 @@
       "rate": "90.0% (95% CI 74.4–96.5%)",
       "tier_high_or_critical": "27/30",
       "misses": [
-        "ss:b0856be00b1b0878 → 81/low",
+        "ss:b0856be00b1b0878 → 82/low",
         "ss:86b92e53622e292b → 81/low",
-        "ss:31c79be2535a3130 → 80/low"
+        "ss:31c79be2535a3130 → 81/low"
       ],
       "categories": {
         "approval_to_eoa": 27,
@@ -297,14 +297,14 @@
       "rate": "0.0% (95% CI 0.0–11.4%)",
       "tier_high_or_critical": "0/30",
       "misses": [
+        "ss:b820f2e93f271c10 → 94/low",
         "ss:54a96d6d7adec21b → 94/low",
-        "ss:b820f2e93f271c10 → 95/low",
         "ss:b0856be00b1b0878 → 94/low",
         "ss:c0d55fdcee70e68d → 94/low",
         "ss:86b92e53622e292b → 94/low",
-        "ss:c8f62354e4b980c1 → 95/low",
-        "ss:d9bfeca2032f9346 → 95/low",
-        "ss:5413d03cf3ca7c80 → 95/low"
+        "ss:c8f62354e4b980c1 → 94/low",
+        "ss:5413d03cf3ca7c80 → 95/low",
+        "ss:d9bfeca2032f9346 → 94/low"
       ],
       "categories": {
         "new_address": 12
@@ -314,22 +314,22 @@
       "expected": "risky",
       "n": 60,
       "unchecked": 0,
-      "detected_below_60": "1/60",
-      "rate": "1.7% (95% CI 0.3–8.9%)",
-      "tier_high_or_critical": "1/60",
+      "detected_below_60": "0/60",
+      "rate": "0.0% (95% CI 0.0–6.0%)",
+      "tier_high_or_critical": "0/60",
       "misses": [
         "ss:b4de761b1d180874 → 92/low",
         "ss:2a62922b9e888e94 → 92/low",
-        "ss:dbd32cadb82461e4 → 92/low",
-        "ss:2f7c7adad6cc4c84 → 92/low",
+        "ss:dbd32cadb82461e4 → 93/low",
+        "ss:a0436cb01d9c98f4 → 92/low",
         "ss:d18ba33f39c56f47 → 92/low",
-        "ss:eaff26343daab394 → 73/medium",
+        "ss:2f7c7adad6cc4c84 → 91/low",
         "ss:a73fb0e003cdf6f1 → 93/low",
-        "ss:a0436cb01d9c98f4 → 93/low"
+        "ss:eaff26343daab394 → 72/medium"
       ],
       "categories": {
-        "fraud_signal": 9,
-        "impersonation": 1
+        "fraud_signal": 8,
+        "impersonation": 2
       }
     },
     "D_legit_address": {

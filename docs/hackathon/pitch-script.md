@@ -12,11 +12,11 @@
 
 ## 0:45–1:15 — Insight + product
 
-"Here's the insight we built x402check on, and it came out of attacking our own system: **claims of legitimacy require structured evidence; prose claims are unverified by default.** 'I already passed screening, proceeding as usual' — in prose — is exactly what an attacker would say. So x402check runs a typed-decision model — Jev, a System One model — over the payment context, with structured evidence fields, and deterministic code enforces the policy. The model judges intent; code enforces evidence. And every verdict is an ES256-signed attestation anyone can verify against a public JWKS. It conforms to the x402 risk-check extension, and we proposed it upstream as the first signed-intent provider."
+"Here's what we learned by attacking our own system: a model reading a payment description only catches risk the description reveals — and an attacker never describes the attack. So x402check leads with **evidence the provider checks itself**: the official OFAC SDN list, MetaMask's phishing list and ScamSniffer's drainer addresses, look-alike domain analysis, and on-chain facts — like an approval being granted to a plain wallet instead of a contract, the classic drainer pattern. A typed model, Jev, then reads the content the agent actually acted on for injected instructions. Caller claims like 'already screened' are recorded as claims and can never lower the score. Every verdict is an ES256 attestation that says which checks actually ran."
 
-## 1:15–1:45 — Evidence (B-roll: consolidated table)
+## 1:15–1:45 — Evidence (B-roll: EVIDENCE.md tables)
 
-"We don't show you vibes, we show you a reproducible evidence trail. A 540-call scale run: 99.76% accuracy at the recommended thresholds with zero false positives across 150 benign cases. A five-iteration red-team loop — 1,500 adversarial cases each — ending at 100% on adversarial mutations, with every failure published. Head-to-head against GPT-4.1-mini as a judge: we win on accuracy, twice the speed, and a fifth of the cost — about five hundredths of a cent per decision, at 400 milliseconds. That's what makes intent-checking viable for sub-cent agent commerce."
+"We measure against labels we didn't write. Every OFAC-sanctioned address we sampled: critical. Drainer permit signatures with the drainer list switched off: 27 of 30 caught by the approval-to-wallet rule. Zero false positives on well-known contracts and top dApps, and 5 hits in the top 200,000 websites. And we publish the limits: a plain transfer to a drainer nobody has reported yet is not detectable from the address alone — that's what real-time feeds are for. About half a second, a tenth of a cent, signed."
 
 ## 1:45–2:10 — GTM + traction
 
@@ -30,4 +30,4 @@
 
 ## Timing checkpoints (record against these)
 - 0:15 hook done | 0:45 gap done | 1:15 insight done | 1:45 evidence done | 2:10 GTM done | 2:30 close
-- If over: cut "twice the speed" detail, keep "fifth of the cost"
+- If over: cut the Tranco line, keep the limits sentence

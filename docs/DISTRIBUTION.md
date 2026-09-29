@@ -1,6 +1,12 @@
 # Distribution drafts — ready to post
 
-Everything below is grounded in live evidence from this repo: scale run (540 calls, 99.76% @ min_score 65-75, 0 FP), red-team loop v1→v5 (docs/EVIDENCE-REDTEAM.md), benchmark vs chat judge (eval/evidence/benchmark-report.json), and a working end-to-end demo (`npm run demo`).
+> **Superseded numbers.** Drafts 1–5 below quote the v5 evaluation (2026-09-27/28). An independent review found those corpora described their own risk, so v5 accuracy does not carry over to real traffic (see docs/EVIDENCE.md). If any draft was already posted, post draft 0 as a follow-up.
+
+## 0. Correction / update comment (for x402 issue #3597 and PR #2300 threads)
+
+> Update on the `jev-risk-check-provider` / x402check numbers I shared earlier: an independent review showed our v5 corpora described the risk in the text being scored ("funds routed through a mixer…"), so the 99–100% figures measured reading, not detection. With an attacker-written context the same cases fall to 20% (only look-alike domains survive). v0.2.0 (live at x402check.xyz) now leads with provider-verified evidence — OFAC SDN screening, MetaMask/ScamSniffer feeds, on-chain facts (approval granted to an EOA), public-suffix-aware domain analysis — and the model is used for injected instructions in content the agent acted on (40/40). Attestations now carry a `checks` claim (what the provider verified) separate from `asserted` (what the caller claimed). New evidence uses external labels: OFAC 24/24 critical; drainer permits 27/30 with the drainer feed held out; 0 FP on well-known contracts/dApps; limits published (plain transfers to unreported drainers: 0/30). Details: docs/EVIDENCE.md. Apologies for the earlier overstatement.
+
+Historical drafts (v5 numbers — do not repost without updating):
 
 ## 1. Comment for x402 PR #2300 (trust-provider extension — 39 comments, active)
 

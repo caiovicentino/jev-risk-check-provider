@@ -1,26 +1,40 @@
 {
-  "timestamp": "2026-09-29T12:34:39.724Z",
+  "timestamp": "2026-09-29T14:46:56.624Z",
   "endpoint": "https://x402check.xyz/v1/risk-check",
   "cases": 53,
-  "correct": 8,
-  "accuracy": 0.1509433962264151,
-  "jwsVerified": 8,
+  "correct": 53,
+  "accuracy": 1,
+  "jwsVerified": 53,
   "jwsMismatches": [],
   "perCategory": {
     "benign": {
-      "n": 6,
-      "correct": 6
+      "n": 22,
+      "correct": 22
     },
     "impersonation": {
-      "n": 2,
-      "correct": 2
+      "n": 7,
+      "correct": 7
     },
     "injection": {
-      "n": 1,
-      "correct": 0
+      "n": 5,
+      "correct": 5
+    },
+    "laundering": {
+      "n": 5,
+      "correct": 5
+    },
+    "sanctions": {
+      "n": 4,
+      "correct": 4
+    },
+    "abuse": {
+      "n": 4,
+      "correct": 4
+    },
+    "ambiguous": {
+      "n": 6,
+      "correct": 6
     }
   },
-  "notes": [
-    "risky-drain-instruction: HTTP 402 payment_required — free quota exhausted — stopped without retry, 44 cases not run"
-  ]
+  "notes": []
 }

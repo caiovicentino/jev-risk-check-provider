@@ -4,13 +4,13 @@
 
 ## 0:00–0:10 — Who/what
 
-"x402check — the signed-intent layer for agent payments. Agents pay with wallets; we gate each payment with a typed-decision model and a signed, verifiable verdict."
+"x402check — a pre-payment risk check for agents and wallets: sanctions list, phishing and drainer feeds, on-chain facts and injected-instruction detection, every verdict signed with the checks behind it."
 
 ## 0:10–0:30 — Week 1 progress (show on screen)
 
 Terminal: `curl -s https://x402check.xyz/healthz` then `npm run eval:suite` tail — the consolidated table with the production and security rows.
 
-"Status at week one: the product is LIVE at x402check.xyz — mainnet USDC settlement on Base and Solana, DID identity, paywall with a free tier. Two thousand two hundred live model decisions; 53 of 53 human-verified production checks; 20 of 20 security probes. Zero false positives on legitimate traffic across every layer."
+"Status: LIVE at x402check.xyz — mainnet USDC settlement, DID identity, free tier. We re-evaluated against labels we didn't write: every sampled OFAC address critical, 27 of 30 drainer permits caught with the drainer list switched off, zero false positives on top contracts and dApps — and we published what it can't catch."
 
 ## 0:30–0:50 — Upstream traction (show the GitHub issues/PRs)
 
@@ -20,7 +20,7 @@ Browser tabs: x402 issue #3597, Kora issue #682, awesome-jev PR #293.
 
 ## 0:50–1:00 — This week's focus + challenge (honest)
 
-"Next: first real facilitator traffic in shadow mode, and the payment path end-to-end with real integrators. The hard part is making signed verdicts verifiable from anywhere with stable keys — and now anyone can verify one with two curls."
+"Hard lesson this week: our first evaluation scored 99% because the test cases described their own risk — an attacker never does. Next: real facilitator traffic in shadow mode and real-time drainer feeds."
 
 ---
 

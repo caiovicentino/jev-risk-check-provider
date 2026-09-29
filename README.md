@@ -1,196 +1,224 @@
-# x402check — signed-intent risk checks for x402 agent commerce
+# x402check — pre-payment risk checks for x402 agents and wallets
 
 **LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · 25 free evaluations/day · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
 
-x402check is an x402 `risk-check` provider that scores agent counterparties with **Jev** — TypeSafe AI's System One model for typed decisions — and issues **ES256-signed attestations** that facilitators and resource servers can verify independently. The verdict answers one question before settlement: **is the paying agent's intent legitimate?**
+x402check is an x402 `risk-check` provider (wire format of [x402 PR #2422](https://github.com/x402-foundation/x402/pull/2422)). You call it before an agent or a wallet pays or signs, and it checks the counterparty. It combines provider-verified evidence with a typed model:
 
-Aligned with the `risk-check` extension spec proposed in
-[x402 PR #2422](https://github.com/x402-foundation/x402/pull/2422): discovery at `/.well-known/risk-check.json`, scoring at `POST /v1/risk-check` (+ `/batch`), and `RiskCheckResult` payloads with compact JWS attestations verified against `/.well-known/jwks.json`.
+- the **OFAC SDN** list;
+- curated **phishing and drainer feeds**;
+- **look-alike domain** analysis;
+- **on-chain facts** about the counterparty, such as whether an approval is being granted to a plain wallet;
+- a typed model (TypeSafe **Jev**) that reads the content the agent acted on for **injected instructions**.
 
-## What it protects
+Every verdict is an **ES256 attestation**. It states which checks the provider actually ran and which fields the caller merely asserted.
 
-| Side | Protected from |
-|---|---|
-| Agent's user | hijacked intent (prompt injection → drain), impersonation, sanctions exposure, becoming a laundering mule |
-| Seller / resource server | malicious agent payments (charge-then-deny), abuse traffic, compliance exposure |
-| Facilitator | all of the above, once for every merchant |
-
-Between "the agent decided to pay" and "the payment settles" there is one instant where intent can be checked. x402check lives in that instant — and proves every verdict with a signature, not a promise.
+> **Scope, stated plainly.** x402check catches what the chain, the lists, and the content in front of it reveal. It does **not** see laundering patterns or other transaction-graph behaviour, and it cannot flag an unknown drainer address that is simply sent funds. A clean verdict means "none of these checks fired", not "safe". Measured limits are in [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 [![x402check demo](https://i.ytimg.com/vi/MCOWk7nh5r8/hqdefault.jpg)](https://youtu.be/MCOWk7nh5r8)
 
-## Payments (live, mainnet)
+<sub>The demo video predates v0.2.0: its evidence slide shows v5 corpus numbers that [EVIDENCE.md](docs/EVIDENCE.md) supersedes.</sub>
 
-`POST /v1/risk-check` is x402-protected: **25 free evaluations/day** per caller, then **$0.001 per evaluation** settled in USDC via x402 across **7 mainnets** — Base, Solana, Polygon, Arbitrum, Avalanche, Monad, Sei — plus Base Sepolia, Arbitrum Sepolia and Solana Devnet testnets (Dexter facilitator, gas-sponsored, zero facilitator fee; buyer funds move buyer → provider wallet directly, the facilitator never holds them).
+## What it checks
+
+| Check | Source | Effect on the verdict |
+|---|---|---|
+| Sanctioned address | Official OFAC SDN XML: 1,056 digital-currency addresses, dated snapshot | score **0 / critical**, deterministic, no model call |
+| Known phishing domain | MetaMask eth-phishing-detect (~100k hosts, embedded) | capped at **20** (critical) |
+| Known drainer / scam address | ScamSniffer (EVM, runtime KV, 7-day publication lag) | capped at **20** |
+| Community-flagged domain | ScamSniffer domain list | capped at **40** only when our own domain analysis corroborates it |
+| Look-alike domain | public-suffix aware: leet, IDN homoglyphs, typosquats, brand + lure word, official domain reused as a subdomain | "strong" impersonation → capped at **40** |
+| Approval granted to a plain wallet | on-chain `eth_getCode` / activity (EVM), account data (Solana) | permits and approvals to an EOA → capped at **55**; **40** if the address has no activity |
+| Injected / manipulated intent | Jev typed questions over `context` (what the agent acted on) | model penalties and caps |
+| New address | on-chain activity | informational `new_address` category |
+
+Caller-supplied `screening` and `authorization` fields are recorded as `asserted` in the attestation and **can never lower the score**. Prose claims such as "already screened" are unverified by construction.
 
 ## Quickstart
 
 ```bash
 curl -X POST https://x402check.xyz/v1/risk-check \
   -H "Content-Type: application/json" \
-  -d '{"wallet":"7Xf2...pvFh","chain":"solana","domain":"api.merchant-labs.com","context":"agent pays $0.05 voucher for a pricing API call","screening":{"sanctions":"clean"}}'
+  -d '{
+    "wallet": "0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f",
+    "chain": "eip155:1",
+    "domain": "https://app.example-dapp.org",
+    "context": "Permit2 signature: unlimited USDC allowance to this spender",
+    "interaction": { "type": "permit_signature", "unlimited": true },
+    "payment": { "network": "eip155:1", "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "pay_to": "0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f" }
+  }'
 ```
 
 ```json
 {
   "checked": true,
-  "score": 99,
-  "tier": "low",
+  "score": 40,
+  "tier": "high",
+  "categories": ["intent_risk", "behavioral", "approval_to_eoa", "new_address"],
   "provider": "did:web:x402check.xyz",
-  "jws": "eyJhbGciOiJFUzI1Ni...",
+  "evidence": {
+    "sanctions": { "list": "ofac-sdn", "as_of": "2026-09-23", "status": "not_listed" },
+    "domain": { "host": "app.example-dapp.org", "registrable": "example-dapp.org", "official": false, "impersonation": "none", "signals": [] },
+    "onchain": { "status": "ok", "network": "eip155:1", "is_contract": false, "activity": "none", "tx_count": 0 },
+    "feeds": [{ "source": "metamask-phishing-detect", "kind": "domain", "as_of": "2026-09-29", "status": "clear" }, "…"],
+    "model": "jev-wallet-risk/v6"
+  },
+  "jws": "eyJhbGciOiJFUzI1NiIsInR5cCI6InJpc2stY2hlY2srand0Ii…",
   "jwks_url": "https://x402check.xyz/.well-known/jwks.json",
-  "checked_at": "...", "expires_at": "..."
+  "checked_at": "…", "expires_at": "…"
 }
 ```
 
+## Request fields
+
+| Field | Required | Rules |
+|---|---|---|
+| `wallet` | yes | the subject address: EVM `0x…`, base58 (Solana/Tron/BTC…), bech32, cashaddr, or CAIP-10. Anything else → `422 {error, field:"wallet"}` |
+| `chain` | no | alias (`ethereum`, `base`, `solana`, …) or CAIP-2 (`eip155:8453`); enables on-chain facts on supported mainnets |
+| `domain` | no | hostname or http(s) URL (normalized server-side); the site the payment or signature is for |
+| `context` | no | ≤ 4096 chars: what the agent acted on (tool output, page text, instruction). Untrusted by design |
+| `interaction` | no | `{type, unlimited?}`; `type` ∈ `native_transfer`, `token_transfer`, `token_approval`, `nft_approval`, `permit_signature`, `order_signature`, `message_signature`, `contract_call` |
+| `payment` | no | binds the attestation to a payment: `{network, pay_to, amount (base units), asset, resource}` |
+| `aud` | no | ≤ 256 chars; copied into the attestation, never shown to the model |
+| `screening`, `authorization` | no | caller assertions, recorded as `asserted` (can only raise risk) |
+
+Batch: `POST /v1/risk-check/batch` with `{"requests": [...]}` (≤ 25). It is all-or-nothing: an invalid item returns `422` with its `index`.
+
+## Attestation
+
+A compact JWS (`alg: ES256`, `typ: risk-check+jwt`, `kid: jev-attest-v1`), TTL 1 h. Claims:
+
+| Claim | Meaning |
+|---|---|
+| `iss`, `sub`, `iat`, `exp`, `jti` | issuer `did:web:x402check.xyz`, the subject wallet, times, unique id |
+| `score`, `tier`, `categories` | the verdict and the findings behind it |
+| `checks` | **what the provider verified**: `sanctions` (list, date, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`), `model` (question set, or `skipped`) |
+| `asserted` | what the caller **claimed** (screening / pre-authorization): not verified |
+| `payment`, `interaction`, `aud` | what the verdict was issued for |
+| `input_hash` | SHA-256 over the canonical inputs, sources and question set |
+
+Verify it by **pinning the issuer**. Never trust a key URL carried by a response or an intermediary:
+
+```bash
+npx tsx scripts/verify-attest.ts <jws> --issuer did:web:x402check.xyz [--aud <url>] [--sub <wallet>]
+```
+
+The verifier resolves the key from the issuer's `did:web` document and checks `alg`, `typ`, `iss`, `exp` and `iat` (plus `aud` and `sub` when given).
+
 ## Wallet integration
 
-Wallets and wallet apps can gate any outgoing payment the same way — check the counterparty **before** the user signs. CORS is open; the snippet below runs in any browser context (extensions, dApps, web wallets):
+Check the **real counterparty**. For `approve`, a Permit2 signature or a Seaport order, that is the spender, operator or recipient decoded from the calldata or typed data, not the token contract. Send the interaction type too. The MetaMask Snap in `snap/` is a complete reference decoder.
 
 ```js
 const res = await fetch("https://x402check.xyz/v1/risk-check", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    wallet: destinationAddress,            // counterparty wallet
-    chain: "solana",                       // or "base", "polygon", ...
-    domain: destinationDomainIfAny,        // optional: site the payment is for
-    context: "user sends 50 USDC to this address",
+    wallet: spenderOrRecipient,              // decoded counterparty
+    chain: `eip155:${chainId}`,
+    domain: location.origin,                 // the requesting site
+    context: "Permit2: unlimited USDC allowance to spender 0x…",
+    interaction: { type: "permit_signature", unlimited: true },
   }),
 });
+if (res.status !== 200) return showNotVerified(res.status);   // 402 = free checks used up
 const v = await res.json();
-if (!v.checked) {
-  // fail-closed: hold the transaction, show "check unavailable"
-} else if (v.tier === "high" || v.tier === "critical") {
-  // block or require explicit user override; display v.jws for audit
-}
+if (!v.checked) return showNotVerified();                     // fail-closed, never an all-clear
+if (v.tier === "high" || v.tier === "critical") warnOrBlock(v);
 ```
 
-Suggested user-facing copy per tier:
-
-| Tier | Wallet UX |
+| Tier | UX |
 |---|---|
-| `low` | no warning; show attestation badge (verified, signed) |
-| `medium` | amber caution: "Some signals suggest caution. Review before signing." |
-| `high` | red warning: "High risk detected. We recommend you do not proceed." |
-| `critical` | hard block with override; show categories from the verdict |
+| `low` | no warning; optional "checked" badge |
+| `medium` | amber: "Some signals suggest caution" |
+| `high` | red: "We recommend you do not proceed" |
+| `critical` | hard block with override; show the categories and evidence |
 
-Batch scan of counterparties in one call: `POST /v1/risk-check/batch` with `{"requests": [...]}` (max 25). Any verdict can be verified without trusting the provider: `npx tsx scripts/verify-attest.ts <jws>` prints `valid: true` against the live JWKS. The free tier (25/day per caller) covers end-user traffic; heavy integrations pay per check over x402 in the same wallets they already manage.
+`X-Risk-Check-Free-Remaining` reports the caller's daily allowance.
 
-## Why
+## Payments and free tier
 
-Agents pay with wallets they never see keys for. The x402 ecosystem gates settlement with deterministic policy engines, but nothing evaluates **intent**: whether a payment corresponds to what the user actually authorized, or whether the payer context carries injection / fraud patterns. This provider fills that layer with typed, calibrated Jev decisions — and because the verdict is signed, downstream verification does not have to trust the provider.
+- **Free:** 25 evaluations per day per caller. An IPv6 caller is counted per /64. A batch of *n* uses *n*. Invalid requests are rejected before any quota is used. Wallet installs can send `X-Risk-Check-Client` for their own allowance; it falls back to the IP allowance.
+- **Paid:** $0.001 per evaluation ($0.002 on Solana), and a batch is billed per item. Settlement is USDC via x402 on **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The facilitator is Dexter (gas-sponsored), with PayAI as fallback. A paid result is released **only after settlement succeeds**.
 
 ## Architecture
 
 ```
-Agent ──x402──> Facilitator ──risk-check──> jev-risk-check-provider
-                                              │
-                                              ├─ Jev systemOne call (Noul ×4, Choice, Score)
-                                              │    state = wallet, chain, domain, operation context
-                                              │    answers = calibrated probabilities + confidence
-                                              ├─ code-controlled composite scoring (weights in code)
-                                              └─ ES256 JWS attestation (iss/sub/score/tier/iat/exp/aud/input_hash)
+request ─► validate (422 names the field) ─► quota / x402 (per item) ─► Provider
+                                                                         │
+      deterministic, provider-side ──────────────────────────────────────┤
+        OFAC SDN screen ── listed? ──► score 0 · critical (no model call)│
+        domain analysis (PSL, homoglyph, typosquat, lure)                │
+        threat feeds (MetaMask embedded, ScamSniffer via KV)             │
+        on-chain facts (JSON-RPC, in parallel with the model)            │
+      model ─ Jev typed questions over provider checks + context ────────┤
+      code  ─ weights, deterministic caps, tiers (src/scoring.ts) ───────┤
+                                                                         ▼
+                          ES256 attestation: checks · asserted · payment · jti
 ```
 
-Design follows the Jev pattern: **atomic questions, composed in code**. Each risk dimension is a separate typed question evaluated in parallel against the same state (one API call per payer); the composite score, caps, and tier mapping are deterministic code, not prompts.
+Source layout:
 
-| Jev question | Type | Signal |
-|---|---|---|
-| `known_threat` | Noul | malicious-actor profile |
-| `sanctions_concern` | Noul | sanctions / high-crime indicators |
-| `laundering_pattern` | Noul | mixing, peel chain, structuring |
-| `risky_domain` | Noul | impersonation / phishing domain |
-| `risk_class` | Choice | benign · automated_abuse · fraud_signal · unclassifiable |
-| `trust` | Score | 0–4 rubric |
+- `src/`: provider, validation, enrichment, scoring and JWS.
+- `deploy/`: the Cloudflare Worker (quota Durable Object, paywall, feeds). See [deploy/README.md](deploy/README.md).
+- `snap/`: the MetaMask Snap.
+- `eval/`: evaluation layers.
+- `scripts/`: data refresh and the verifier.
 
-Mapping to the x402 score scale (0 = highest risk, 100 = safest): weighted penalties subtracted from 100, trust bonus applied; hard caps (known threat ≥ 0.85 → ≤ 20; sanctions ≥ 0.85 → ≤ 30; trust confidence < 0.5 → ≤ 55); tiers `low ≥ 80`, `medium ≥ 60`, `high ≥ 30`, else `critical`.
+## Evidence (v0.2.0, commit `6caf5a4`)
 
-## Fail-closed behavior
+| What | Result |
+|---|---|
+| OFAC SDN addresses (external labels) | 24/24 critical |
+| MetaMask-listed phishing domains · ScamSniffer drainer addresses | 40/40 · 30/30 |
+| Drainer **permits**, drainer feed switched off (approval-to-EOA rule) | **27/30** |
+| Plain **transfers** to unlisted drainers | **0/30**: not detectable from the address alone |
+| Unlisted phishing domains without a feed | 0–3/60: feeds do the heavy lifting |
+| Well-known contracts and top dApp domains | 0 false positives (0/22, 0/40) |
+| Tranco top 200k, deterministic rules | 5 capped (0.003%) |
+| Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
+| Injected instructions passed as raw agent content | 40/40 |
+| Production: 53 cases · security probes | 53/53 (53 JWS verified) · v2 12/12, v5 20/20, full 54/0 FAIL |
 
-- No `TYPESAFE_API_KEY` or any Jev error → `{"checked": false}` (never a fabricated score).
-- Every attestation carries `input_hash` (sha256 of canonical scoring inputs + question-set version) and `exp` (1h) per the spec.
-- `aud` claim binds the attestation to the resource URL when provided.
+Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). The pre-v0.2.0 evidence documents are kept as historical records with correction notes.
 
-## Run
+## Run locally
 
 ```bash
 npm install
-npm test
-TYPESAFE_API_KEY=... npm start          # :8787
+npm test                           # 63 unit tests
+npm run typecheck                  # root + deploy + scripts + snap
+AI_GATEWAY_API_KEY=... npm start   # :8787 (or TYPESAFE_API_KEY=...)
 curl localhost:8787/.well-known/risk-check.json
-curl -X POST localhost:8787/v1/risk-check \
-  -d '{"wallet":"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM","chain":"solana","context":"agent pays $0.05 for API access"}'
+npm run eval:suite -- --seed 200   # full evaluation (~$0.15 of model calls)
 ```
 
-## Evaluation
+Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deploy/README.md](deploy/README.md) for secrets, feeds, deploy and rollback.
 
-Two backends, same provider logic: `TYPESAFE_API_KEY` → TypeSafe direct (`/v1/systemone`), or `AI_GATEWAY_API_KEY` → Vercel AI Gateway (`experimental_evaluate`, model `typesafe-ai/jev`, matching the jev-shield setup).
+## MetaMask Snap (preview)
 
-Two modes, same pipeline:
+`snap/` has `onTransaction` / `onSignature` insights that decode the request locally, check the real counterparty and render the signed verdict with its evidence. Supported decoding:
 
-- `npm run eval:synthetic` — full offline pipeline validation with a mock JEV backend (fixture answers per case). Validates plumbing, scoring math, log format, and gate derivation without any API access.
-- `npm run shadow` — live shadow run against the real TypeSafe API (`TYPESAFE_API_KEY` or `AI_GATEWAY_API_KEY` required). Never enforces; records verdicts next to expectations.
+- calldata: ERC-20 approve / transfer, Permit2, EIP-2612, setApprovalForAll, NFT transfers;
+- typed data: v1, v3 and v4, including Permit2 and Seaport;
+- `personal_sign` messages, decoded to text.
 
-Two defects found and fixed using run-1 data: (1) gateway `score` answers carry no calibrated confidence — the confidence cap only applies to calibrated answers; (2) JEV could not detect leet-substitution lookalike domains from raw state — the provider enriches state with deterministic `domain_analysis` (leet normalization, brand-token match, suspicious TLD) before the call — deterministic code first, Jev second.
-
-## Scale evidence
-
-`npm run eval:suite` runs the consolidated five-layer suite (synthetic, shadow, scale, red-team, benchmark) in one command — full numbers in `docs/EVIDENCE.md`. Latest consolidated run (v5 question set, signal-driven review tiers): **2,238 decisions, synthetic/shadow 100%, scale 99.8%, red-team 99.7% (0 FN), benchmark 100% vs chat-judge 99.3%, human-labeled gate READY (53 verified checks)** — plus **production eval 53/53 against the live endpoint with all attestations verified against the public JWKS** (`npm run prod`) and a **20/20-pass security probe suite** (`npm run security`).
+On install and on update it shows a disclosure listing exactly what is sent. The install id is random, not derived from the recovery phrase.
 
 ```bash
-npm run board todo      # unlabeled cases, disagreements first
-npm run board label <case_id> real|fp   # human-verified label
-npm run board report    # accuracy per category, cost, switch-over gate
+cd snap && npm install && npm test          # builds, then 90 tests incl. the built bundle in SES
+npx mm-snap serve                           # then wallet_requestSnaps "local:http://localhost:8062" in MetaMask Flask
 ```
 
-**Switch-over gate: READY** (53 human-verified checks, 0 dismissed-real, 0 false-confirms, 2% review share in the screening-integrated mode; unscreened traffic pays a documented ~26% review cost — the fail-closed trade-off, block threshold identical in both modes).
+The Snap is **not yet published to npm nor allowlisted by MetaMask**, so there is no one-click install in regular MetaMask yet.
 
-## Shadow mode
+## Data sources and licenses
 
-`npm run shadow` replays labeled cases through the provider (Jev enabled, no enforcement) and appends evidence to `eval/evidence/shadow-log.jsonl`: per-case verdicts, latency, token usage, estimated cost ($0.042/MTok input, output free), disagreements, and the switch-over gate. Threshold and question-set are versioned; changing them re-baselines the log.
-
-## Honest limitations
-
-- Scoring runs on Jev-evaluated context only — no on-chain graph, address-cluster, or threat-feed enrichment yet (planned: Helius webhook enrichment, Solana program allowlist signals).
-- No sanctions feed integration; `sanctions_concern` is a Jev judgment, not a screened list. Do not use as a compliance control.
-- Attestation keys are Worker secrets (stable `jev-attest-v1`); KMS/HSM-backed key custody is the next hardening step.
-- Batch endpoint parallelizes rather than amortizing a single Jev call; caching per payer (per spec facilitator guidance) is not implemented server-side yet.
-
-## Red-team, benchmark, demo, production, security
-
-- **Red-team loop** (`npm run eval:redteam`): 1,500 adversarial cases (synonym mutations, authority spoofing, encoded payloads, distributed malice) + legitimate-lookalike FP probe + prose-only-claim dual-use class. Five hardening iterations (v1→v5) — see `docs/EVIDENCE-REDTEAM.md`. Final: 100% adversarial accuracy, 1.3% FP. The reusable design principle: **claims of legitimacy require structured evidence** (`screening`, `authorization` fields); prose claims are unverified by default.
-- **Benchmark** (`npm run eval:benchmark`): same sample through a chat LLM judge (`gpt-4.1-mini` via AI Gateway) — JEV provider 100% @ p50 394ms / $0.0157 vs chat judge 99.3% @ p50 727ms / $0.0174 (approx. pricing). JEV additionally outputs typed, calibrated, signable verdicts.
-- **End-to-end demo** (`npm run demo`): three live scenarios — (A) legitimate agent pays, attestation JWS verified independently against JWKS; (B) compromised agent (injected guard-bypass) rejected by facilitator at score 0/critical; (C) agent-side counterparty gate: agent refuses to pay an impersonated recipient at score 8/critical before signing anything.
-- **Deploy** (`deploy/`): live at `https://x402check.xyz` — `did:web:x402check.xyz`, x402 paywall (SDK v2, multi-network), free tier + KV accounting; `deploy/README.md` documents the full setup.
-- **Distribution drafts**: `docs/DISTRIBUTION.md` — comment for x402 PR #2300, issue draft for x402-foundation, directory entries, X post, Kora issue (issue-first per house rules).
-
-## Human verification
-
-`npm run verify` — labeling session (`--sheet` prints the full review set; `--answers <string>` applies r/f/s per case). **Status: DONE** — 53/53 human-verified, gate READY.
+Code is MIT. Data sources: OFAC SDN (U.S. Treasury), MetaMask eth-phishing-detect (DBAD-1.2, embedded as a derived hash set, attributed), ScamSniffer scam-database (GPL-3.0, runtime only: never committed or bundled) and public JSON-RPC endpoints. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Refresh with `npm run ofac:update` and `npm run feeds:update`.
 
 ## Roadmap
 
-Done:
-1. ~~Human labels → gate READY~~ ✅ 53 verified checks, 0 dismissed-real, 0 false-confirms.
-2. ~~Public deployment with real `did:web:` identity~~ ✅ live at x402check.xyz.
-3. ~~x402 upstream: reference-provider proposal~~ ✅ issue #3597 + comments on PRs #2300/#2422.
-
-Next:
-4. Real facilitator traffic in shadow mode — evidence moves from synthetic corpora to live x402 flows.
-5. Kora `decision_provider` integration (issue #682).
-6. CDP facilitator option for key-based mainnet settlement; KMS/HSM key custody.
-7. Payments beyond USDC (multi-asset) and remaining x402 networks as facilitator coverage lands.
-8. AP2 `RiskPayload` implementation once upstream stabilizes.
-
-See `docs/EVIDENCE.md` (consolidated master) and `docs/EVIDENCE-SCALE.md`, `docs/EVIDENCE-REDTEAM.md`, `docs/EVIDENCE-SECURITY.md` for the full evidence trail.
-
-## MetaMask Snap
-
-The pre-payment gate runs inside MetaMask itself: `onTransaction` and `onSignature` hooks call x402check before the user signs and render the signed verdict (score, tier, categories) in the confirmation screen. Install in one click from the landing page (`wallet_requestSnaps`), or locally:
-
-```bash
-cd snap && npm install && ./build-via-tmp.sh && npx mm-snap serve
-```
-
-Then in any dApp with MetaMask: `wallet_requestSnaps` with `local:http://localhost:8062` (requires "Allow local Snaps" in MetaMask settings). Fail-closed: unreachable provider shows "NOT verified", never a false all-clear. Free tier is per install (client id via `snap_getEntropy`, 25/day) with a global daily budget for new installs; production volume settles over x402.
+1. Shadow real x402 facilitator traffic, moving the evidence from curated corpora to live flows.
+2. Fresher address intelligence: real-time drainer feeds and funding-source analytics for plain transfers.
+3. Publish the Snap and request MetaMask allowlisting.
+4. KMS/HSM custody for the attestation key; key rotation with overlapping `kid`s.
+5. Kora `decision_provider` integration (issue #682); AP2 `RiskPayload` once upstream stabilizes.

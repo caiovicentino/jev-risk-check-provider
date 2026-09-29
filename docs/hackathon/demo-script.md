@@ -44,24 +44,16 @@ VO: "The provider enriched the domain with deterministic analysis before the mod
 
 ## Shot 4 — Evidence close (2:20–3:00)
 
-`npm run eval:suite` final table on screen (or pre-rendered screenshot to save time — the table):
+Show the `docs/EVIDENCE.md` grounded table (or `npm run security:v2` live against production):
 
-`curl -s https://x402check.xyz/v1/risk-check -X POST -H "Content-Type: application/json" -d '{"wallet":"Hu9TqN3LrZb7CxW2VyP8dMf5Gk1AsU6JcE4iRnB9YtQp","chain":"solana","domain":"api.merchant-labs.com","context":"weather subscription","screening":{"sanctions":"clean"}}'` — point at `provider: did:web:x402check.xyz`
+| check (external labels) | result |
+|---|---|
+| OFAC SDN addresses | 24/24 critical |
+| drainer permits, drainer feed OFF (approval-to-wallet rule) | 27/30 |
+| well-known contracts + top dApps | 0 false positives |
+| Tranco top 200k (deterministic) | 5 capped |
+| production: 53 checks · security v2 | 53/53 (JWS verified) · 12/12 |
 
-| layer | acc | FN | FP | p50 |
-|---|---|---|---|---|
-| scale 420 | 99.8% | 1 | 0 | 390ms |
-| red-team 1,419 | 99.7% | 0 | 4 | 387ms |
-| benchmark JEV | 293 | 100% | 0 | 396ms |
-| production (live x402check.xyz) | 53/53 | 0 | 0 | 385ms |
-| security suite (live) | 20/20 PASS | - | - | - |
+VO: "Everything you just saw runs as a public service with mainnet USDC settlement and a DID identity, and every attestation says which checks backed it. We measure against labels we didn't write, and we publish the limits too: a plain transfer to a drainer nobody has reported yet isn't detectable from the address alone. x402check: evidence before the payment."
 
-VO: "Everything you just saw runs as a public service — mainnet USDC settlement on Base and Solana, DID identity, every attestation verifiable against the published public key. Every number here is reproducible with one seeded command. Zero false positives on benign traffic across every live layer — because the one thing an intent gate must never do is break legitimate payments. x402check: signed intent for agent payments."
-
----
-
-## Production checklist
-- [ ] `npm run demo` fresh run immediately before recording (JEV verdicts vary slightly — re-verify scores shown match)
-- [ ] Record at 2x terminal history so JSON lines are visible
-- [ ] Fallback: if Scenario C shows a different score (sampling variance), use the honest frame: "score under the 65 threshold — refused"
-- [ ] Export 1080p, ≤3:00, captions burned in for silent viewing
+> Note: the published video (youtu.be/MCOWk7nh5r8) predates v0.2.0 and shows the v5 table. Re-record Shot 4 with these numbers.

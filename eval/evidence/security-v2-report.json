@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-09-29T14:30:06.374Z",
-  "endpoint": "http://localhost:8799",
-  "passed": 11,
+  "timestamp": "2026-09-29T14:45:23.619Z",
+  "endpoint": "https://x402check.xyz",
+  "passed": 12,
   "failed": 0,
-  "skipped": 1,
+  "skipped": 0,
   "results": [
     {
       "id": "v2-discovery",
@@ -28,7 +28,7 @@
     {
       "id": "v2-free-quota-per-item-and-invalid-free",
       "status": "PASS",
-      "detail": "remaining 9 → batch of 2 → 7 → 3 invalid + 1 valid → 6"
+      "detail": "remaining 24 → batch of 2 → 22 → 3 invalid + 1 valid → 21"
     },
     {
       "id": "v2-healthz-edge-cached",
@@ -53,17 +53,17 @@
     {
       "id": "v2-approval-to-fresh-eoa",
       "status": "PASS",
-      "detail": "permit → fresh EOA 40/high; → Universal Router 71/low"
+      "detail": "permit → fresh EOA 40/high; → Universal Router 85/low"
     },
     {
       "id": "v2-evidence-and-signed-checks",
       "status": "PASS",
-      "detail": "evidence{sanctions,onchain=ok,feeds=1} + signed checks/payment/aud/jti; iss pinned via did:web"
+      "detail": "evidence{sanctions,onchain=unavailable,feeds=3} + signed checks/payment/aud/jti; iss pinned via did:web"
     },
     {
       "id": "v2-ipv6-slash64-aggregation",
-      "status": "SKIP",
-      "detail": "set IPV6_A and IPV6_B (two source addresses in one /64)"
+      "status": "PASS",
+      "detail": "two source addresses in one /64 share the quota: remaining 14 → 13"
     }
   ]
 }

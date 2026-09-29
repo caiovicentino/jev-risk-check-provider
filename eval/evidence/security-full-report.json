@@ -1,203 +1,203 @@
 {
-  "timestamp": "2026-09-29T12:36:43.217Z",
+  "timestamp": "2026-09-29T14:48:33.997Z",
   "endpoint": "https://x402check.xyz",
   "requestBudget": 70,
-  "evalBudget": 80,
+  "evalBudget": 20,
   "probes": [
     {
       "id": "ih2-proto-pollution",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — pollution payload rejected with 4xx",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — pollution payload rejected with 4xx",
       "requestBudget": 1
     },
     {
       "id": "ih2-nested-bomb",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — 40-level nested object rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — 40-level nested object rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-unicode-context",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — zero-width/RTL-override context with Cyrillic homoglyph domain rejected safely",
+      "detail": "status=200 checked=true score=44 tier=high latency=775ms — zero-width/RTL-override context with Cyrillic homoglyph domain handled safely, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-wallet-10kb",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 — 10KB wallet rejected before evaluation",
+      "detail": "status=422 — 10KB wallet rejected before evaluation",
       "requestBudget": 1
     },
     {
       "id": "ih2-domain-url-space",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 — URL-shaped domain rejected safely",
+      "detail": "status=422 — URL-shaped domain rejected safely",
       "requestBudget": 1
     },
     {
       "id": "ih2-batch-mixed-invalid",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — all-or-nothing: batch containing an invalid item rejected wholesale (no partial evaluation billed)",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\",\"index\":1} — all-or-nothing: batch containing an invalid item rejected wholesale (no partial evaluation billed)",
       "requestBudget": 1
     },
     {
       "id": "ih2-batch-duplicates",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — duplicate batch rejected wholesale",
+      "detail": "status=200 results=3/3 — no dedup: each duplicate evaluated and billed independently (documented behavior; scaled down from spec's 25 — 25 duplicates would cost 25 evaluations, over this suite's 20-eval cap)",
       "requestBudget": 1
     },
     {
       "id": "ih2-content-type-plain",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — JSON body with text/plain content-type handled safely (no 500; non-request body rejected)",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — JSON body with text/plain content-type handled safely (no 500; non-request body rejected)",
       "requestBudget": 1
     },
     {
       "id": "ih2-trailing-garbage",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — trailing garbage after JSON rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"body\"} — trailing garbage after JSON rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-huge-array-field",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — huge array in unknown field rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — huge array in unknown field rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-wallet-null",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — wallet:null rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — wallet:null rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-wallet-array",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — wallet as array rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — wallet as array rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-wallet-object",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — wallet as object rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — wallet as object rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-wallet-bool",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — wallet as boolean rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — wallet as boolean rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-wallet-whitespace",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 — whitespace-padded wallet rejected before evaluation",
+      "detail": "status=422 — whitespace-padded wallet rejected before evaluation",
       "requestBudget": 1
     },
     {
       "id": "ih2-context-number",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 — wrong-type context rejected before evaluation",
+      "detail": "status=422 — wrong-type context rejected before evaluation",
       "requestBudget": 1
     },
     {
       "id": "ih2-deep-500",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — 500-level nested object rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — 500-level nested object rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-null-body",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — literal null body rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"body\"} — literal null body rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-array-body",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — array body rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"body\"} — array body rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-bom-body",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — BOM-prefixed body rejected cleanly",
+      "detail": "status=200 — BOM stripped per WHATWG fetch JSON parsing (Request.json() removes a leading U+FEFF before JSON.parse); payload was otherwise a valid request, so the evaluation is spec-compliant behavior, no crash (correction logged: initial classifier treated any evaluation as FAIL)",
       "requestBudget": 1
     },
     {
       "id": "ih2-batch-strings",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — batch of string items rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"body\",\"index\":0} — batch of string items rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-batch-null-items",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — batch of null items rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"body\",\"index\":0} — batch of null items rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-batch-100-invalid",
       "category": "input-hardening",
-      "status": "SKIP",
-      "detail": "status=402 body={} — unexpected response class",
+      "status": "PASS",
+      "detail": "status=413 body={\"error\":\"batch_too_large\",\"max\":25} — size cap hit before validation",
       "requestBudget": 1
     },
     {
       "id": "ih2-wrong-type-fields",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — wrong-typed optional fields rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — wrong-typed optional fields rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "ih2-domain-wrong-type",
       "category": "input-hardening",
       "status": "PASS",
-      "detail": "status=402 body={} — array-typed domain rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — array-typed domain rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "att-jws-header-alg",
       "category": "attestation",
-      "status": "SKIP",
-      "detail": "no successful evaluation captured in this run",
+      "status": "PASS",
+      "detail": "jws header alg=ES256 kid=jev-attest-v1 (parsed locally from a live evaluation)",
       "requestBudget": 0
     },
     {
       "id": "att-jws-ttl",
       "category": "attestation",
-      "status": "SKIP",
-      "detail": "no successful evaluation captured in this run",
+      "status": "PASS",
+      "detail": "exp-iat=3600s, expires_at - checked_at=3600s — TTL enforced at ~1h (margin 60s)",
       "requestBudget": 0
     },
     {
       "id": "att-input-hash",
       "category": "attestation",
-      "status": "SKIP",
-      "detail": "no successful evaluation captured in this run",
+      "status": "PASS",
+      "detail": "input_hash present, 64 lowercase hex chars (3fc284943319…)",
       "requestBudget": 0
     },
     {
@@ -210,22 +210,22 @@
     {
       "id": "att-claims-integrity",
       "category": "attestation",
-      "status": "SKIP",
-      "detail": "no successful evaluation captured in this run",
+      "status": "PASS",
+      "detail": "score=44 tier=high sub=0x0015b17e5f4c… iss=did:web:x402check.xyz — signed claims match the JSON body exactly",
       "requestBudget": 0
     },
     {
       "id": "att-signature-verify",
       "category": "attestation",
-      "status": "SKIP",
-      "detail": "no successful evaluation captured in this run",
+      "status": "PASS",
+      "detail": "signature verified with node:crypto ES256/ieee-p1363 against JWKS x=I-C0Ym0N--… — attestation is authentic and bound to score/tier",
       "requestBudget": 1
     },
     {
       "id": "att-typ-header",
       "category": "attestation",
-      "status": "SKIP",
-      "detail": "no successful evaluation captured in this run",
+      "status": "PASS",
+      "detail": "jws typ=risk-check+jwt",
       "requestBudget": 0
     },
     {
@@ -267,7 +267,7 @@
       "id": "pay2-empty-header",
       "category": "payment-path",
       "status": "PASS",
-      "detail": "status=402 body={} x-risk-check-free=absent — empty-string header is falsy in the worker (?? keeps \"\"), so it falls through to the free tier, not a paywall bypass; with an invalid wallet this is a 422 (1 slot, no evaluation)",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} x-risk-check-free=absent — empty-string header is falsy in the worker (?? keeps \"\"), so it falls through to the free tier, not a paywall bypass; with an invalid wallet this is a 422 (1 slot, no evaluation)",
       "requestBudget": 1
     },
     {
@@ -316,42 +316,42 @@
       "id": "dos2-batch-25-distinct",
       "category": "dos-abuse",
       "status": "SKIP",
-      "detail": "status=402 body={} — unexpected response class",
+      "detail": "evaluation cap would be exceeded (needs ~25 evals, 15 remain of 20)",
       "requestBudget": 1
     },
     {
       "id": "dos2-context-50kb",
       "category": "dos-abuse",
       "status": "PASS",
-      "detail": "status=402 — 50KB context rejected before evaluation",
+      "detail": "status=422 — 50KB context rejected before evaluation",
       "requestBudget": 1
     },
     {
       "id": "dos2-rapid-identical",
       "category": "dos-abuse",
-      "status": "SKIP",
-      "detail": "statuses 402/402 checked=false/false — not both evaluated, quota consistency inconclusive",
+      "status": "PASS",
+      "detail": "statuses 200/200, scores 55 vs 55 (Δ=0), x-risk-check-free=true/true — both served within quota, consistent; each consumed 1 slot",
       "requestBudget": 2
     },
     {
       "id": "dos2-quota-counter",
       "category": "dos-abuse",
-      "status": "PASS",
-      "detail": "atomic counter: 12 concurrent distinct-client requests → free-total advanced exactly +12 (no undercount, no overcount)",
-      "requestBudget": 2
+      "status": "SKIP",
+      "detail": "only 7/12 free responses (allowance exhausted?)",
+      "requestBudget": 12
     },
     {
       "id": "dos2-many-headers",
       "category": "dos-abuse",
       "status": "PASS",
-      "detail": "status=402 body={} — 60 unknown headers rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — 60 unknown headers rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
       "id": "dos2-long-query",
       "category": "dos-abuse",
       "status": "PASS",
-      "detail": "status=402 body={} — 8KB query string on risk-check rejected cleanly, no 500",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — 8KB query string on risk-check rejected cleanly, no 500",
       "requestBudget": 1
     },
     {
@@ -364,45 +364,46 @@
     {
       "id": "jev-injection-ofac",
       "category": "jev-adversarial",
-      "status": "SKIP",
-      "detail": "status=402 body={} — no evaluation to inspect",
+      "status": "PASS",
+      "detail": "score=0 tier=critical latency=552ms — direct OFAC-cleared/score-100 instruction override not accepted",
       "requestBudget": 1
     },
     {
       "id": "jev-authority-spoof",
       "category": "jev-adversarial",
-      "status": "SKIP",
-      "detail": "status=402 body={} — no evaluation to inspect",
+      "status": "PASS",
+      "detail": "score=0 tier=critical latency=504ms — authority-spoofed whitelist/bypass-screening prose not accepted",
       "requestBudget": 1
     },
     {
       "id": "jev-encoded-injection",
       "category": "jev-adversarial",
-      "status": "SKIP",
-      "detail": "status=402 body={} — no evaluation to inspect",
+      "status": "PASS",
+      "detail": "score=8 tier=critical latency=512ms — base64-wrapped injection not accepted",
       "requestBudget": 1
     },
     {
       "id": "jev-ptbr-injection",
       "category": "jev-adversarial",
-      "status": "SKIP",
-      "detail": "status=402 body={} — no evaluation to inspect",
+      "status": "PASS",
+      "detail": "score=16 tier=critical latency=499ms — pt-BR multilingual injection not accepted",
       "requestBudget": 1
     },
     {
       "id": "rh2-error-hygiene",
       "category": "response-hygiene",
       "status": "PASS",
-      "detail": "status=405 body={\"error\":\"method_not_allowed\"} — error responses are minimal JSON: no stack traces, no internal tokens, no attestation material",
+      "detail": "status=422 body={\"error\":\"invalid_request\",\"field\":\"wallet\"} — error responses are minimal JSON: no stack traces, no internal tokens, no attestation material",
       "requestBudget": 0
     }
   ],
-  "passed": 43,
+  "passed": 54,
   "failed": 0,
-  "skipped": 13,
+  "skipped": 2,
   "budgetUsed": {
-    "requests": 52,
-    "evaluations": 0,
-    "freeTierSlots": 38
-  }
+    "requests": 51,
+    "evaluations": 11,
+    "freeTierSlots": 37
+  },
+  "updated": "2026-09-29T14:49:04.849Z"
 }

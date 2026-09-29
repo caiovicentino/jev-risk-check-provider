@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-29T14:39:05.136Z",
+  "timestamp": "2026-09-29T14:53:16.156Z",
   "invalid_requests": 0,
   "sources": {
     "metamask": "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json",
@@ -74,9 +74,9 @@
       "rate": "90.0% (95% CI 74.4–96.5%)",
       "tier_high_or_critical": "27/30",
       "misses": [
-        "ss:b0856be00b1b0878 → 81/low",
+        "ss:b0856be00b1b0878 → 82/low",
         "ss:86b92e53622e292b → 81/low",
-        "ss:31c79be2535a3130 → 80/low"
+        "ss:31c79be2535a3130 → 81/low"
       ],
       "categories": {
         "approval_to_eoa": 27,
@@ -91,14 +91,14 @@
       "rate": "0.0% (95% CI 0.0–11.4%)",
       "tier_high_or_critical": "0/30",
       "misses": [
+        "ss:b820f2e93f271c10 → 94/low",
         "ss:54a96d6d7adec21b → 94/low",
-        "ss:b820f2e93f271c10 → 95/low",
         "ss:b0856be00b1b0878 → 94/low",
         "ss:c0d55fdcee70e68d → 94/low",
         "ss:86b92e53622e292b → 94/low",
-        "ss:c8f62354e4b980c1 → 95/low",
-        "ss:d9bfeca2032f9346 → 95/low",
-        "ss:5413d03cf3ca7c80 → 95/low"
+        "ss:c8f62354e4b980c1 → 94/low",
+        "ss:5413d03cf3ca7c80 → 95/low",
+        "ss:d9bfeca2032f9346 → 94/low"
       ],
       "categories": {
         "new_address": 12
@@ -108,22 +108,22 @@
       "expected": "risky",
       "n": 60,
       "unchecked": 0,
-      "detected_below_60": "1/60",
-      "rate": "1.7% (95% CI 0.3–8.9%)",
-      "tier_high_or_critical": "1/60",
+      "detected_below_60": "0/60",
+      "rate": "0.0% (95% CI 0.0–6.0%)",
+      "tier_high_or_critical": "0/60",
       "misses": [
         "ss:b4de761b1d180874 → 92/low",
         "ss:2a62922b9e888e94 → 92/low",
-        "ss:dbd32cadb82461e4 → 92/low",
-        "ss:2f7c7adad6cc4c84 → 92/low",
+        "ss:dbd32cadb82461e4 → 93/low",
+        "ss:a0436cb01d9c98f4 → 92/low",
         "ss:d18ba33f39c56f47 → 92/low",
-        "ss:eaff26343daab394 → 73/medium",
+        "ss:2f7c7adad6cc4c84 → 91/low",
         "ss:a73fb0e003cdf6f1 → 93/low",
-        "ss:a0436cb01d9c98f4 → 93/low"
+        "ss:eaff26343daab394 → 72/medium"
       ],
       "categories": {
-        "fraud_signal": 9,
-        "impersonation": 1
+        "fraud_signal": 8,
+        "impersonation": 2
       }
     },
     "D_legit_address": {
