@@ -1,9 +1,9 @@
 # Evidence — x402check v0.2.0
 
-All numbers come from commit `6caf5a4`:
+All numbers come from commit `1e27dff`:
 
-- the consolidated suite (`npm run eval:suite -- --seed 200`, 2026-09-29, question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, ~$0.15 of model calls, 261 s);
-- the production deployment `https://x402check.xyz`. `security:v2` ran on Worker `76bc1051`, and the other production suites on `2c3937fa`, which differs only in the Solana on-chain RPC default and the 2 s lookup ceiling.
+- the consolidated suite (`npm run eval:suite -- --seed 200`, 2026-09-29, question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, ~$0.15 of model calls, 265 s);
+- the production deployment `https://x402check.xyz`. `security:v2` ran on Worker `76bc1051`, and the other production suites on `2c3937fa`, which differs only in the Solana on-chain RPC default and the 2 s lookup ceiling. The current Worker is `161c912e` (§6): its fixes were verified in production with zero-cost probes, and locally on workerd and in unit tests for paths that need evaluations.
 
 Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not. Every rate carries a Wilson 95% interval.
 
@@ -54,11 +54,11 @@ Reading: the model detects risk that is **present in the content it is given**. 
 |---|---|---|---|---|---|
 | synthetic (mock model) | 53 | 100% (93–100%) | 0 | 0 | plumbing only |
 | shadow, production regime → gate | 53 | 100% (93–100%) | 0 | 0 | no caller screening; review share **0.0%**; gate **READY** |
-| shadow, legacy label-derived screening | 53 | 100% | 0 | 0 | comparison only (label leaked into input); review 9.4% |
-| scale (7 categories × 60) | 420 | 100% (99.1–100%) | 0 | 0 | stability 91% unanimous tier (24×5) |
-| red-team v6 corpus | 1,439 (+1 unchecked) | 99.2% (98.6–99.6%) | 2 | 9 | 60 prose-only clearance claims held in the block band |
-| benchmark: provider | 225 | 99.6% (97.5–99.9%) | 0 | 1 | same described-scenario sample |
-| benchmark: gpt-4.1-mini chat judge | 225 | 98.7% (96.2–99.5%) | 1 | 2 | one-line prompt; **intervals overlap: no significant difference** |
+| shadow, legacy label-derived screening | 53 | 100% | 0 | 0 | comparison only (label leaked into input); review 7.5% |
+| scale (7 categories × 60) | 420 | 100% (99.1–100%) | 0 | 0 | stability 96% unanimous tier (24×5) |
+| red-team v6 corpus | 1,440 | 99.0% (98.4–99.4%) | 3 | 11 | 60 prose-only clearance claims held in the block band |
+| benchmark: provider | 225 | 99.1% (96.8–99.8%) | 0 | 2 | same described-scenario sample |
+| benchmark: gpt-4.1-mini chat judge | 225 | 99.1% (96.8–99.8%) | 0 | 2 | one-line prompt; **identical accuracy: no difference** |
 
 - The switch-over gate runs in the production regime: no caller `screening`, and the provider's own OFAC screen and feeds in the state. The v5 gate reached READY only in a "screening-integrated" simulation that derived the caller's screening field from the label. Unscreened, it failed at a 26% review share.
 - The 53 "human-verified" labels were applied by the project owner to cases the project authored. They confirm that the authored intent was captured. They are not an independent ground truth.
@@ -98,6 +98,36 @@ Not re-exercised: a real paid settlement. Both payer wallets are unfunded (0 USD
 - ScamSniffer's public data lags 7 days. MetaMask's list is refreshed only when `npm run feeds:update` is run and deployed.
 - OFAC screening covers direct listing only; it does not detect funds received from listed addresses.
 - The MetaMask Snap was exercised in the official SES execution environment (snaps-jest), not in the MetaMask extension. It is not published or allowlisted.
+
+## 6. Second adversarial review (after the fixes)
+
+Two independent reviewers attacked the v0.2.0 code: one the backend and Worker, one the Snap decoders. They reported only findings they had reproduced.
+
+**Backend: 9 confirmed findings, all fixed in `1e27dff`**, with regression tests in `test/review-regressions.test.ts`:
+
+- *(high)* Case-flipped variants of listed Base58Check addresses were accepted as different, unlisted addresses, and the reference verifier compared `sub` case-insensitively. Checksums are now enforced; across 666 checksummed OFAC entries, every case-flipped variant is rejected. OFAC is also indexed by the 20-byte hash an address encodes, so the same key in another encoding is listed. `sameSubject()` compares base58 case-sensitively.
+- A hostile punycode label crashed domain analysis before the OFAC short-circuit. Fixed with an RFC 3492 decoder that has bounds checks; sanctions now run first.
+- Self-asserted `pre_authorized` could raise the score. The trust floor is removed.
+- A CAIP-10 chain or `payment.network` could disagree with `chain`. That now returns 422.
+- The prototype keys `constructor` and `__proto__` were accepted as chains. The aliases now live in a `Map`, and the model's `risk_class` must be one of the declared choices.
+- The body cap was counted in UTF-16 units after buffering. It is now counted in bytes while streaming.
+- A paid request could be settled even though the evaluation failed. It now gets 503 with no charge.
+- At midnight, a request stamped with the previous day could reset the counters. The day is now monotonic.
+- An `X-PAYMENT`-only request skipped the free tier and could never pay.
+
+Removing the trust floor moved the red-team layer from 99.2% to 99.0% (FP 9 → 11), which is within noise.
+
+**Snap: 9 confirmed decoder findings**, all proven with MetaMask's own EIP-712 hashing. Examples:
+
+- non-canonical encodings that sign the same hash as a drainer permit but redirect the check;
+- the DAI `allowed` truthiness;
+- native value sent to a contract under a known selector;
+- listing-drainer bypasses;
+- UniswapX outputs;
+- wrapper calls;
+- a stack overflow on huge inputs.
+
+Fixes are tracked in the Snap's own tests (see the Snap commit).
 
 ## Reproduce
 

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-29T14:53:16.156Z",
+  "timestamp": "2026-09-29T15:45:54.387Z",
   "invalid_requests": 0,
   "sources": {
     "metamask": "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json",
@@ -75,8 +75,8 @@
       "tier_high_or_critical": "27/30",
       "misses": [
         "ss:b0856be00b1b0878 → 82/low",
-        "ss:86b92e53622e292b → 81/low",
-        "ss:31c79be2535a3130 → 81/low"
+        "ss:86b92e53622e292b → 80/low",
+        "ss:31c79be2535a3130 → 82/low"
       ],
       "categories": {
         "approval_to_eoa": 27,
@@ -96,9 +96,9 @@
         "ss:b0856be00b1b0878 → 94/low",
         "ss:c0d55fdcee70e68d → 94/low",
         "ss:86b92e53622e292b → 94/low",
-        "ss:c8f62354e4b980c1 → 94/low",
-        "ss:5413d03cf3ca7c80 → 95/low",
-        "ss:d9bfeca2032f9346 → 94/low"
+        "ss:c8f62354e4b980c1 → 95/low",
+        "ss:d9bfeca2032f9346 → 94/low",
+        "ss:5413d03cf3ca7c80 → 94/low"
       ],
       "categories": {
         "new_address": 12
@@ -112,18 +112,18 @@
       "rate": "0.0% (95% CI 0.0–6.0%)",
       "tier_high_or_critical": "0/60",
       "misses": [
-        "ss:b4de761b1d180874 → 92/low",
-        "ss:2a62922b9e888e94 → 92/low",
+        "ss:b4de761b1d180874 → 91/low",
+        "ss:2a62922b9e888e94 → 93/low",
         "ss:dbd32cadb82461e4 → 93/low",
-        "ss:a0436cb01d9c98f4 → 92/low",
         "ss:d18ba33f39c56f47 → 92/low",
-        "ss:2f7c7adad6cc4c84 → 91/low",
-        "ss:a73fb0e003cdf6f1 → 93/low",
-        "ss:eaff26343daab394 → 72/medium"
+        "ss:a0436cb01d9c98f4 → 92/low",
+        "ss:2f7c7adad6cc4c84 → 92/low",
+        "ss:a73fb0e003cdf6f1 → 94/low",
+        "ss:eaff26343daab394 → 73/medium"
       ],
       "categories": {
-        "fraud_signal": 8,
-        "impersonation": 2
+        "fraud_signal": 7,
+        "impersonation": 1
       }
     },
     "D_legit_address": {

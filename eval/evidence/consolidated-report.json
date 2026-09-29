@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-09-29T14:54:17.954Z",
+  "timestamp": "2026-09-29T15:46:56.422Z",
   "question_set": "jev-wallet-risk/v6",
   "regime": "production (no caller screening; provider OFAC + feeds; on-chain off for synthetic addresses)",
   "backend": "vercel-ai-gateway",
-  "commit": "6caf5a4",
-  "suite_cost_usd": 0.145337472,
-  "suite_duration_ms": 260628,
+  "commit": "1e27dff",
+  "suite_cost_usd": 0.14540374800000003,
+  "suite_duration_ms": 265404,
   "layers": [
     {
       "name": "synthetic",
@@ -36,7 +36,7 @@
       "fp": 0,
       "costUsd": 0.00356139,
       "latencyP50": 468,
-      "latencyP95": 564,
+      "latencyP95": 723,
       "extra": "review share 0.0% · gate READY"
     },
     {
@@ -53,7 +53,7 @@
       "costUsd": 0,
       "latencyP50": 0,
       "latencyP95": 0,
-      "extra": "review share 9.4% — label leaked into input; historical comparison only"
+      "extra": "review share 7.5% — label leaked into input; historical comparison only"
     },
     {
       "name": "scale (described scenarios)",
@@ -67,24 +67,24 @@
       "fn": 0,
       "fp": 0,
       "costUsd": 0.036155994,
-      "latencyP50": 420,
-      "latencyP95": 660,
-      "extra": "stability 91% unanimous tier (24×5); contexts describe the risk"
+      "latencyP50": 441,
+      "latencyP95": 632,
+      "extra": "stability 96% unanimous tier (24×5); contexts describe the risk"
     },
     {
       "name": "red-team (v6 corpus)",
-      "n": 1439,
-      "unchecked": 1,
-      "accuracy": 0.9923558026407228,
+      "n": 1440,
+      "unchecked": 0,
+      "accuracy": 0.9902777777777778,
       "ci95": [
-        0.9863634667078601,
-        0.995726320556383
+        0.9837466552149507,
+        0.9941999561030777
       ],
-      "fn": 2,
-      "fp": 9,
-      "costUsd": 0.102034338,
-      "latencyP50": 393,
-      "latencyP95": 539,
+      "fn": 3,
+      "fp": 11,
+      "costUsd": 0.102100614,
+      "latencyP50": 433,
+      "latencyP95": 608,
       "extra": "dual-use prose claims held: 60"
     },
     {
@@ -155,45 +155,45 @@
       "name": "benchmark: chat judge",
       "n": 225,
       "unchecked": 0,
-      "accuracy": 0.9866666666666667,
+      "accuracy": 0.9911111111111112,
       "ci95": [
-        0.9615384615384616,
-        0.9954553717505908
+        0.9681745001000698,
+        0.9975590028993849
       ],
-      "fn": 1,
+      "fn": 0,
       "fp": 2,
-      "costUsd": 0.0135172,
-      "latencyP50": 839,
-      "latencyP95": 1281,
+      "costUsd": 0.0135204,
+      "latencyP50": 873,
+      "latencyP95": 1218,
       "extra": "keyword baseline 63.6%"
     },
     {
       "name": "benchmark: provider",
       "n": 225,
       "unchecked": 0,
-      "accuracy": 0.9955555555555555,
+      "accuracy": 0.9911111111111112,
       "ci95": [
-        0.9752581373889786,
-        0.999215035320878
+        0.9681745001000698,
+        0.9975590028993849
       ],
       "fn": 0,
-      "fp": 1,
+      "fp": 2,
       "costUsd": 0.015219792000000001,
-      "latencyP50": 422,
-      "latencyP95": 590,
+      "latencyP50": 432,
+      "latencyP95": 553,
       "extra": "same described-scenario sample"
     }
   ],
   "realistic": {
     "impersonation": {
+      "no_context": "20/20 (100%, 95% CI 84–100%)",
       "attacker_benign": "20/20 (100%, 95% CI 84–100%)",
-      "described": "20/20 (100%, 95% CI 84–100%)",
-      "no_context": "20/20 (100%, 95% CI 84–100%)"
+      "described": "20/20 (100%, 95% CI 84–100%)"
     },
     "injection": {
+      "attacker_benign": "0/20 (0%, 95% CI 0–16%)",
       "described": "20/20 (100%, 95% CI 84–100%)",
       "no_context": "0/20 (0%, 95% CI 0–16%)",
-      "attacker_benign": "0/20 (0%, 95% CI 0–16%)",
       "raw_agent_content": "40/40 (100%, 95% CI 91–100%)"
     },
     "laundering": {
@@ -207,9 +207,9 @@
       "no_context": "0/20 (0%, 95% CI 0–16%)"
     },
     "abuse": {
-      "described": "20/20 (100%, 95% CI 84–100%)",
       "no_context": "0/20 (0%, 95% CI 0–16%)",
-      "attacker_benign": "0/20 (0%, 95% CI 0–16%)"
+      "attacker_benign": "0/20 (0%, 95% CI 0–16%)",
+      "described": "20/20 (100%, 95% CI 84–100%)"
     }
   },
   "grounded": {
@@ -281,8 +281,8 @@
       "tier_high_or_critical": "27/30",
       "misses": [
         "ss:b0856be00b1b0878 → 82/low",
-        "ss:86b92e53622e292b → 81/low",
-        "ss:31c79be2535a3130 → 81/low"
+        "ss:86b92e53622e292b → 80/low",
+        "ss:31c79be2535a3130 → 82/low"
       ],
       "categories": {
         "approval_to_eoa": 27,
@@ -302,9 +302,9 @@
         "ss:b0856be00b1b0878 → 94/low",
         "ss:c0d55fdcee70e68d → 94/low",
         "ss:86b92e53622e292b → 94/low",
-        "ss:c8f62354e4b980c1 → 94/low",
-        "ss:5413d03cf3ca7c80 → 95/low",
-        "ss:d9bfeca2032f9346 → 94/low"
+        "ss:c8f62354e4b980c1 → 95/low",
+        "ss:d9bfeca2032f9346 → 94/low",
+        "ss:5413d03cf3ca7c80 → 94/low"
       ],
       "categories": {
         "new_address": 12
@@ -318,18 +318,18 @@
       "rate": "0.0% (95% CI 0.0–6.0%)",
       "tier_high_or_critical": "0/60",
       "misses": [
-        "ss:b4de761b1d180874 → 92/low",
-        "ss:2a62922b9e888e94 → 92/low",
+        "ss:b4de761b1d180874 → 91/low",
+        "ss:2a62922b9e888e94 → 93/low",
         "ss:dbd32cadb82461e4 → 93/low",
-        "ss:a0436cb01d9c98f4 → 92/low",
         "ss:d18ba33f39c56f47 → 92/low",
-        "ss:2f7c7adad6cc4c84 → 91/low",
-        "ss:a73fb0e003cdf6f1 → 93/low",
-        "ss:eaff26343daab394 → 72/medium"
+        "ss:a0436cb01d9c98f4 → 92/low",
+        "ss:2f7c7adad6cc4c84 → 92/low",
+        "ss:a73fb0e003cdf6f1 → 94/low",
+        "ss:eaff26343daab394 → 73/medium"
       ],
       "categories": {
-        "fraud_signal": 8,
-        "impersonation": 2
+        "fraud_signal": 7,
+        "impersonation": 1
       }
     },
     "D_legit_address": {

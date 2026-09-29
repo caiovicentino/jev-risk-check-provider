@@ -164,7 +164,7 @@ Source layout:
 - `eval/`: evaluation layers.
 - `scripts/`: data refresh and the verifier.
 
-## Evidence (v0.2.0, commit `6caf5a4`)
+## Evidence (v0.2.0, commit `1e27dff`)
 
 | What | Result |
 |---|---|
