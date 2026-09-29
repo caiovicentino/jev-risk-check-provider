@@ -15,7 +15,9 @@ Aligned with the `risk-check` extension spec proposed in
 | Seller / resource server | malicious agent payments (charge-then-deny), abuse traffic, compliance exposure |
 | Facilitator | all of the above, once for every merchant |
 
-Between "the agent decided to pay" and "the payment settles" there is one instant where intent can still be checked. x402check lives in that instant — and proves every verdict with a signature, not a promise.
+Between "the agent decided to pay" and "the payment settles" there is one instant where intent can be checked. x402check lives in that instant — and proves every verdict with a signature, not a promise.
+
+[![x402check demo](https://i.ytimg.com/vi/fOCCHCicxT8/hqdefault.jpg)](https://youtu.be/fOCCHCicxT8)
 
 ## Payments (live, mainnet)
 

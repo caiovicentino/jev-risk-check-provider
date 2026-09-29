@@ -32,16 +32,34 @@ async function main() {
     context: "agent pays $0.05 voucher for a pricing API call",
     screening: { sanctions: "clean" },
   };
-  console.log("POST", ENDPOINT, "| network:", NETWORK);
+  console.log("POST", ENDPOINT, "| network:", NETWORK, process.env.X402CHECK_PAID ? "| PAID" : "");
   const res = await fetchWithPay(ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(process.env.X402CHECK_PAID ? { "X-Risk-Check-Paid": "1" } : {}),
+    },
     body: JSON.stringify(body),
   });
   const settle = res.headers.get("PAYMENT-RESPONSE") ?? res.headers.get("X-PAYMENT-RESPONSE");
   if (settle) {
     const s = JSON.parse(Buffer.from(settle, "base64").toString("utf8"));
     console.log("SETTLED:", JSON.stringify({ success: s.success, transaction: s.transaction, network: s.network, payer: s.payer }));
+    const tx = s.transaction as string | undefined;
+    if (tx && NETWORK.startsWith("solana")) {
+      console.log("PROOF: https://solscan.io/tx/" + tx);
+    } else if (tx && NETWORK.startsWith("eip155")) {
+      const cid = Number(NETWORK.split(":")[1]);
+      const exp: Record<number, string> = {
+        8453: "https://basescan.org/tx/",
+        137: "https://polygonscan.com/tx/",
+        42161: "https://arbiscan.io/tx/",
+        43114: "https://snowtrace.io/tx/",
+        143: "https://monadexplorer.com/tx/",
+        1329: "https://seitrace.com/tx/",
+      };
+      if (exp[cid]) console.log("PROOF: " + exp[cid] + tx);
+    }
   }
   console.log("STATUS:", res.status);
   const pr = res.headers.get("payment-required");
@@ -51,7 +69,7 @@ async function main() {
     console.log("PAYMENT-REQUIRED full:", JSON.stringify(decoded).slice(0, 600));
   }
   const data = await res.json();
-  console.log(JSON.stringify(data).slice(0, 400));
+  console.log(JSON.stringify(data, null, 2));
 }
 
 main();

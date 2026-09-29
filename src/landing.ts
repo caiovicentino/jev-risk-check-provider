@@ -76,6 +76,11 @@ const PAGE = `<!doctype html>
   section { border-top: 1px solid var(--line); padding: 52px 0; }
   .sec-head { display: flex; align-items: baseline; gap: 18px; margin-bottom: 30px; }
   .sec-no { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--faint); }
+  .video-frame { max-width: 780px; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden; aspect-ratio: 16/9; background: var(--paper); }
+  .video-frame iframe { width: 100%; height: 100%; display: block; border: 0; }
+  .video-cap { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--faint); margin-top: 10px; }
+  .video-cap a { color: var(--muted); }
+  .video-cap a:hover { color: var(--green); }
   h2 { font-family: "Space Grotesk", sans-serif; font-weight: 500; font-size: 26px; letter-spacing: -0.02em; }
   .cols { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 48px; }
   .item { padding: 18px 0; border-top: 1px solid var(--line); }
@@ -245,6 +250,14 @@ curl https://x402check.xyz/.well-known/jwks.json
 <tr><td>Networks</td><td>Accepts USDC settlement across the x402 networks: EVM chains (Base, Polygon, Arbitrum, Avalanche, Monad, Sei) and Solana, mainnet + testnet</td></tr>
     </table>
 <p class="note"><b>Payment networks live:</b> Base, Solana, Polygon, Arbitrum, Avalanche, Monad and Sei on mainnet — plus Base Sepolia, Arbitrum Sepolia and Solana Devnet testnets — all settling USDC via x402 with any client (agent wallets, SDKs). The facilitator verifies the buyer's signed authorization and submits the transfer onchain; buyer funds move directly to the provider wallet, and the facilitator never holds them.</p>
+  </section>
+
+  <section id="demo">
+    <div class="sec-head"><span class="sec-no">06</span><h2>Demo</h2></div>
+    <div class="video-frame">
+      <iframe src="https://www.youtube-nocookie.com/embed/fOCCHCicxT8" title="x402check demo" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+    </div>
+    <div class="video-cap">Live product walkthrough &middot; <a href="https://youtu.be/fOCCHCicxT8">watch on YouTube</a></div>
   </section>
 
   <footer>

@@ -156,7 +156,8 @@ async function freeQuota(env: WorkerEnv, ip: string): Promise<number> {
 
 async function handleProtected(request: Request, env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
   const paymentHeader = request.headers.get("PAYMENT-SIGNATURE") ?? request.headers.get("X-PAYMENT");
-  if (!paymentHeader) {
+  const forcePaid = (request.headers.get("X-Risk-Check-Paid") ?? "").trim().length > 0;
+  if (!paymentHeader && !forcePaid) {
     const remaining = await freeQuota(env, request.headers.get("CF-Connecting-IP") ?? "unknown");
     if (remaining > 0) {
       const res = await serve(request);

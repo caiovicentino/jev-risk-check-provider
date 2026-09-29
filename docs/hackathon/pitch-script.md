@@ -4,7 +4,7 @@
 
 ## 0:00–0:15 — Hook
 
-"Last year, an autonomous AI agent published its own private keys — while denying it had done so. Last month, the x402 protocol processed 75 million agent transactions. Nobody checked intent on any of them."
+"Last year, an autonomous AI agent published its own private keys — while denying it had done so. Agents now pay with wallets on x402, the open payment standard for agentic HTTP commerce — and nobody checked intent on any of those payments."
 
 ## 0:15–0:45 — The gap
 
@@ -24,7 +24,7 @@
 
 ## 2:10–2:30 — Why now + the ask
 
-"Everything just aligned: x402 at the Linux Foundation, AP2 at FIDO, Solana Foundation shipping agent infrastructure. The intent layer doesn't exist yet — we're first, with the receipts. In this window we're shipping the public did:web deployment, real facilitator shadowing, and the Kora integration. We're asking for your eyes on the demo — and we'd love yours in the arena."
+"Everything just aligned: x402 is a Linux Foundation project, AP2 is gaining agent-payment traction, and Solana Foundation is shipping agent infrastructure. The intent layer doesn't exist yet — we're first, with the receipts. In this window we're shipping the public did:web deployment, real facilitator shadowing, and the Kora integration. We're asking for your eyes on the demo — and we'd love yours in the arena."
 
 ---
 
