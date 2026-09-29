@@ -1,24 +1,106 @@
-# Evidence — x402check v0.3 (v0.3.0–v0.3.2)
+# Evidence — x402check v0.4 (v0.3.0–v0.4.0)
 
-All numbers were measured on 2026-09-29 on the v0.3.0 code:
+All numbers were measured on 2026-09-29. **v0.4** adds the kit watch and the first shadow of a facilitator's real traffic (§0); it was measured on the v0.4.0 code without model calls:
+
+- the kit watch backfill (`scripts/hunt-kits.ts`, the same code the Worker cron runs);
+- `eval/kit-watch.ts`: precision on held-out legitimate code, template recall, the poisoner audit and the forwarder audit;
+- `scripts/payai-shadow.ts`: seven days of PayAI-settled payments on Base;
+- `eval/security-v4.ts`: paid production probes.
+
+The v0.3 layers (§1–§5) were measured on the v0.3.0 code:
 
 - the consolidated suite (`npm run eval:suite -- --seed 200`: question set `jev-wallet-risk/v6`, backend Vercel AI Gateway `typesafe-ai/jev`, $0.145 of model calls, 260 s), at the release commit;
 - the grounded layers with the Tranco scan (`TRANCO_LIST=top-1m.csv npm run eval:grounded -- --seed 200 --tranco-n 200000`, Tranco list of 2026-09-28);
-- two new layers that make no model calls, `eval/simulation.ts` and `eval/code-fingerprint.ts`;
+- two layers that make no model calls, `eval/simulation.ts` and `eval/code-fingerprint.ts`;
 - local workerd runs of the production Worker, and production probes (§7).
 
-Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not. Every rate carries a Wilson 95% interval. The rulebook these numbers measure is [`METHODOLOGY.md`](METHODOLOGY.md).
+Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not, and neither is the kit-watch watchlist (it is the provider's private data). Every rate carries a Wilson 95% interval. The rulebook these numbers measure is [`METHODOLOGY.md`](METHODOLOGY.md).
 
-**New in v0.3:**
+## 0. Kit watch and a facilitator shadow (v0.4, new)
 
-- transaction simulation;
-- drainer-kit code fingerprints;
-- contract-verification signals;
-- a daily runtime refresh of OFAC and MetaMask;
-- `/status`;
-- the TypeScript SDK and the MCP server.
+### What the watch saw
 
-Sections 2 and 3 measure the new layers. The v0.2 layers were re-run: the numbers below are from this run, and the differences from v0.2 are noted.
+The same code as the production cron read every block of the windows below. Public lists name almost none of what it found.
+
+| | Ethereum, 24 h (7,200 blocks) | Base, 6 h (10,800 blocks) |
+|---|---|---|
+| EIP-7702 authorizations read | 37,843 | 15,912 |
+| Delegates classified | 196 | 95 |
+| Contracts created at the top level | 1,254 | 1,712 |
+| **Look-alikes delegated to the poisoning executor** | **6,232** | 0 |
+| Wallets delegated to a labelled sweeper family | 16 | 12 |
+| Wallets delegated to a forwarder (behaviour, no label) | 559 | 204 |
+| Destinations of forwarders (plain wallets only) | 24 | 10 |
+| New contracts in an old drainer-kit family | **0** of 1,254 | **0** of 1,712 |
+| Flagged addresses on ScamSniffer's public list | **0** of 6,831 | **0** of 226 |
+
+Reading:
+
+- **Drainer infrastructure has moved to EIP-7702.** Not one new contract matched a drainer-kit family (the kits of 2017–2023). Tens of thousands of delegations a day did, however, go to address-poisoning executors and to sweepers.
+- **The poisoning executor is a single public template.** Wintermute exposed and verified it ("Poisoner": `executeBatch` gated on `tx.origin`). One operator delegated 6,232 fresh look-alike wallets to it in a day.
+- 22 forwarder families were learned from behaviour alone. Two of them are known by their delegate's address, because their code is too small to fingerprint.
+
+### Precision
+
+**Poisoner family.** The delegate's verified source obeys only its operator (a `tx.origin` check). So a wallet that delegates to it is controlled by the operator while it stays delegated, whether or not it is a look-alike.
+
+- **Audit:** 40 authorities were sampled (seed 7). For each, up to 8 counterparties' latest 50 token transfers and 50 transactions were read, looking for a *different* address sharing the authority's first 3 and last 4 hex digits: the real payee it imitates. By chance this happens about once in 250 million pairs.
+- **Result:** **27/37 confirmed look-alikes = 73.0% (95% CI 57.0–84.6%)**. 3 had no activity yet.
+- This is a lower bound: the victim's matching payment can be older than what was read. A first version of the audit read only token transfers and missed payments in native ETH (5/28). That miss was in the audit, not the watch.
+
+**Forwarders (behaviour).**
+- Of the 34 destinations, none carries an exchange or service label on Blockscout, one is flagged as a scam, and none is on ScamSniffer's list.
+- An auto-forwarding delegation is recorded as a fact ("whatever this wallet receives is passed on to X"), not as proof of theft. It caps at 40 (`auto_forwarding_wallet`); only labelled sweeper families cap at 20.
+
+**Code families and the production code sets, on code legitimate users run.** This measurement found a false positive that had been live since v0.3.
+
+- **Corpus:** held-out verified contracts (Blockscout pages 41–80, 2,000 per chain, never used to build anything) plus the contracts called in the latest blocks.
+
+| Held-out corpus | Fingerprintable | Kit families, before the gate | after the gate | Production code sets (Forta + ScamSniffer) |
+|---|---|---|---|---|
+| Ethereum (2,000 verified + 5,808 callees) | 2,500 | 16 = 0.6% (0.4–1.0%) | 1 = 0.04% (0.007–0.23%) | 1 = 0.04% (0.007–0.23%) |
+| Base (2,000 verified + 5,311 callees) | 2,957 | 0 (0–0.13%) | 0 (0–0.13%) | 0 (0–0.13%) |
+
+- **What collided:** lists label a single deposit address or wallet as phishing because it received phishing proceeds, but its code is a legitimate fleet's. Forta's dataset does this for:
+  - Luno's deposit forwarder (11 labelled);
+  - a Poloniex deposit contract;
+  - BitGo's `Forwarder` (eth-multisig-v2);
+  - the Mist/Ethereum Wallet multisig.
+- **Consequence in production:** the v0.3 Forta set flagged **every deposit address of those fleets** as drainer code (cap 30). The v0.3 figure "0/9,625" was measured on the latest callees and CoinGecko tokens, a corpus that happened to contain none of them.
+- **Fix (v0.4):**
+  1. A **collision gate** (`scripts/legit-corpus.ts`): a fingerprint in legitimate use never enters a code set or a kit family. The gate corpus is the verified contracts of pages 1–40, CoinGecko tokens and callees, disjoint from the held-out pages above.
+  2. The four fleets are guarded explicitly.
+  3. Forta contracts created **before 2021** no longer seed a set. All four collisions came from them, and dropping them costs no recall (40/82 before and after).
+  4. Families that come only from an address hard-coded in a listed contract are dropped, because that target is whatever the contract calls. Uniswap's V2 router entered this way.
+- **After the fix:**
+  - the embedded Forta set went from 46 to 27 fingerprints; the ScamSniffer set is unchanged (52);
+  - the kit registry went from 109 families to 85;
+  - the paid production probes (§7) confirm that a Luno deposit address and a BitGo forwarder now score low.
+- **Second held-out run (pages 81–120 and fresh callees, after these rules):**
+  - **Ethereum: 1 match among 1,737 fingerprintable contracts.** On review, it is a real `SecurityUpdates` drainer. Its verified source has a payable `SecurityUpdate()` and an owner-only `withdraw`, and victims paid into it in 2023. It is on no public list we use, and it entered the "legitimate" corpus because it was re-verified on Blockscout that day.
+  - **Base: 0 matches among 2,935.**
+  - **False positives: 0/1,737 on Ethereum (0.00–0.22%) and 0/2,935 on Base (0.00–0.13%).**
+  - A corpus of verified and called contracts is not guaranteed clean: every match is reviewed before it is counted either way.
+
+**Template fingerprints: a negative result.**
+- Zeroing immutables and hard-coded addresses did not recognize a single additional listed drainer contract: 40/82 = 48.8% (38.3–59.4%) with exact fingerprints, and the same with templates. The listed kits differ by more than their operator's address.
+- Templates are kept for the poisoner family, whose deployments differ only by an immutable (the operator).
+
+### PayAI shadow (`scripts/payai-shadow.ts`)
+
+- **Method:** PayAI publishes its EVM settlement signers (x402 v2 `/supported`). Every transaction they sent on Base from 2026-09-22 to 2026-09-29 was read from Blockscout, and the ERC-20 Transfer logs of their receipts are the payments.
+- **Checks replayed:** x402check's deterministic layers, on every payee and payer: OFAC, ScamSniffer addresses, the kit watch, and the code each address runs, with a forwarding probe on every delegated payee. No model calls.
+
+| | |
+|---|---|
+| Settlement transactions (2 of 15 published signers active on Base) | 3,487 |
+| USDC payments | 3,132 · $709.48 · median $0.01 · p99 $3.77 |
+| Payees / payers | 207 / 226 (24 payees and 20 payers are EIP-7702-delegated EOAs) |
+| Top 10 payees' share of payments | 59% |
+| **Flagged payees / payers** | **0 / 0** |
+| Cost of checking every payment at $0.001 | $3.13 for the week |
+
+Reading: PayAI's Base traffic in that week was small and clean by every deterministic layer. The shadow measures the base rate a facilitator would pay to rule out the rare bad payee. It does not measure a detection.
 
 ## 1. Externally grounded labels (`eval/grounded.ts`)
 
@@ -86,7 +168,7 @@ A fingerprint is the SHA-256 of a contract's runtime code without the compiler-m
 | Cross-source: Forta 2023 fingerprints only | 15/100 | 15.0% (9.3–23.3%) |
 | **Temporal: contracts created earlier (listed set) or Forta** | **43/100** | **43.0% (33.7–52.8%)** |
 | Leave-one-out within ScamSniffer (upper bound) | 51/100 | 51.0% (41.3–60.6%) |
-| **False positives: contracts called in the latest 300 blocks + CoinGecko tokens** | **0/2,018 fingerprintable** (0/9,625 contracts) | 0.00% (0.00–0.19%) |
+| False positives: contracts called in the latest 300 blocks + CoinGecko tokens | 0/2,018 fingerprintable (0/9,625 contracts) | 0.00% (0.00–0.19%) — **superseded in v0.4, see below** |
 
 Reading:
 
@@ -98,6 +180,7 @@ Reading:
   - the corpus also included 3,385 tokens, 4,065 delegating contracts and 1,055 delegated accounts.
 - **The temporal split assumes an earlier-created contract was already listed** when the later one appeared. Listing lag would lower the figure. The leave-one-out figure is an upper bound.
 - **A match caps the score at 30 (high).** It is not treated as proof: the verdict states which set matched.
+- **Correction (v0.4).** The false-positive corpus above held no exchange deposit contracts. On held-out verified contracts, the Forta set matched the deposit fleets of Luno, Poloniex and BitGo, and the Mist multisig. Forta labels single deposit addresses of those fleets as phishing. v0.4 gates every code set against legitimate code and drops pre-2021 Forta contracts (§0).
 
 ## 4. Attacker-realistic context (`eval/realistic.ts`)
 
@@ -132,7 +215,8 @@ Reading: the model detects risk that is **present in the content it is given**. 
 
 ## 6. What each number does NOT show
 
-- Real x402 facilitator traffic has not been shadowed yet. All model-in-the-loop corpora are synthetic or curated.
+- Real x402 facilitator traffic has been shadowed for one facilitator and one week, from public data and with the deterministic layers only (§0): 3,132 payments, none flagged. All model-in-the-loop corpora are synthetic or curated.
+- The kit watch's volumes are one day on Ethereum and six hours on Base. Its lead time over the public lists needs weeks of listings to measure: no flagged address was on ScamSniffer's list at measurement time, and that list lags 7 days.
 - ScamSniffer's public data lags 7 days. OFAC and MetaMask are refreshed daily by `.github/workflows/feeds.yml`. Before v0.3 they changed only with a deploy.
 - The simulation replays at the latest block. It says nothing about transactions whose preconditions no longer hold, and it is measured on Ethereum only; Base, Polygon, Arbitrum, Optimism and BSC use the same code path.
 - OFAC screening covers direct listing only; it does not detect funds received from listed addresses.
@@ -150,6 +234,16 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run prod`: 53 described cases against the live endpoint | **53/53** correct, **53/53** attestations verified (issuer pinned, `exp` checked), 0 mismatches | 53 |
 | `npm run security:v2`: v0.2 fixes, "no free evaluations", simulation pricing (v0.3.2) | **12/12 PASS** | 6 |
 | `npm run security:v3`: v0.3 features (v0.3.2: two simulated evaluations settled at $0.005) | **8/8 PASS** | 3 |
+| `npm run security:v4`: v0.4 kit watch and collision gate (Worker `5f8e17f0`) | **7/7 PASS** | 5 |
+
+The `security:v4` probes cover:
+- a poisoning look-alike from the watchlist, observed on Ethereum and evaluated on Base, capped at **20/critical**. `address_poisoning` is signed as `x402check-kit-watch@<scan time>:hit`;
+- a wallet delegated to a labelled sweeper, capped at **20**. It is found both by the watchlist and by its current code;
+- a Luno deposit address and a BitGo forwarder, now **low**, with the code feeds clear. v0.3 capped both at 30: this is the false positive fixed by the gate;
+- a well-known wallet with the kit watch `clear`;
+- `/status` reporting the watch's coverage (blocks behind, per chain) without a single address in it.
+
+The watchlist subjects are named in the report only by a SHA-256 prefix.
 
 The `security:v3` probes cover:
 - a Forta-fingerprinted drainer contract, on no address list, capped at **30**;
@@ -211,6 +305,11 @@ npm run eval:suite -- --seed 200             # needs AI_GATEWAY_API_KEY or TYPES
 TRANCO_LIST=top-1m.csv npm run eval:grounded -- --seed 200 --tranco-n 200000
 npm run eval:simulation -- --drainers 400 --per-contract 3 --legit-per-contract 12 --seed 11
 npm run eval:code                            # needs .cache ScamSniffer list (eval:grounded caches it)
+npx tsx scripts/kit-catalog.ts && npx tsx scripts/legit-corpus.ts && npx tsx scripts/kit-registry.ts
+npx tsx scripts/hunt-kits.ts --chain eip155:1 --hours 24 && npx tsx scripts/hunt-kits.ts --chain eip155:8453 --hours 6
+npm run eval:kit-watch -- --sample 40 && npm run eval:kit-watch -- --second-holdout
+npx tsx scripts/payai-shadow.ts --days 7
+PAY_NETWORK=eip155:8453 npm run security:v4
 PAY_NETWORK=eip155:8453 npm run security:v3 && PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
 # ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.07 in total)
 ```

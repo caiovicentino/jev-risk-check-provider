@@ -23,6 +23,12 @@ x402check is MIT-licensed. It uses the following third-party data. Nothing below
 - Not done: the derived data is **not committed to this repository and not bundled into the distributed Worker code**, so no GPL-covered work is conveyed.
 - Handling: ScamSniffer domain hits cap a score only when x402check's own domain analysis corroborates them, because the list also contains popular shared hosts (URL shorteners, storage platforms). EVM address hits are applied directly.
 - Code fingerprints: the same runtime-only rule applies to the drainer-kit code fingerprints derived from the listed addresses (`feed:scamsniffer:code:v1` in KV, `.cache/threat-feeds/scamsniffer-code.bin` locally). They are never committed or bundled.
+- Kit watch: the same rule applies to the families seeded from listed contracts and from the delegates of listed EIP-7702 wallets (`scripts/kit-catalog.ts`, `scripts/kit-registry.ts`). They live in `.cache/intel/` locally and in the KV key `kw:registry`, and they are never committed or bundled. The watchlist the scan builds from them is kept private the same way.
+
+## Wintermute's exposure of an address-poisoning executor
+
+- Source: the source code of `Poisoner` at `0xe6b97aa1490c93c28a14d86c13c9dc9c950643ed` (Ethereum), published through Blockscout source verification with the comment "Recreated and exposed by Wintermute".
+- Use: its runtime code fingerprint and template fingerprint seed the kit watch's `poisoner` family. Nothing of the source is redistributed.
 
 ## Forta labelled-datasets — MIT License
 

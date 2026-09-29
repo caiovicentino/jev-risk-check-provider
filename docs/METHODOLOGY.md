@@ -29,9 +29,26 @@ Evidence is collected by the provider itself. Nothing the caller asserts counts 
    - **What is classified:** the subject's runtime code, and in a simulated transaction the called contract, recipients and spenders.
    - **What gets a fingerprint:** only *logic* code, as the SHA-256 of the bytecode with the compiler-metadata trailer removed. Token, NFT, delegating (DELEGATECALL/CALLCODE) and very small (<100-byte) code is never fingerprinted itself, because countless legitimate contracts share it (a fake-token clone has exactly the real token's code).
    - **Indirection:** matching follows one level of it, to the code an address actually runs: an EIP-7702 delegate, an EIP-1167, Safe or EIP-1967 proxy implementation, or an address hard-coded in delegating code.
-   - **Reference sets:** fingerprints are compared with those of contracts listed by Forta's labelled datasets (embedded) and ScamSniffer (runtime).
-   - **Guard:** any listed fingerprint identical to a widely used implementation is dropped at build time. These include the MetaMask 7702 delegator, the Safe singletons, Coinbase Smart Wallet, the 4337 EntryPoints, Permit2 and Multicall3.
-6. **Transaction simulation** (`src/simulation.ts`). The transaction is replayed with `eth_simulateV1` and `traceTransfers` on Ethereum, Base, Polygon, Arbitrum, Optimism or BSC, against the latest block.
+   - **Reference sets:** fingerprints are compared with those of contracts listed by Forta's labelled datasets (embedded, contracts created since 2021) and ScamSniffer (runtime).
+   - **Guard:** a listed fingerprint is dropped at build time if it is identical to a widely used implementation:
+     - the MetaMask 7702 delegator, the Safe singletons, Coinbase Smart Wallet, the 4337 EntryPoints, Permit2 and Multicall3;
+     - exchange deposit fleets that lists label as phishing because single deposit addresses received phishing proceeds: Luno, Poloniex, BitGo's `Forwarder`, and the Mist multisig.
+   - **Collision gate:** a listed fingerprint is also dropped if it matches code in legitimate use (`scripts/legit-corpus.ts`): recently verified contracts, CoinGecko tokens and the contracts real users call.
+6. **Kit watch** (`src/kit-watch.ts`, `deploy/kit-watch.ts`). This is the provider's own record of drainer infrastructure. A cron reads every new Ethereum and Base block, once a minute.
+   - **EIP-7702 delegations.** Each authorization in a type-4 transaction names a delegate, and the scan classifies each delegate once:
+     - **Labelled families:** an address-poisoning executor (a publicly exposed "Poisoner", or any deployment of its template), or a sweeper that ScamSniffer-listed wallets delegate to and that forwards what they receive.
+     - **Behaviour:** the scan sends 0.01 ETH (simulated) to a wallet that delegates to it. A delegate that passes at least half of it on in the same call is a **forwarder**.
+       - The forwarder's logic code becomes a learned family, so its redeployments are known on sight.
+       - Code with no logic fingerprint (tiny forwarders, proxies) is known by the delegate's address instead.
+     - **What is recorded:** every wallet that delegates to a poisoner, sweeper or forwarder, and where a forwarder sends what it receives.
+   - **New contracts.** Every contract created at the top level is fingerprinted, following proxies. It is matched against the drainer-kit families by exact fingerprint or by **template fingerprint**: the logic code with every PUSH20/PUSH32 immediate zeroed, so redeployments that differ only in immutables or in a hard-coded operator address share it. A match records the contract and its deployer.
+   - **At evaluation time:**
+     - The subject is looked up in the watchlist, and so are the recipients, spenders and called contract of a simulated transaction.
+     - The code the subject runs now is matched against the families. A wallet that delegates to a known poisoner, sweeper or forwarder is therefore caught even if the scan never saw the delegation.
+     - EOA entries hold on every EVM chain, because the same key controls the address. Contract entries hold only on the chain where they were seen.
+   - **Guard:** the guarded implementations and the collision gate (item 5) apply to the families too, by exact and by template fingerprint. A fingerprint that comes only from an address hard-coded in a listed contract never seeds a family, because it names what the contract calls.
+   - **Private:** the watchlist and the families live in the operator's KV. `/status` reports coverage (blocks behind the chain head, gaps) and counts, never addresses.
+7. **Transaction simulation** (`src/simulation.ts`). The transaction is replayed with `eth_simulateV1` and `traceTransfers` on Ethereum, Base, Polygon, Arbitrum, Optimism or BSC, against the latest block.
    - **Sender balance:** it is set to the value plus 0.1 ETH. The question is what the transaction does, not whether the sender can afford it, and a plausible balance gives a contract nothing to detect.
    - **Asset movements:** Transfer, Approval, ApprovalForAll, ERC-1155, WETH and Permit2 logs are reduced to net movements, in linear time and under caps on response size, logs and flows. Value routed through the called contract is attributed to its final recipient.
    - **Classification:** every recipient and spender is classified as a contract or a plain wallet, largest first, up to 40.
@@ -40,11 +57,11 @@ Evidence is collected by the provider itself. Nothing the caller asserts counts 
      - a recipient named in the top-level call (`transfer`, `transferFrom`, `safeTransferFrom`), for the called token and amount only;
      - the subject, for any asset, unless a payee scope names it more precisely;
      - the native value sent to the called address.
-7. **Contract verification** (`src/contract-intel.ts`).
+8. **Contract verification** (`src/contract-intel.ts`).
    - **Source:** Blockscout source-verification status. "Not verified" is cached for 10 minutes; "verified" for 24 hours.
    - **When:** only when the user grants a contract control over assets, when assets are parked in a contract, or when a contract forwards them to an undisclosed wallet.
    - **Proxies and delegated accounts:** an exact forwarding proxy (Safe, EIP-1167, minimal EIP-1967) and a delegated account are judged by the code they run, because fresh Safes are unverified on explorers while their singleton is verified.
-8. **Model** (TypeSafe Jev, question set `jev-wallet-risk/v6`). Typed questions over the state: the provider's checks, the caller's assertions labelled as such, and the content the agent acted on. The model is the only layer that reads `context`, and it is where manipulation such as injected instructions is detected.
+9. **Model** (TypeSafe Jev, question set `jev-wallet-risk/v6`). Typed questions over the state: the provider's checks, the caller's assertions labelled as such, and the content the agent acted on. The model is the only layer that reads `context`, and it is where manipulation such as injected instructions is detected.
 
 Every external lookup is time-boxed and fails to "unavailable", which is stated in the evidence. A failed lookup is never read as "clear": where a verdict depends on it, the tier is raised to at least medium (§3). A `checked: false` response carries a `reason` code.
 
@@ -57,11 +74,15 @@ The score runs from 0 to 100, where higher is safer. It starts from the model's 
 | OFAC SDN | subject listed (exact or same key) | **0**, critical, model skipped | `sanctioned_address` |
 | MetaMask phishing list | domain listed | **20** | `phishing_domain` |
 | ScamSniffer addresses | subject listed | **20** | `known_scam_address` |
+| Kit watch | the subject, or a counterparty in the simulated transaction, is a look-alike delegated to an address-poisoning executor | **20** | `address_poisoning` |
+| Kit watch | a wallet delegated to a labelled sweeper family (its key is compromised) | **20** | `compromised_wallet` |
+| Kit watch | a contract in a drainer-kit family (exact or template), the deployer of one, or the destination of a labelled sweeper | **30** | `known_drainer_code`, `drainer_operator` |
 | Drainer code fingerprint | subject, or a contract in the simulated transaction, runs a listed drainer's logic code | **30** | `known_drainer_code` |
 | Caller assertion | `screening: "flagged"` | **30** | `compliance_risk` |
 | Simulation | assets leave the sender, nothing comes back, and an undisclosed plain wallet ends up with them | **40**; **75** and review when a source-verified contract forwarded them (bridges, batch senders) | `outflow_to_undisclosed_eoa` |
 | Simulation | a named payee receives a different asset, or more, than declared | **40** | `outflow_exceeds_declared` |
 | Domain analysis | strong impersonation | **40** | `impersonation` |
+| Kit watch | a wallet delegated to code that forwards what it receives, with no label (or the destination it forwards to) | **40** | `auto_forwarding_wallet`, `drainer_operator` |
 | ScamSniffer domains | host listed **and** corroborated by domain analysis | **40** | `phishing_domain` |
 | Interaction | approval or permit to a plain wallet with no history | **40** | `approval_to_eoa` |
 | Interaction or simulation | approval or permit to a plain wallet | **55** | `approval_to_eoa` |
@@ -97,7 +118,8 @@ Anyone can verify it with the published JWKS (`scripts/verify-attest.ts` is a re
 | OFAC SDN digital currency addresses | U.S. public data | embedded snapshot | daily workflow → `feeds` branch, Ed25519-signed manifest (publisher key pinned in the Worker) → runtime swap after signature, date, SHA-256, count and shrink checks |
 | MetaMask eth-phishing-detect | DBAD-1.2 | embedded hash set | same as OFAC |
 | ScamSniffer domains, addresses, code fingerprints | GPL-3.0 | operator KV only, never committed | `scripts/update-threat-feeds.ts --scamsniffer --upload`; the public data lags 7 days |
-| Forta labelled datasets (phishing contracts) | MIT | embedded fingerprint set | static 2023 dataset |
+| Forta labelled datasets (phishing contracts created since 2021) | MIT | embedded fingerprint set | static 2023 dataset |
+| Kit watch (x402check's own scan of Ethereum and Base) | the provider's own data; the seeded families are partly derived from ScamSniffer (GPL-3.0) | operator KV only | every minute (Worker cron); families seeded by `scripts/kit-catalog.ts` and `scripts/kit-registry.ts --upload`, backfill with `scripts/hunt-kits.ts` |
 | On-chain state, simulation | — | public JSON-RPC with a fallback endpoint per chain (simulation: Ethereum, Base, Polygon, Arbitrum, Optimism, BSC; on-chain facts also Avalanche and Solana) | live |
 | Contract verification | — | Blockscout API v2 | live, cached 24 h |
 
@@ -113,10 +135,17 @@ Anyone can verify it with the published JWKS (`scripts/verify-attest.ts` is a re
 
 ## 7. Known limits and negative results
 
-- **A plain transfer to an unknown drainer wallet is not detectable** from the address alone: 0/30 on held-out drainer addresses with feeds off. Only feeds catch these, and they lag.
+- **A plain transfer to an unknown drainer wallet is not detectable** from the address alone: 0/30 on held-out drainer addresses with feeds off. Only feeds catch these, and they lag. The kit watch closes this gap for two kinds of wallet only: look-alikes that delegate to a poisoner, and wallets that delegate to a sweeper or forwarder (§2, item 6).
 - **Unlisted phishing domains that imitate no brand** are mostly missed: 0–4 of 60 held out across four samples. A feed is required.
-- **Code fingerprints generalize across kits, not across sources.** Fingerprints from Forta's 2023 labels match 15% of the contracts ScamSniffer lists today. A continuously updated set matches 43% of contracts at creation time. See `EVIDENCE.md`.
+- **Code fingerprints generalize across deployments of a kit, not across eras.** A continuously updated set would have recognized 40 of 82 listed contracts at creation time (v0.4, Ethereum and Base). No new contract in the scanned windows matched an old kit: today's drainer infrastructure is mostly EIP-7702 delegations, which the kit watch covers. See `EVIDENCE.md`.
+- **Lists label wallets, not only drainers.** A deposit address that received phishing proceeds gets listed, and its code is an exchange's standard contract. The collision gate and the fleet guards exist because of this; a fleet that is neither verified nor called recently can still slip through until the gate corpus includes it.
 - **Simulation runs against the latest block.** A replay that reverts or moves nothing today (spent approvals, drained balances) says nothing about the past. Historical replays need archive state, which the free public RPCs refuse.
 - **Simulation cannot see intent.** A drainer contract that keeps the funds itself and is source-verified is only caught by the code-fingerprint layer or by a feed.
 - **Domain age is not used.** We measured it with RDAP and dropped it: 30 of 40 sampled listed phishing domains no longer had a registration record (RDAP 404). For most real phishing, age could not be established at all.
+- **Kit watch coverage.**
+  - Only contracts created at the top level are seen. Factory deployments (CREATE/CREATE2 inside another contract) are missed. Of the listed kit contracts whose creation is known, 7 of 162 were deployed through a factory.
+  - EIP-7702 delegations are watched on Ethereum and Base only.
+  - A forwarder is recognized by native-ETH behaviour. A sweeper that moves only tokens is missed, and so is one probed before it is initialized, until a later probe.
+  - The old drainer-kit families (2017–2023) did not redeploy in the scanned windows. What the watch finds today is EIP-7702 infrastructure; see `EVIDENCE.md`.
+- **Behaviour is not intent.** A wallet that forwards everything it receives could belong to a legitimate forwarding setup. Without a label, it caps at 40, not 20.
 - **OFAC screening covers direct listing only.** It says nothing about funds received from listed addresses, and x402check is not a compliance program.

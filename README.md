@@ -8,13 +8,14 @@ x402check is an x402 `risk-check` provider (wire format of [x402 PR #2422](https
 - curated **phishing and drainer feeds**;
 - **transaction simulation**: where the assets actually go, and which approvals are granted;
 - **drainer-kit code fingerprints**, which recognize redeployed drainer contracts before their address is listed;
+- **our own kit watch**: every Ethereum and Base block is read as it is produced. It records look-alike wallets that delegate (EIP-7702) to an address-poisoning executor, wallets whose delegate forwards whatever they receive (sweepers), and new contracts running drainer-kit code;
 - **look-alike domain** analysis;
 - **on-chain facts** about the counterparty, such as whether an approval is being granted to a plain wallet;
 - a typed model (TypeSafe **Jev**) that reads the content the agent acted on for **injected instructions**.
 
 Every verdict is an **ES256 attestation**. It states which checks the provider actually ran and which fields the caller merely asserted.
 
-> **Scope, stated plainly.** x402check catches what the chain, the lists, and the content in front of it reveal. It does **not** see laundering patterns or other transaction-graph behaviour, and it cannot flag an unknown drainer address that is simply sent funds. A clean verdict means "none of these checks fired", not "safe". Measured limits are in [docs/EVIDENCE.md](docs/EVIDENCE.md).
+> **Scope, stated plainly.** x402check catches what the chain, the lists, its own kit watch, and the content in front of it reveal. It does **not** see laundering patterns or other transaction-graph behaviour. It cannot flag an unknown drainer address that is simply sent funds, unless the address is one of the look-alikes or compromised wallets the kit watch has seen. A clean verdict means "none of these checks fired", not "safe". Measured limits are in [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 [![x402check demo](https://i.ytimg.com/vi/MCOWk7nh5r8/hqdefault.jpg)](https://youtu.be/MCOWk7nh5r8)
 
@@ -34,6 +35,9 @@ Every verdict is an **ES256 attestation**. It states which checks the provider a
 | Payee gets more than declared | simulation + `payment` / the explicit transfer in the calldata | the named payee receives a different asset, or more, than declared → **40** |
 | Assets parked in an unverified contract | simulation + Blockscout source verification | nothing in return, contract source not verified → **55** |
 | Drainer-kit code | logic-code fingerprints of contracts listed by Forta (embedded) and ScamSniffer (runtime) | the subject, or a contract in the simulated transaction, runs a listed drainer's code → **30** |
+| Address-poisoning look-alike | **kit watch** (our own scan of every Ethereum and Base block) | the wallet delegates (EIP-7702) to an address-poisoning executor → **20** (`address_poisoning`) |
+| Compromised wallet | kit watch | the wallet delegates to a labelled sweeper family → **20** (`compromised_wallet`); to code that forwards what it receives, with no label → **40** (`auto_forwarding_wallet`) |
+| Drainer operator | kit watch | the address deployed drainer-kit code, or collects what a sweeper forwards → **30** (`drainer_operator`); **40** when the forwarder has no label |
 | Unverified spender | Blockscout source verification | approval or permit to an unverified contract → **75** and at least `medium` (review) |
 | Injected / manipulated intent | Jev typed questions over `context` (what the agent acted on) | model penalties and caps |
 | New address | on-chain activity | informational `new_address` category |
@@ -232,24 +236,28 @@ Source layout:
 - `scripts/`: data refresh, the feeds publisher and the verifier.
 - `docs/`: [METHODOLOGY](docs/METHODOLOGY.md), [EVIDENCE](docs/EVIDENCE.md), [STRATEGY](docs/STRATEGY.md).
 
-## Evidence (v0.3)
+## Evidence (v0.4)
 
 | What | Result |
 |---|---|
+| **Kit watch, Ethereum 24 h:** addresses flagged (6,232 poisoning look-alikes, 575 wallets delegated to sweepers or forwarders, 24 destinations) | **6,831**, and **0** of them on ScamSniffer's public list |
+| **Kit watch:** sampled poisoning look-alikes confirmed by a victim's history (lower bound) | **27/37** (73%) |
+| **Kit watch:** new contracts matching an old drainer kit (Ethereum 24 h + Base 6 h) | **0/2,966**: drainer infrastructure moved to EIP-7702 |
+| **Code sets on held-out legitimate code** (verified contracts + callees) | Before the v0.4 gate: 16/2,500 on Ethereum. That is a v0.3 false positive, found and fixed: exchange deposit fleets (Luno, Poloniex, BitGo) that Forta labels as phishing. After the gate, on a second held-out set: **0 false positives in 1,737 + 2,935** (Ethereum + Base); its one match was a real, unlisted drainer |
+| **PayAI shadow:** 7 days of PayAI-settled payments on Base, deterministic layers | 3,132 payments, 207 payees, **0 flagged**; $3.13 to check them all |
 | OFAC SDN addresses (external labels) | 24/24 critical |
 | MetaMask-listed phishing domains · ScamSniffer drainer addresses | 40/40 · 30/30 |
 | Drainer **permits**, drainer feed switched off (approval-to-EOA rule) | **27/30** |
 | **Simulation:** real drainer transactions that still move assets at the latest block | **18/25 flagged** (72%), all as hidden recipients |
 | **Simulation:** real transactions to 19 well-known contracts | **0/84** flagged |
-| **Code fingerprints:** listed drainer contracts matched by earlier kits' code, at creation time | **43/100** |
-| **Code fingerprints:** legitimate contracts (latest blocks + CoinGecko tokens), following delegations and proxies | **0/9,625** matched |
-| Plain **transfers** to unlisted drainers | **0/30**: not detectable from the address alone |
+| **Code fingerprints:** listed drainer contracts matched by earlier kits' code, at creation time | **40/82** (Ethereum and Base; 43/100 in v0.3 on Ethereum only) |
+| Plain **transfers** to unlisted drainers | **0/30**: not detectable from the address alone, unless the kit watch has seen the wallet |
 | Unlisted phishing domains without a feed | 0–4/60 across four samples: feeds do the heavy lifting |
 | Well-known contracts and top dApp domains | 0 false positives (0/22, 0/40) |
 | Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
-| **Production, every evaluation paid and settled in USDC on Base** | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 · `security:v3` 8/8 |
+| **Production, every evaluation paid and settled in USDC on Base** | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 · `security:v3` 8/8 · `security:v4` 7/7 |
 
 Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). How each verdict is formed, with every cap: [docs/METHODOLOGY.md](docs/METHODOLOGY.md). Earlier evidence documents are kept as historical records with correction notes.
 
@@ -319,9 +327,9 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). OFAC and MetaMask are refr
 
 ## Roadmap
 
-1. Shadow real x402 facilitator traffic, moving the evidence from curated corpora to live flows.
-2. Proprietary drainer intelligence: scan new contract deployments for known drainer-kit code before any public list names them.
-3. Fresher address intelligence: real-time drainer feeds and funding-source analytics for plain transfers; EIP-7702 sweeper detection.
+1. Shadow facilitator traffic continuously. The first week of PayAI-settled payments is replayed (v0.4), and a weekly report and an inline, log-only integration are offered to PayAI.
+2. Measure the kit watch's lead time over the public lists as their listings arrive (they lag 7 days), and extend it to factory deployments (CREATE2 inside a contract) and to more chains.
+3. Fresher address intelligence: funding-source analytics for plain transfers to wallets the watch has not seen.
 4. Valuation-aware simulation rules (price data), closing the "return a dust asset" evasion.
 5. Batch and `upto` payment schemes, to spread settlement gas when facilitators stop sponsoring it.
 6. Wallet-side payment for the Snap, then publish it and request MetaMask allowlisting.

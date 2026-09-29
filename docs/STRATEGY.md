@@ -32,7 +32,7 @@ Every answer comes back as a signed attestation that a merchant, a facilitator, 
 
 | Layer | Question | Sources (today → next) |
 |---|---|---|
-| Counterparty intelligence | Is this address or site known to be bad? | OFAC SDN (same-key cross-encoding, refreshed daily), MetaMask phishing list (refreshed daily), ScamSniffer, look-alike analysis, contract verification (Blockscout), **drainer-kit code fingerprints** → 7702 sweeper detection, funding-source analytics |
+| Counterparty intelligence | Is this address or site known to be bad? | OFAC SDN (same-key cross-encoding, refreshed daily), MetaMask phishing list (refreshed daily), ScamSniffer, look-alike analysis, contract verification (Blockscout), drainer-kit code fingerprints (gated against legitimate code), **the kit watch: our own block-by-block record of EIP-7702 poisoners, sweepers and forwarders, and new drainer-kit deployments** → funding-source analytics, lead time over the public lists |
 | Interaction intelligence | What will this do to the user's assets? | decoding of calldata and typed data (Snap), approval-to-EOA rule, **transaction simulation (`eth_simulateV1`): net asset movements, approvals granted, value forwarded to undisclosed wallets or parked in unverified contracts** → historical replay for evaluation (archive state) |
 | Content intelligence | Was the agent manipulated? | Jev typed questions over the content the agent acted on |
 | Attestation and transparency | Can anyone verify this verdict? | ES256 JWS, `did:web`, JCS input hash, `checks`/`asserted`, public rulebook (`METHODOLOGY.md`), live data freshness (`/status`) → public verdict transparency log |
@@ -62,15 +62,18 @@ The same API reaches everyone who moves value: x402 facilitators and resource se
   - MCP server and SDK for agents.
   - Public rulebook (`METHODOLOGY.md`) and a live data-status endpoint (`/status`).
   - CI on every push.
-- **v0.4**
-  - Shadow real facilitator traffic.
-  - Real-time drainer intelligence for plain transfers, the measured 0/30 gap.
-  - EIP-7702 sweeper detection: 30 of the 2,530 ScamSniffer-listed addresses are delegated accounts.
+- **v0.4 (shipped)**
+  - **The kit watch.** Our own intelligence: every Ethereum and Base block is read. It covers EIP-7702 poisoners (look-alikes), sweepers and forwarders (compromised wallets), and drainer-kit deployments. On its first day it flagged 6,831 addresses on Ethereum, none of them on ScamSniffer's public list. It closes the 0/30 gap for those two kinds of wallet.
+  - **A collision gate on every code set.** It found and fixed a v0.3 false positive: exchange deposit fleets that a list labels as phishing.
+  - **A shadow of real facilitator traffic.** Seven days of PayAI-settled payments on Base were replayed from public data.
+- **v0.5**
+  - A continuous facilitator shadow: a weekly report, and an inline, log-only integration.
+  - The kit watch's lead time over the public lists; factory (CREATE2) deployments; more chains.
   - Automated ScamSniffer refresh into KV.
   - KMS custody and key rotation.
   - Publish the Snap and seek allowlisting.
   - AP2 `RiskPayload`.
-- **v0.5**
+- **Later**
   - A public verdict transparency log (Merkle).
   - Weekly threat reports generated from feed deltas.
   - SLAs for paid tiers.
