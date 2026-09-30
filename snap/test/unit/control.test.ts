@@ -190,12 +190,20 @@ describe('cg-4: ownership and upgrades of the signer\'s own account are danger; 
 });
 
 describe('cg-4: what cannot be read is opaque', () => {
-  it('audit repro: a 7702 self-call with calldata that is not decoded is opaque, not an all-clear', () => {
-    const decoded = tx(USER, calldata('deadbeef', DRAINER));
-    expect(decoded.counterparty).toBeUndefined();
-    expect(decoded.opaque).toContain(`account ${USER} calls its own code (function selector 0xdeadbeef`);
-    expect(decoded.warnings[0]).toBe(opaqueNote(decoded.opaque as string));
-    expect(decoded.localNote).toContain('calls your own account');
+  it('audit repro: a 7702 self-call with calldata that is not decoded is never an all-clear', () => {
+    // At the top level of a transaction it has no counterparty and a local note:
+    // the guard refuses it with its own code (unreadable_self_call).
+    const top = tx(USER, calldata('deadbeef', DRAINER));
+    expect(top.counterparty).toBeUndefined();
+    expect(top.localNote).toContain('calls your own account');
+    expect(top.opaque).toBeUndefined();
+    // Nested in a call the account makes (where an address would be checked instead), it is opaque.
+    const nested = tx(USER, execute7579('single', [{ to: USER, value: 0n, data: calldata('deadbeef', DRAINER) }]));
+    expect(nested.opaque).toContain(`account ${USER} calls its own code (function selector 0xdeadbeef`);
+    expect(nested.warnings[0]).toBe(opaqueNote(nested.opaque as string));
+    const safe = tx(SAFE, safeExec(SAFE, 0n, calldata('deadbeef'), 0));
+    expect(safe.opaque).toContain(`account ${SAFE} calls its own code`);
+    expect(signSafeTx(calldata('deadbeef')).opaque).toContain(`account ${SAFE} calls its own code`);
   });
 
   it('the same undecoded call to another contract is checked (and simulated), not opaque', () => {
@@ -205,11 +213,23 @@ describe('cg-4: what cannot be read is opaque', () => {
     expect(decoded.transaction).toBeDefined();
   });
 
-  it('audit repro: a deployment carrying value is opaque; a zero-value deployment is not', () => {
+  it('calldata too short for a control function reverts on-chain: it is not taken for that change', () => {
+    // installModule without its bytes argument: 2 of its 3 head words.
+    const truncated = `0x9517e29f${'0'.repeat(63)}1${'0'.repeat(24)}${DRAINER.slice(2)}`;
+    const top = tx(USER, truncated);
+    expect(top.danger).toStrictEqual([]);
+    expect(top.counterparty).toBeUndefined();
+    const nested = tx(USER, execute7579('single', [{ to: USER, value: 0n, data: truncated }]));
+    expect(nested.danger).toStrictEqual([]);
+    expect(nested.opaque).toContain('calls its own code (function selector 0x9517e29f');
+  });
+
+  it('audit repro: a deployment carrying value is flagged (the guard refuses it as not simulated); a zero-value one is not', () => {
     const funded = decodeTransaction({ from: USER, data: '0x6080', value: '0x8ac7230489e80000' }, 'eip155:1');
-    expect(funded.opaque).toContain('the deployment sends 10 ETH');
+    expect(funded.warnings[0]).toContain('the deployment sends 10 ETH (10000000000000000000 wei) to a new contract whose init code decides');
     expect(funded.counterparty).toBeUndefined();
-    expect(decodeTransaction({ from: USER, data: '0x6080', value: '0x0' }, 'eip155:1').opaque).toBeUndefined();
+    expect(funded.opaque).toBeUndefined();
+    expect(decodeTransaction({ from: USER, data: '0x6080', value: '0x0' }, 'eip155:1').warnings).toStrictEqual([]);
   });
 
   it('calls nested past the decoding depth are opaque', () => {

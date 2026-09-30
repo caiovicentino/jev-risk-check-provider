@@ -76,6 +76,12 @@ type Ctx = {
   user?: string | undefined;
   depth: number;
   budget: { calls: number };
+  /**
+   * decodeTransaction reports an undecoded self-call at its top level itself
+   * (no counterparty, a local note; the guard refuses it as an unreadable
+   * self-call), so only nested ones are marked opaque there.
+   */
+  topLevelSelfCallReported?: boolean | undefined;
 };
 
 export type Action = {
@@ -269,7 +275,7 @@ function plainCall(call: Call, ctx: Ctx, detail: string): Action {
   // An account running its own code with calldata that is not decoded can do
   // anything the account can (add an owner, install a module, upgrade itself):
   // checking its own address says nothing about it.
-  const self = isSelfCall(call);
+  const self = isSelfCall(call) && !(ctx.topLevelSelfCallReported && ctx.depth === 0);
   return {
     label: "Contract call",
     summary: `Contract call to ${call.to} (${detail})${sends}.`,
@@ -1398,12 +1404,11 @@ function decodeCall(call: InnerCall, ctx: Ctx): Action {
     }
     return action;
   }
+  // Calldata shorter than the function's arguments reverts on any contract
+  // compiled since Solidity 0.5: it is not that control change (it stays undecoded).
   const control = CONTROL_FUNCTIONS[selector] as ControlFunction | undefined;
-  if (control) {
+  if (control && args.length >= control.words * 64) {
     const warnings: string[] = [];
-    if (args.length < control.words * 64) {
-      warnings.push(`calldata is ${control.words * 32 - args.length / 2} byte(s) shorter than ${control.name} expects`);
-    }
     const action = control.decode(args, call, ctx, warnings);
     if (call.value > 0n) {
       action.warnings.push(`sends ${nativeAmount(call.value, ctx.chain)} to ${call.to} while calling ${control.name}`);
@@ -1444,21 +1449,20 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
 
   if (isMissing(tx.to)) {
     // A deployment moves nothing of the sender's but its value: with value,
-    // the init code (unreadable here) decides where that value goes.
-    const opaque = valueText
-      ? `the deployment sends ${valueText} to a new contract whose init code decides what happens to it, and x402check cannot read init code`
-      : undefined;
+    // the init code (unreadable here, and not simulated) decides where it goes.
+    if (valueText) {
+      warnings.unshift(`the deployment sends ${valueText} to a new contract whose init code decides what happens to it; x402check cannot read init code`);
+    }
     return withCandidates(
       {
         action: "Contract deployment",
         chain,
         amountLabel: valueText,
         summary: `Contract deployment (no recipient address)${valueText ? `, sending ${valueText}` : ""}.`,
-        warnings: opaque ? [opaqueNote(opaque), ...warnings] : warnings,
+        warnings,
         danger,
         localNote:
           "This transaction deploys a new contract, so there is no counterparty address to check. Nothing was sent to x402check.",
-        ...(opaque ? { opaque } : {}),
       },
       [],
     );
@@ -1506,7 +1510,7 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
 
   const plan = planSimulation({ chain, from, to, value: valueInvalid ? undefined : value, data: fullData });
   if ("warning" in plan && plan.warning) warnings.push(plan.warning);
-  const ctx: Ctx = { chain, user: from, depth: 0, budget: { calls: MAX_INNER_CALLS } };
+  const ctx: Ctx = { chain, user: from, depth: 0, budget: { calls: MAX_INNER_CALLS }, topLevelSelfCallReported: true };
   const action: Action =
     data === null
       ? { ...plainCall({ sender: from, to, value, data: "" }, ctx, "unparseable calldata"), warnings: ["the calldata is not valid hex"] }
