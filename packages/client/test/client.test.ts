@@ -261,3 +261,38 @@ describe("createClient: errors", () => {
     assert.equal(already.code, "aborted");
   });
 });
+
+describe("createClient: prepaid credits", () => {
+  const TOKEN = "x402c_" + "A".repeat(43);
+
+  test("a credit token is sent as a bearer credential; the charge and balance come back in the info", async () => {
+    const { fetch, calls } = mockFetch(() => json(200, RESULT, { "X-Credits-Charged": "$0.001", "X-Credits-Balance": "$0.999" }));
+    const client = createClient({ fetch, creditToken: TOKEN });
+    const { info } = await client.checkWithInfo({ wallet: EVM, chain: "base" });
+    assert.equal((calls[0]?.init.headers as Record<string, string>).Authorization, `Bearer ${TOKEN}`);
+    assert.deepEqual(info.credits, { chargedUsd: "$0.001", balanceUsd: "$0.999" });
+    assert.throws(() => createClient({ creditToken: "sk_live_nope" }), /creditToken/);
+  });
+
+  test("an empty balance is its own error, never a verdict; a rejected token too", async () => {
+    const short = createClient({ fetch: mockFetch(() => json(402, { error: "insufficient_credits", balance_usd: "$0.0005", cost_usd: "$0.001" })).fetch, creditToken: TOKEN });
+    const err = await rejection(short.check({ wallet: EVM }));
+    assert.equal(err.code, "insufficient_credits");
+    assert.match(err.message, /balance \$0\.0005, this call costs \$0\.001/);
+    assert.doesNotMatch(err.message, /x402c_/, "the token never appears in an error");
+    const bad = await rejection(createClient({ fetch: mockFetch(() => json(401, { error: "invalid_credit_token" })).fetch, creditToken: TOKEN }).check({ wallet: EVM }));
+    assert.equal(bad.code, "invalid_credit_token");
+  });
+
+  test("buyCredits pays through the configured fetch and returns the new token; creditBalance reads it", async () => {
+    const { fetch, calls } = mockFetch((url, init) =>
+      init.method === "GET" ? json(200, { balance_usd: "$1.00" }) : json(200, { token: TOKEN, credited_usd: "$1.00", balance_usd: "$1.00" }),
+    );
+    const bought = await createClient({ fetch }).buyCredits(1);
+    assert.deepEqual(bought, { token: TOKEN, creditedUsd: "$1.00", balanceUsd: "$1.00" });
+    assert.equal(calls[0]?.url, "https://x402check.xyz/v1/credits");
+    assert.equal(calls[0]?.init.body, JSON.stringify({ amount_usd: 1 }));
+    assert.deepEqual(await createClient({ fetch, creditToken: TOKEN }).creditBalance(), { balanceUsd: "$1.00" });
+    await assert.rejects(createClient({ fetch }).buyCredits(0.01), /amountUsd/);
+  });
+});

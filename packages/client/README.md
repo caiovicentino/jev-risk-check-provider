@@ -9,7 +9,7 @@ Typed client and attestation verifier for [x402check](https://x402check.xyz). x4
 - a simulation of the transaction (API v0.3);
 - a typed model that reads the content the agent acted on.
 
-Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. Every evaluation is paid per call with [x402](#paying-x402): $0.001 in USDC ($0.002 on Solana), and $0.005 when the request includes a `transaction` that is simulated. There is no free tier.
+Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. Every evaluation is paid with [x402](#paying-x402): **$0.001 from prepaid credits**, or per call at the payment network's price ($0.0035 on Base, $0.002 on Solana). A request whose `transaction` is simulated costs $0.005. There is no free tier.
 
 - **Zero runtime dependencies.** ESM with bundled `.d.ts` types.
 - **Runs anywhere WebCrypto and `fetch` exist:** Node ≥ 20, browsers, Cloudflare Workers, Deno and Bun.
@@ -292,7 +292,19 @@ In the simulation evidence, an outflow's `counterparty` is the **final beneficia
 
 ## Paying (x402)
 
-Every evaluation is paid per call with x402 v2: $0.001 in USDC on Base, Polygon, Arbitrum, Avalanche, Monad or Sei, or $0.002 on Solana. A request with a `transaction` that is simulated costs $0.005 on any network. A batch of *n* costs *n* times the unit price. There is no free tier.
+Every evaluation is paid; there is no free tier. There are two ways:
+
+- **Prepaid credits (cheapest, fastest):** `buyCredits(amountUsd)` pays once via x402, for a pack of $0.10 to $100. It returns a token (`x402c_…`, shown once).
+  - With `createClient({ creditToken })`, every check costs **$0.001**, or $0.005 when a transaction is simulated. It is debited from the balance with no 402 round trip and no on-chain settlement.
+  - `info.credits` gives each call's charge and the balance left. An empty balance rejects with `code: "insufficient_credits"`, and a check that produces no verdict is refunded.
+- **Per call:** the payment network's price: Base $0.0035, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009. A simulated item costs $0.005, or the network's price if higher. A batch of *n* costs *n* items.
+
+```ts
+const { token } = await createClient({ fetch: wrapFetchWithPayment(fetch, payer) }).buyCredits(1); // $1.00, one settlement
+const x402check = createClient({ creditToken: token }); // keep the token secret
+const { result, info } = await x402check.checkWithInfo({ wallet: "0x…", chain: "base" });
+info.credits; // { chargedUsd: "$0.001", balanceUsd: "$0.999" }
+```
 
 Without payment, the API answers `402`, and the client rejects with an `X402CheckError`: `code: "payment_required"`, with the decoded challenge in `paymentRequired.accepts`. `interpret()` turns that into `not_verified` with the next step to configure a payer.
 
@@ -310,7 +322,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 const payer = new x402Client()
   .register("eip155:*", new ExactEvmScheme(privateKeyToAccount(process.env.PAYER_KEY as `0x${string}`)))
-  .setSpendControls({ maxAmountPerPayment: "$0.05" }); // refuse anything above 5 cents per call
+  .setSpendControls({ maxAmountPerPayment: "$1" }); // a credit pack, or refuse anything above $1 per call
 
 const x402check = createClient({ fetch: wrapFetchWithPayment(fetch, payer), timeoutMs: 30_000 });
 const { result, info } = await x402check.checkWithInfo({ wallet: "0x…", chain: "base" });

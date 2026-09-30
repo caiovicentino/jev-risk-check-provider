@@ -127,8 +127,8 @@ describe("paid checks (x402 v2)", () => {
       assert.equal(r.isError, true);
       assert.match(r.text, /^x402check: NOT VERIFIED/);
       assert.match(r.text, /payment required \(every evaluation is paid via x402\)/);
-      assert.match(r.text, /Next: every check is paid via x402 \(\$0\.001 in USDC\)\. Set X402CHECK_PAYER_KEY to the private key of a dedicated, low-balance wallet funded with a little USDC on Base \(the x402 exact scheme is gasless for the payer\)/);
-      assert.match(String(r.structuredContent?.next ?? ""), /^every check is paid via x402/);
+      assert.match(r.text, /Next: every check is paid\. Set X402CHECK_CREDIT_TOKEN to a prepaid credit token \(\$0\.001 a check; buy one with POST https:\/\/x402check\.xyz\/v1\/credits\), or X402CHECK_PAYER_KEY to the private key of a dedicated, low-balance wallet funded with a little USDC on Base \(paid per call via x402: \$0\.0035 on Base, gasless for the payer\)/);
+      assert.match(String(r.structuredContent?.next ?? ""), /^every check is paid\. Set X402CHECK_CREDIT_TOKEN/);
       assert.equal((r.structuredContent?.error as { code: string }).code, "payment_required");
       assert.equal(upstream.payments.length, 0);
     } finally {
@@ -230,5 +230,56 @@ describe("paid checks (x402 v2)", () => {
     assert.throws(() => createX402CheckServer({ payerKey: generatePrivateKey(), maxPaymentUsd: -1 }), /X402CHECK_MAX_PAYMENT_USD/);
     const payer = createPayer({ privateKey: generatePrivateKey() });
     assert.deepEqual([payer.maxPaymentUsd, payer.budgetUsd, payer.spentUsd(), payer.canAfford()], [0.05, 1, 0, true]);
+  });
+});
+
+describe("prepaid credits", () => {
+  test("X402CHECK_CREDIT_TOKEN: checks are debited from credits, no payment is signed, the token never appears", async () => {
+    const token = `x402c_${"k".repeat(43)}`;
+    const seen: string[] = [];
+    const fetch = async (url: string, init?: { headers?: Record<string, string>; body?: string }) => {
+      if (url === DID_URL) return new Response(JSON.stringify(didDocument(issuer)), { status: 200, headers: { "Content-Type": "application/json" } });
+      seen.push(init?.headers?.Authorization ?? "");
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      const result = await signedResult(issuer, { claims: { checks: CHECKS, request_hash: await requestHash(body) } });
+      return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json", "X-Credits-Charged": "$0.001", "X-Credits-Balance": "$0.499" } });
+    };
+    const session = await connect({ fetch: fetch as never, creditToken: token, payerKey: generatePrivateKey() });
+    try {
+      const r = await callTool(session.client, "x402check_check", { wallet: SPENDER, chain: "base" });
+      assert.match(r.text, /^x402check: ALLOW\./);
+      assert.match(r.text, /Paid from prepaid credits: \$0\.001 \(balance \$0\.499\)/);
+      assert.deepEqual(seen, [`Bearer ${token}`]);
+      assert.deepEqual(r.structuredContent?.payment, { credits_charged_usd: "$0.001", credits_balance_usd: "$0.499" }, "credits take precedence: nothing paid, no payer spend");
+      assert.ok(!JSON.stringify(r).includes(token), "the token is never echoed");
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("credits used up, or a token not accepted: not_verified, and the next step names the credit token, never a payer", async () => {
+    const token = `x402c_${"k".repeat(43)}`;
+    const cases: Array<[number, Record<string, unknown>, RegExp]> = [
+      [
+        402,
+        { error: "insufficient_credits", balance_usd: "$0.00", cost_usd: "$0.001", top_up: 'POST /v1/credits {"amount_usd": 1} with this token' },
+        /Next: this server's prepaid credits cannot pay for this check \(insufficient credits: balance \$0\.00, this call costs \$0\.001\)\. Ask the operator to top up the X402CHECK_CREDIT_TOKEN balance/,
+      ],
+      [401, { error: "invalid_credit_token" }, /Next: the prepaid credit token was not accepted; ask the operator to check X402CHECK_CREDIT_TOKEN\./],
+    ];
+    for (const [status, body, next] of cases) {
+      const fetch = async (url: string) => (url === DID_URL ? json(200, didDocument(issuer)) : json(status, body));
+      const session = await connect({ fetch: fetch as never, creditToken: token });
+      try {
+        const r = await callTool(session.client, "x402check_check", { wallet: SPENDER, chain: "base" });
+        assert.match(r.text, /^x402check: NOT VERIFIED/);
+        assert.match(r.text, next);
+        assert.doesNotMatch(r.text, /retry the check|USDC balance of the payer/);
+        assert.equal(r.structuredContent?.action, "not_verified");
+        assert.ok(!JSON.stringify(r).includes(token), "the token is never echoed");
+      } finally {
+        await session.close();
+      }
+    }
   });
 });

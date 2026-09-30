@@ -4,7 +4,7 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>x402check — pre-payment risk checks for x402 agents and wallets</title>
-<meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, transaction simulation, drainer-kit code fingerprints and injected-instruction analysis — as signed, verifiable attestations. $0.001 per evaluation, paid per call with x402.">
+<meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, transaction simulation, drainer-kit code fingerprints and injected-instruction analysis — as signed, verifiable attestations. $0.001 per evaluation with prepaid credits, or per call with x402.">
 <link rel="canonical" href="https://x402check.xyz/">
 <meta name="theme-color" content="#fcfcfa">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%239945ff'/%3E%3Cstop offset='1' stop-color='%2314f195'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='monospace' font-size='34' font-weight='bold' text-anchor='middle' fill='%230a0b10'%3Ex%3C/text%3E%3C/svg%3E">
@@ -18,7 +18,7 @@ const PAGE = `<!doctype html>
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="x402check — check the counterparty before paying">
-<meta name="twitter:description" content="OFAC SDN screening, phishing and drainer feeds, transaction simulation, drainer-kit code, injected-intent detection — signed attestations that state which checks ran. $0.001 per evaluation via x402.">
+<meta name="twitter:description" content="OFAC SDN screening, phishing and drainer feeds, transaction simulation, drainer-kit code, injected-intent detection — signed attestations that state which checks ran. $0.001 per evaluation with prepaid credits via x402.">
 <meta name="twitter:image" content="https://x402check.xyz/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -146,7 +146,7 @@ const PAGE = `<!doctype html>
     <div>
       <div class="kicker">x402 trust-provider &middot; risk-check extension &middot; reference implementation</div>
       <h1>Check the counterparty before an agent or a wallet pays.</h1>
-      <p class="lede">x402check screens the address against the <b>OFAC SDN list</b> and curated <b>phishing / drainer feeds</b>, <b>simulates the transaction</b> to see where the assets actually go, recognizes <b>drainer-kit code</b>, flags look-alike domains and approvals granted to plain wallets, and reads the content the agent acted on for <b>injected instructions</b>. Every verdict is a <b>signed attestation</b> that states which checks actually ran. $0.001, fail-closed.</p>
+      <p class="lede">x402check screens the address against the <b>OFAC SDN list</b> and curated <b>phishing / drainer feeds</b>, <b>simulates the transaction</b> to see where the assets actually go, recognizes <b>drainer-kit code</b>, flags look-alike domains and approvals granted to plain wallets, and reads the content the agent acted on for <b>injected instructions</b>. Every verdict is a <b>signed attestation</b> that states which checks actually ran. $0.001 a check with prepaid credits, fail-closed.</p>
       <div class="cta-row">
         <a class="cta solid" href="#integrate">Integrate in 5 minutes</a>
         <a class="cta line" href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">Read the evidence</a>
@@ -220,7 +220,7 @@ const PAGE = `<!doctype html>
   <section id="integrate">
     <div class="sec-head"><span class="sec-no">04</span><h2>Integration</h2></div>
     <pre>
-<span class="cm"># Paid per call with x402: $0.001 in USDC ($0.002 on Solana); $0.005 with a transaction to simulate.</span>
+<span class="cm"># Paid with x402: $0.001 a check from prepaid credits (POST /v1/credits), or per call ($0.0035 on Base); $0.005 with a transaction to simulate.</span>
 <span class="cm"># An unpaid call returns 402 with the accepted mainnet options; any x402 client pays and retries.</span>
 curl -X POST https://x402check.xyz/v1/risk-check \\
   -H <span class="g">"Content-Type: application/json"</span> \\
@@ -269,7 +269,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
     <div class="sec-head"><span class="sec-no">06</span><h2>Pricing &amp; identity</h2></div>
     <table>
       <tr><th></th><th></th></tr>
-      <tr><td>Price</td><td>$0.001 per evaluation ($0.002 on Solana); $0.005 when the request includes a transaction that is simulated; batch billed per item. USDC via x402 on mainnet &mdash; Base, Polygon, Arbitrum, Avalanche, Monad, Sei, Solana. Every evaluation is paid; the attestation is released only after settlement.</td></tr>
+      <tr><td>Price</td><td><b>$0.001 per evaluation with prepaid credits</b>: one x402 payment buys a balance ($0.10&ndash;$100), then each check is debited with no payment round trip. Or per call, by payment network: $0.0035 on Base, $0.002 on Solana and Sei, $0.001 on Avalanche and Monad, $0.007 on Polygon, $0.009 on Arbitrum. $0.005 when the request includes a transaction that is simulated; batch billed per item. USDC via x402, mainnet only. Every evaluation is paid; a per-call attestation is released only after settlement.</td></tr>
       <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> &mdash; <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
       <tr><td>Data</td><td>OFAC SDN (U.S. Treasury) and MetaMask eth-phishing-detect, refreshed daily; ScamSniffer (runtime); Forta labelled datasets; Blockscout; public JSON-RPC &mdash; see THIRD_PARTY_NOTICES.md and the live <a href="/status">data status</a></td></tr>
       <tr><td>Engine</td><td>Deterministic checks and scoring in open-source code (MIT); TypeSafe Jev System One for content intent</td></tr>

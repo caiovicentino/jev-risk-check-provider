@@ -4,11 +4,14 @@ An MCP server that lets any AI agent check a counterparty **before money moves**
 
 Each check screens the counterparty against the OFAC SDN list, phishing and drainer feeds, look-alike domains and on-chain facts. It can also simulate the transaction (API v0.3), and a typed model reads the content the agent acted on. The server verifies every verdict's ES256 attestation against `did:web:x402check.xyz` before the agent sees an action.
 
-**Every check is paid:** $0.001 in USDC per evaluation via x402, or $0.005 when the check includes a transaction to simulate. There is no free tier. The server pays from a wallet you configure (`X402CHECK_PAYER_KEY`), with a per-payment cap and a total budget. The agent never handles money.
+**Every check is paid.** There is no free tier, and the agent never handles money. The server pays one of two ways:
+
+- **From prepaid credits (`X402CHECK_CREDIT_TOKEN`):** $0.001 a check, or $0.005 when a transaction is simulated, with no payment round trip. Buy a token with `POST https://x402check.xyz/v1/credits` or the SDK's `buyCredits`.
+- **Per call via x402 (`X402CHECK_PAYER_KEY`):** from a wallet you configure, at the payment network's price ($0.0035 on Base), with a per-payment cap and a total budget.
 
 | Tool | What it does |
 |---|---|
-| `x402check_check` | Risk-checks a counterparty, paying $0.001, or $0.005 when a transaction is simulated. It returns an action (`allow`, `warn`, `block` or `not_verified`), the findings, the evidence, the attestation `jti`, the settlement receipt and the full structured result. |
+| `x402check_check` | Risk-checks a counterparty, paying $0.001 from credits (or the network's price per call), or $0.005 when a transaction is simulated. It returns an action (`allow`, `warn`, `block` or `not_verified`), the findings, the evidence, the attestation `jti`, the settlement receipt and the full structured result. |
 | `x402check_verify_attestation` | Verifies an x402check attestation (`{ jws, aud?, sub? }`) before relying on it. It makes no payment. |
 | `x402check_methodology` | Explains what is checked, the price, and the published, measured limits. It makes no payment. |
 
@@ -17,6 +20,10 @@ Each check screens the counterparty against the OFAC SDN list, phishing and drai
 ### Claude Code
 
 ```bash
+# prepaid credits: $0.001 a check, no payment round trip
+claude mcp add x402check -e X402CHECK_CREDIT_TOKEN=x402c_YOUR_TOKEN -- npx -y @x402check/mcp
+
+# or per call via x402, from a dedicated wallet
 claude mcp add x402check \
   -e X402CHECK_PAYER_KEY=0xYOUR_DEDICATED_WALLET_KEY \
   -e X402CHECK_BUDGET_USD=1.00 \
@@ -24,7 +31,7 @@ claude mcp add x402check \
   -- npx -y @x402check/mcp
 ```
 
-Without `X402CHECK_PAYER_KEY` the server still starts, but every check returns `not_verified` with instructions to configure a payer.
+Without `X402CHECK_CREDIT_TOKEN` or `X402CHECK_PAYER_KEY`, the server still starts. Every check then returns `not_verified`, with instructions to configure one of them.
 
 ### Claude Desktop
 
@@ -84,6 +91,7 @@ claude mcp add x402check -e X402CHECK_PAYER_KEY=0xYOUR_DEDICATED_WALLET_KEY -- n
 
 | Variable | Default | |
 |---|---|---|
+| `X402CHECK_CREDIT_TOKEN` | none | A prepaid credit token (`x402c_…`, from `POST /v1/credits`).<br>• Each check is debited from its balance: $0.001, or $0.005 when a transaction is simulated. There is no payment round trip.<br>• It takes precedence over `X402CHECK_PAYER_KEY`. The balance is the cap, so the two limits below apply to the payer only.<br>• An empty balance returns `not_verified`, with the top-up to do. |
 | `X402CHECK_PAYER_KEY` | none | EVM private key (`0x` + 64 hex) of the wallet that pays for checks, in USDC via x402, on Base when offered. See the security note below. |
 | `X402CHECK_MAX_PAYMENT_USD` | `0.05` | The most a single payment may cost. A higher price is refused before anything is signed. |
 | `X402CHECK_BUDGET_USD` | `1.00` | Total spend for this server process. Once reached, checks return `not_verified` ("budget exhausted") without calling the API. Every signed payment counts, settled or not. |
@@ -97,6 +105,7 @@ claude mcp add x402check -e X402CHECK_PAYER_KEY=0xYOUR_DEDICATED_WALLET_KEY -- n
 - **The payer needs no ETH.** The x402 "exact" scheme is gasless for the payer: it signs a USDC transfer authorization (EIP-3009), and the facilitator settles it.
 - **Spending is bounded twice.** `X402CHECK_MAX_PAYMENT_USD` caps each payment (x402 spend controls), and `X402CHECK_BUDGET_USD` caps the total for the process.
 - **The key is never logged or echoed.** It lives only inside the signer, and every tool output is scrubbed of it. At startup, stderr shows the payer's public address and limits, never the key.
+- **The credit token is a bearer secret,** like an API key. Anyone who holds it can spend its balance. It is never logged or echoed, and every tool output is scrubbed of it. Keep the balance small and top it up as needed.
 - **Solana payment is not built in,** to keep the dependency surface of a key-holding process small. `@x402check/client` accepts any x402-paying fetch, including a Solana one.
 
 ## How an agent should use it
@@ -136,7 +145,7 @@ Simulation (eip155:8453): ok · amounts in base units
 - findings: outflow_to_undisclosed_eoa, approval_to_eoa, unlimited_approval
 Attestation: signature verified against did:web:x402check.xyz · jti 7d0f3a52-1c4b-4e8a-9f6d-2b3c4d5e6f70 · expires 2026-09-29T18:00:55.000Z
 Payment: settled on eip155:8453 · tx 0x6c1b5d0e0c1f4f8e9a3b2d7c5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f
-Payer budget: $0.001 of $1.00 spent by this server
+Payer budget: $0.0035 of $1.00 spent by this server
 Policy: allow → proceed · warn → ask the user first · block or not_verified → STOP.
 ```
 
@@ -145,7 +154,9 @@ The tool also returns `structuredContent`, which conforms to the tool's `outputS
 - `action`, `reasons`, and `next` (with `not_verified`);
 - `tier`, `score`, `categories` and `jti`, present only when the verdict is trusted;
 - `attestation`: `{ verified, failures, issuer, expires_at }`;
-- `payment`: the settlement receipt `{ settled, network, transaction, payer }` and the payer's `{ spent_usd, budget_usd }`;
+- `payment`, which depends on how the check was paid:
+  - per call: the settlement receipt `{ settled, network, transaction, payer }` and the payer's `{ spent_usd, budget_usd }`;
+  - from credits: `{ credits_charged_usd, credits_balance_usd }`, and the text shows `Paid from prepaid credits: $0.001 (balance $0.499)`;
 - `error`: `{ code, status, message, field?, index?, retry_after?, payment_required? }`;
 - `result`: the API result, with its `jws`. Its evidence is normalized, so values not in their expected format are dropped.
 

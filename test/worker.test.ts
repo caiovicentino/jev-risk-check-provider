@@ -66,6 +66,11 @@ test("testnet payment options exist only when explicitly enabled", () => {
   assert.ok(prod.includes("eip155:8453") && prod.includes("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"));
   for (const testnet of ["eip155:84532", "eip155:421614", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"]) assert.ok(!prod.includes(testnet), testnet);
   assert.ok(nets({ ENABLE_TESTNETS: "true" }).includes("eip155:84532"));
+  // Each network carries its own price: Base first.
+  const ctx = { path: "/v1/risk-check", adapter: { getBody: () => ({ wallet: WALLET }) } } as unknown as HTTPRequestContext;
+  const priced = Object.fromEntries(buildAccepts({}).map((a) => [String(a.network), (a.price as (c: HTTPRequestContext) => string)(ctx)]));
+  assert.equal(buildAccepts({})[0]?.network, "eip155:8453");
+  assert.deepEqual(priced, { "eip155:8453": "$0.0035", "eip155:137": "$0.007", "eip155:42161": "$0.009", "eip155:43114": "$0.001", "eip155:143": "$0.001", "eip155:1329": "$0.002", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "$0.002" });
 });
 
 test("invalid input is rejected before any payment work", async () => {
@@ -112,30 +117,52 @@ test("paid path releases the attestation only after settlement succeeds", async 
   assert.equal(body.jws, undefined);
 });
 
-test("payment routing: EVM networks settle through PayAI (below Dexter's gas floors), Solana and Monad through Dexter", async () => {
-  const { scopedFacilitator, paymentRouting } = await import("../deploy/protected.js");
-  const kind = (network: string, floor?: number) => ({ x402Version: 2, scheme: "exact", network, ...(floor !== undefined ? { extra: { paymentFloorAvailable: true, minPaymentAmountUsd: floor } } : {}) });
+test("payment routing: a facilitator every payer can pay through, then the cheapest to us; margins per network", async () => {
+  const { paymentRouting, routedFacilitators } = await import("../deploy/protected.js");
+  const kind = (network: string, extra: Record<string, unknown> = {}) => ({ x402Version: 2, scheme: "exact", network, extra });
+  const floor = (usd: number, method?: string) => ({ paymentFloorAvailable: true, minPaymentAmountUsd: usd, ...(method ? { assetTransferMethod: method } : {}) });
   const client = (kinds: ReturnType<typeof kind>[]) => ({ verify: async () => ({ isValid: true }), settle: async () => ({ success: true }), getSupported: async () => ({ kinds }) }) as never;
-  const payai = client([kind("eip155:8453"), kind("eip155:137"), kind("eip155:42161"), kind("eip155:43114"), kind("eip155:1329"), kind("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")]);
-  const dexter = client([kind("eip155:8453", 0.0015), kind("eip155:137", 0.0031), kind("eip155:143", 0.0003), kind("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", 0.0013)]);
-  const routes = await paymentRouting({}, [
-    { name: "payai", client: scopedFacilitator(payai, (n) => n.startsWith("eip155:")) },
-    { name: "dexter", client: dexter },
-  ]);
-  const by = Object.fromEntries(routes.map((r) => [r.network, r]));
-  assert.equal(by["eip155:8453"]?.facilitator, "payai");
-  assert.equal(by["eip155:1329"]?.facilitator, "payai");
-  assert.equal(by["eip155:143"]?.facilitator, "dexter");
-  assert.equal(by["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]?.facilitator, "dexter", "PayAI is scoped to EVM");
-  assert.equal(by["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]?.below_floor, false, "$0.002 clears Dexter's Solana floor");
-  assert.ok(routes.every((r) => !r.below_floor));
-  // The failure this routing fixes: Dexter alone settles Base below its gas-cost floor.
-  const dexterOnly = await paymentRouting({}, [{ name: "dexter", client: dexter }]);
-  assert.equal(dexterOnly.find((r) => r.network === "eip155:8453")?.below_floor, true);
+  const SOL = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+  // PayAI: EIP-3009 on EVM (gasless for any payer), fee = gas + 30% (live table of 2026-09-30).
+  const payai = client([kind("eip155:8453"), kind("eip155:137"), kind("eip155:42161"), kind("eip155:43114"), kind("eip155:1329"), kind(SOL)]);
+  const payaiFees = new Map([["eip155:8453", 0.00231], ["eip155:137", 0.00489], ["eip155:42161", 0.00663], ["eip155:43114", 0.0001], ["eip155:1329", 0.00077], [SOL, 0.00162]]);
+  // Dexter: no fee, but Permit2 on every EVM network and a floor.
+  const dexterKinds = (solFloor: number) => [kind("eip155:8453", floor(0.0015, "permit2")), kind("eip155:137", floor(0.0036, "permit2")), kind("eip155:42161", floor(0.0061, "permit2")), kind("eip155:43114", floor(0.004, "permit2")), kind("eip155:143", floor(0.0003, "permit2")), kind(SOL, floor(solFloor))];
+  const entries = (solFloor = 0.0013, fees: (() => Promise<Map<string, number>>) | undefined = async () => payaiFees) => [
+    { name: "payai", client: payai, fees },
+    { name: "dexter", client: client(dexterKinds(solFloor)), fees: async () => new Map<string, number>() },
+  ];
+  const by = async (e: ReturnType<typeof entries>) => Object.fromEntries((await paymentRouting({}, e)).map((r) => [r.network, r]));
+
+  const routes = await by(entries());
+  // Base: Dexter would be free, but through Permit2: most payers could not pay. PayAI, at a margin.
+  assert.deepEqual([routes["eip155:8453"]?.facilitator, routes["eip155:8453"]?.transfer_method, routes["eip155:8453"]?.fee_usd, routes["eip155:8453"]?.margin_pct], ["payai", "eip3009", 0.00231, 32]);
+  for (const n of ["eip155:137", "eip155:42161", "eip155:43114", "eip155:1329"]) assert.equal(routes[n]?.facilitator, "payai", n);
+  assert.ok(Object.values(routes).every((r) => (r.margin_usd ?? 0) > 0), "every route clears its settlement cost");
+  // Monad: Dexter is the only facilitator (Permit2 as a last resort).
+  assert.deepEqual([routes["eip155:143"]?.facilitator, routes["eip155:143"]?.transfer_method], ["dexter", "permit2"]);
+  // Solana: both are payable by anyone; Dexter costs us nothing.
+  assert.deepEqual([routes[SOL]?.facilitator, routes[SOL]?.fee_usd, routes[SOL]?.margin_pct, routes[SOL]?.below_floor], ["dexter", 0, 96.5, false]);
+
+  // Dexter's floor rises above our Solana price: the route moves to PayAI instead of failing.
+  const raised = await by(entries(0.0025));
+  assert.deepEqual([raised[SOL]?.facilitator, raised[SOL]?.below_floor], ["payai", false]);
+  // PayAI's fee table unavailable: the route stays payable, the margin is unknown, never guessed.
+  const blind = await by(entries(0.0013, async () => Promise.reject(new Error("down"))));
+  assert.deepEqual([blind["eip155:8453"]?.facilitator, blind["eip155:8453"]?.fee_usd, blind["eip155:8453"]?.margin_usd], ["payai", null, null]);
+
+  // The resource server sees each facilitator scoped to its routed networks, first.
+  const list = routedFacilitators(entries() as never, await paymentRouting({}, entries()));
+  const firstFor = async (network: string) => {
+    for (const [i, f] of list.entries()) if ((await f.getSupported()).kinds.some((k) => k.network === network)) return i;
+    return -1;
+  };
+  assert.equal(await firstFor("eip155:8453"), 0, "PayAI's scoped client comes first for Base");
+  assert.equal(await firstFor(SOL), 1, "Dexter's scoped client comes first for Solana");
 });
 
 test("differentiated pricing: $0.005 for an evaluation that simulates a transaction, per item in a batch", async () => {
-  const { priceMilli, simulates } = await import("../deploy/protected.js");
+  const { priceMicro, simulates } = await import("../deploy/protected.js");
   const USER = "0x1111111111111111111111111111111111111111";
   const tx = { from: USER, to: USER, value: "1" };
   const ctx = (path: string, body: unknown) => ({ path, adapter: { getBody: () => body } }) as unknown as HTTPRequestContext;
@@ -150,5 +177,9 @@ test("differentiated pricing: $0.005 for an evaluation that simulates a transact
   const mixed = { requests: [{ wallet: USER, chain: "base", transaction: tx }, { wallet: USER }, { wallet: USER, chain: "polygon" }] };
   assert.equal(makePrice(0.001)(ctx("/v1/risk-check/batch", mixed)), "$0.007");
   assert.equal(makePrice(0.002)(ctx("/v1/risk-check/batch", mixed)), "$0.009");
-  assert.equal(priceMilli("/v1/risk-check/batch", { requests: new Array(25).fill({ wallet: USER, chain: "base", transaction: tx }) }, 1), 125);
+  assert.equal(priceMicro("/v1/risk-check/batch", { requests: new Array(25).fill({ wallet: USER, chain: "base", transaction: tx }) }, 1000), 125_000);
+  // Base's price ($0.0035) needs sub-millidollar precision; a simulated item never costs less than its network's price.
+  assert.equal(makePrice(0.0035)(ctx("/v1/risk-check", { wallet: USER })), "$0.0035");
+  assert.equal(makePrice(0.0035)(ctx("/v1/risk-check/batch", mixed)), "$0.012");
+  assert.equal(makePrice(0.009)(ctx("/v1/risk-check", { wallet: USER, chain: "base", transaction: tx })), "$0.009");
 });

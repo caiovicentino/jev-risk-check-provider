@@ -38,7 +38,14 @@ PAY_TO_SOL = "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X"
 #   3. the provider DID becomes did:web:<your-domain>, verifiable by any resource server
 #   4. publish the discovery doc URL in your x402 PaymentRequired extensions
 
-# v1 created the free-tier quota counter; v2 deletes it (v0.3 removed the free tier).
+# Prepaid credit ledgers (deploy/credits.ts): one Durable Object per token, so a debit is
+# atomic and a balance can never be overdrawn.
+[[durable_objects.bindings]]
+name = "CREDITS"
+class_name = "CreditLedger"
+
+# v1 created the free-tier quota counter; v2 deletes it (v0.3 removed the free tier);
+# v3 adds the prepaid credit ledger.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RateCounter"]
@@ -46,6 +53,10 @@ new_sqlite_classes = ["RateCounter"]
 [[migrations]]
 tag = "v2"
 deleted_classes = ["RateCounter"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CreditLedger"]
 
 # Embedded threat-feed hash sets (src/data/*.bin) are bundled as ArrayBuffer Data modules.
 # Keep this table LAST: TOML keys written after a [[table]] header belong to that table.

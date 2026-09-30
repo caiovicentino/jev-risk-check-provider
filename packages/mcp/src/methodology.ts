@@ -38,7 +38,7 @@ Policy for agents: call x402check_check BEFORE sending funds, signing approvals,
 - block: do not proceed
 - not_verified: the check did not complete or could not be verified. STOP; it is never an all-clear.
 
-Price: $0.001 per evaluation ($0.002 on Solana), $0.005 when a transaction is simulated, paid per call with x402 (USDC); there is no free tier. This server pays from its configured payer (X402CHECK_PAYER_KEY), within its per-payment cap and budget.
+Price: $0.001 per evaluation from prepaid credits (one x402 payment buys a balance: POST /v1/credits), or per call via x402 in USDC at the payment network's price ($0.0035 on Base, $0.002 on Solana; the 402 challenge lists them all); $0.005 when a transaction is simulated. There is no free tier. This server pays from its prepaid credits (X402CHECK_CREDIT_TOKEN) or its configured payer (X402CHECK_PAYER_KEY), within its per-payment cap and budget.
 
 Evidence: ${EVIDENCE_URL}
 Methodology: ${METHODOLOGY_URL}

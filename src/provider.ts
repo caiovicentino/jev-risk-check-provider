@@ -14,7 +14,7 @@ import { GRANTING_INTERACTIONS, type Answer, type Evidence, type KitWatchEvidenc
 
 export const PROVIDER_DID_PREFIX = "did:web:";
 export const ATTESTATION_TTL_MS = 60 * 60 * 1000;
-export const PROVIDER_VERSION = "0.4.0";
+export const PROVIDER_VERSION = "0.5.0";
 
 export type ProviderConfig = {
   host: string;
@@ -96,7 +96,16 @@ export type ScoredEvaluation = {
   error: string | null;
 };
 
-export type PricingInfo = { unitUsd: string; simulationUsd?: string; networks: string[] };
+export type PricingInfo = {
+  /** Headline price (Base). */
+  unitUsd: string;
+  simulationUsd?: string;
+  networks: string[];
+  /** Price per evaluation by payment network (CAIP-2 → USD). */
+  byNetwork?: Record<string, string>;
+  /** Prepaid credits (deploy/credits.ts), when enabled. */
+  credits?: { check_usd: string; simulated_check_usd: string; pack_min_usd: string; pack_max_usd: string; endpoint: string };
+};
 
 export function discoveryDocument(host: string, pricing?: PricingInfo): RiskCheckDiscovery {
   return {
@@ -114,11 +123,16 @@ export function discoveryDocument(host: string, pricing?: PricingInfo): RiskChec
             currency: "USDC",
             protocol: "x402",
             network: pricing.networks[0] ?? "",
-            unit: pricing.simulationUsd
-              ? `per evaluation ($0.002 on Solana); $${pricing.simulationUsd} when the request includes a transaction that is simulated; batch billed per item`
-              : "per evaluation ($0.002 on Solana); batch billed per item",
+            unit: [
+              "per evaluation, by payment network (amounts_by_network)",
+              ...(pricing.simulationUsd ? [`$${pricing.simulationUsd} when the request includes a transaction that is simulated (or the network's price if higher)`] : []),
+              "batch billed per item",
+              ...(pricing.credits ? [`or $${pricing.credits.check_usd} per evaluation from prepaid credits (credits)`] : []),
+            ].join("; "),
             ...(pricing.simulationUsd ? { amount_with_transaction: pricing.simulationUsd } : {}),
             networks: pricing.networks,
+            ...(pricing.byNetwork ? { amounts_by_network: pricing.byNetwork } : {}),
+            ...(pricing.credits ? { credits: pricing.credits } : {}),
           },
         }
       : {}),

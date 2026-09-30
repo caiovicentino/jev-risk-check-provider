@@ -1,5 +1,5 @@
 export { createClient, decodePaymentRequired, isRiskCheckResult, DEFAULT_BASE_URL, DEFAULT_TIMEOUT_MS, MAX_BATCH } from "./client.js";
-export type { CallOptions, ClientOptions, ResponseInfo, X402CheckClient } from "./client.js";
+export type { CallOptions, ClientOptions, CreditPurchase, ResponseInfo, X402CheckClient } from "./client.js";
 export { X402CheckError, isX402CheckError } from "./errors.js";
 export type { X402CheckErrorCode } from "./errors.js";
 export {

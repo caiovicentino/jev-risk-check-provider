@@ -246,7 +246,7 @@ describe("x402check_check", () => {
       assert.equal(r.isError, true);
       assert.match(r.text, /^x402check: NOT VERIFIED/);
       assert.match(r.text, /payment required \(every evaluation is paid via x402\)/);
-      assert.match(r.text, /Next: every check is paid via x402 \(\$0\.001 in USDC\)\. Set X402CHECK_PAYER_KEY/);
+      assert.match(r.text, /Next: every check is paid\. Set X402CHECK_CREDIT_TOKEN to a prepaid credit token \(\$0\.001 a check.*or X402CHECK_PAYER_KEY/);
       const error = r.structuredContent?.error as { code: string; status: number; payment_required: typeof challenge };
       assert.equal(error.code, "payment_required");
       assert.equal(error.status, 402);
@@ -592,7 +592,7 @@ describe("x402check_methodology", () => {
       assert.match(r.text, /40\/82 listed contracts at creation from earlier deployments; on held-out legitimate code the gated code sets have 0 false positives among 1,737/);
       assert.match(r.text, /Kit watch.*address_poisoning.*compromised_wallet.*auto_forwarding_wallet.*drainer_operator/s);
       assert.doesNotMatch(r.text, /0 collisions among 9,625/);
-      assert.match(r.text, /Price: \$0\.001 per evaluation \(\$0\.002 on Solana\), \$0\.005 when a transaction is simulated, paid per call with x402 \(USDC\); there is no free tier/);
+      assert.match(r.text, /Price: \$0\.001 per evaluation from prepaid credits .* \(\$0\.0035 on Base, \$0\.002 on Solana; the 402 challenge lists them all\); \$0\.005 when a transaction is simulated\. There is no free tier/);
       assert.doesNotMatch(r.text, /per day|free tier:/i);
       assert.match(r.text, /Transaction simulation \(eth_simulateV1 on Ethereum, Base, Polygon, Arbitrum, Optimism and BSC; not Avalanche\)/);
       assert.match(r.text, /hidden recipients.*exceeds-declared.*unverified sinks/s);
@@ -622,9 +622,10 @@ describe("configuration", () => {
         X402CHECK_BUDGET_USD: "2.5",
         X402CHECK_CLIENT_ID: "ignored",
       }),
-      { baseUrl: "http://localhost:8787", issuer: undefined, timeoutMs: 2500, payerKey: key, maxPaymentUsd: 0.01, budgetUsd: 2.5 },
+      { baseUrl: "http://localhost:8787", issuer: undefined, timeoutMs: 2500, creditToken: undefined, payerKey: key, maxPaymentUsd: 0.01, budgetUsd: 2.5 },
     );
-    assert.deepEqual(configFromEnv({}), { baseUrl: undefined, issuer: undefined, timeoutMs: undefined, payerKey: undefined, maxPaymentUsd: undefined, budgetUsd: undefined });
+    assert.deepEqual(configFromEnv({}), { baseUrl: undefined, issuer: undefined, timeoutMs: undefined, creditToken: undefined, payerKey: undefined, maxPaymentUsd: undefined, budgetUsd: undefined });
+    assert.equal(configFromEnv({ X402CHECK_CREDIT_TOKEN: ` x402c_${"A".repeat(43)} ` }).creditToken, `x402c_${"A".repeat(43)}`);
   });
 
   test("the base URL from the environment is used", async () => {

@@ -6,11 +6,14 @@ import { VERSION } from "./version.js";
 
 const HELP = `x402check-mcp ${VERSION}: MCP server (stdio) for x402check pre-payment risk checks.
 
-Every check is paid via x402: $0.001 in USDC per evaluation, gasless for the payer.
+Every check is paid: $0.001 from prepaid credits, or per call via x402 in USDC
+($0.0035 on Base, gasless for the payer).
 
 Environment:
+  X402CHECK_CREDIT_TOKEN     prepaid credit token (x402c_…, from POST /v1/credits): checks are
+                             debited from its balance, with no payment round trip. A secret.
   X402CHECK_PAYER_KEY        EVM private key (0x + 64 hex) of a DEDICATED, low-balance wallet
-                             holding a little USDC on Base. It pays for checks (Base first).
+                             holding a little USDC on Base. It pays per check (Base first).
   X402CHECK_MAX_PAYMENT_USD  per-payment cap (default 0.05)
   X402CHECK_BUDGET_USD       total spend for this server process (default 1.00)
   X402CHECK_BASE_URL         API origin (default https://x402check.xyz)
@@ -32,11 +35,13 @@ async function main(): Promise<void> {
   const config = configFromEnv(process.env);
   const server = createX402CheckServer(config);
   // stderr only (stdout carries MCP messages); the public address, never the key.
-  if (config.payerKey) {
+  if (config.creditToken) {
+    process.stderr.write("x402check-mcp: paying from prepaid credits (X402CHECK_CREDIT_TOKEN)\n");
+  } else if (config.payerKey) {
     const address = createPayer({ privateKey: config.payerKey, maxPaymentUsd: config.maxPaymentUsd, budgetUsd: config.budgetUsd }).address;
     process.stderr.write(`x402check-mcp: paying from ${address} (max $${(config.maxPaymentUsd ?? DEFAULT_MAX_PAYMENT_USD).toFixed(3)} per check, budget $${(config.budgetUsd ?? DEFAULT_BUDGET_USD).toFixed(2)})\n`);
   } else {
-    process.stderr.write("x402check-mcp: no X402CHECK_PAYER_KEY: checks are paid via x402 and will return not_verified until a payer is configured\n");
+    process.stderr.write("x402check-mcp: no X402CHECK_CREDIT_TOKEN or X402CHECK_PAYER_KEY: checks are paid and will return not_verified until one is configured\n");
   }
   await server.connect(new StdioServerTransport());
   const shutdown = (): void => {

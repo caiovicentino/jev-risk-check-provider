@@ -9,7 +9,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 export const DEFAULT_MAX_PAYMENT_USD = 0.05;
 export const DEFAULT_BUDGET_USD = 1;
-/** The cheapest evaluation ($0.001 on EVM networks). Below it the budget cannot buy a check. */
+/** The cheapest per-call evaluation ($0.001 on Avalanche and Monad; $0.0035 on Base). Below it the budget cannot buy a check. */
 export const MIN_CHECK_USD = 0.001;
 /** Preferred first when the 402 offers it: Base. */
 export const PREFERRED_NETWORK = "eip155:8453";

@@ -48,14 +48,25 @@ export interface PaymentView {
   payer?: string;
   spent_usd?: number;
   budget_usd?: number;
+  /** Paid from prepaid credits: this check's charge and the balance left ("$0.001"). */
+  credits_charged_usd?: string;
+  credits_balance_usd?: string;
 }
 
 const TX_HASH = /^(?:0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/;
 const CAIP2 = /^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/;
 
-/** The decoded PAYMENT-RESPONSE receipt (format-checked) plus the payer's spend so far. */
-export function paymentView(receipt: Record<string, unknown> | undefined, spend: { spent_usd: number; budget_usd: number } | undefined): PaymentView | undefined {
+/** The decoded PAYMENT-RESPONSE receipt (format-checked), the payer's spend so far, or the prepaid-credit charge. */
+export function paymentView(
+  receipt: Record<string, unknown> | undefined,
+  spend: { spent_usd: number; budget_usd: number } | undefined,
+  credits?: { chargedUsd: string; balanceUsd: string } | undefined,
+): PaymentView | undefined {
   const view: PaymentView = {};
+  if (credits) {
+    view.credits_charged_usd = credits.chargedUsd;
+    view.credits_balance_usd = credits.balanceUsd;
+  }
   if (receipt) {
     if (typeof receipt.success === "boolean") view.settled = receipt.success;
     if (typeof receipt.network === "string" && CAIP2.test(receipt.network)) view.network = receipt.network;
@@ -205,7 +216,7 @@ function attestationLine(result: RiskCheckResult | undefined, v: VerificationRes
 type PayerInfo = { address: string; maxPaymentUsd: number; budgetUsd: number; spentUsd: number };
 
 const NO_PAYER =
-  "Next: every check is paid via x402 ($0.001 in USDC). Set X402CHECK_PAYER_KEY to the private key of a dedicated, low-balance wallet funded with a little USDC on Base (the x402 exact scheme is gasless for the payer), then restart this server. Do not proceed without a check.";
+  "Next: every check is paid. Set X402CHECK_CREDIT_TOKEN to a prepaid credit token ($0.001 a check; buy one with POST https://x402check.xyz/v1/credits), or X402CHECK_PAYER_KEY to the private key of a dedicated, low-balance wallet funded with a little USDC on Base (paid per call via x402: $0.0035 on Base, gasless for the payer), then restart this server. Do not proceed without a check.";
 
 function paymentNextStep(refusal: PaymentRefused | undefined, error: unknown, payer: PayerInfo | undefined): string | undefined {
   if (refusal) {
@@ -219,6 +230,13 @@ function paymentNextStep(refusal: PaymentRefused | undefined, error: unknown, pa
       default:
         return "Next: the payment could not be created; ask the operator to check X402CHECK_PAYER_KEY. Do not proceed without a check.";
     }
+  }
+  // Paid from prepaid credits: retrying cannot help, and there is no payer to check.
+  if (error instanceof X402CheckError && error.code === "insufficient_credits") {
+    return `Next: this server's prepaid credits cannot pay for this check (${error.message}). Ask the operator to top up the X402CHECK_CREDIT_TOKEN balance: POST https://x402check.xyz/v1/credits with that token. Do not proceed without a check.`;
+  }
+  if (error instanceof X402CheckError && error.code === "invalid_credit_token") {
+    return "Next: the prepaid credit token was not accepted; ask the operator to check X402CHECK_CREDIT_TOKEN. Do not proceed without a check.";
   }
   if (error instanceof X402CheckError && error.code === "payment_required") {
     if (!payer) return NO_PAYER;
@@ -283,6 +301,7 @@ export function renderCheck(r: CheckRendering): string {
     lines.push(`Payment: ${p.settled === false ? "NOT settled" : "settled"}${where}${p.transaction ? ` · tx ${p.transaction}` : ""}`);
   }
   if (p?.spent_usd !== undefined && p.budget_usd !== undefined) lines.push(`Payer budget: ${dollars(p.spent_usd)} of ${dollars(p.budget_usd)} spent by this server`);
+  if (p?.credits_charged_usd && p.credits_balance_usd) lines.push(`Paid from prepaid credits: ${p.credits_charged_usd} (balance ${p.credits_balance_usd})`);
   const next = paymentNextStep(r.refusal, r.error, r.payer) ?? nextStep(r.error, r.result);
   if (next) lines.push(next);
   lines.push(POLICY);

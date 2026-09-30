@@ -5,6 +5,10 @@ export type X402CheckErrorCode =
   | "invalid_request"
   /** 402: the call was not paid (every evaluation is paid via x402), or the payment failed; see `paymentRequired` / `paymentError`. */
   | "payment_required"
+  /** 402 on a call paid from prepaid credits: the balance does not cover it. Top up with `buyCredits`. */
+  | "insufficient_credits"
+  /** 401: the credit token was not accepted. */
+  | "invalid_credit_token"
   /** 413: body over 64 KiB, or more than 25 batch items. */
   | "too_large"
   /** 503: the evaluation could not be completed (paid path, no charge). Retry after `retryAfter`. */

@@ -13,6 +13,21 @@ export interface ScheduledController {
   scheduledTime: number;
   cron: string;
 }
+/** Durable Object storage (transactional key-value API; also available on SQLite-backed objects). */
+export interface DurableObjectState {
+  storage: {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    put(key: string, value: unknown): Promise<void>;
+    put(entries: Record<string, unknown>): Promise<void>;
+  };
+}
+export interface DurableObjectId {
+  toString(): string;
+}
+export interface DurableObjectNamespace {
+  idFromName(name: string): DurableObjectId;
+  get(id: DurableObjectId): { fetch(input: string | Request, init?: RequestInit): Promise<Response> };
+}
 
 export type WorkerEnv = {
   PROVIDER_HOST?: string;
@@ -44,5 +59,7 @@ export type WorkerEnv = {
   /** "off" disables the kit watch (the block-scanning cron and its evaluation-time lookups). */
   KIT_WATCH?: string;
   RATE?: KVNamespace;
+  /** Prepaid credit ledgers (deploy/credits.ts), one Durable Object per token. */
+  CREDITS?: DurableObjectNamespace;
 };
 

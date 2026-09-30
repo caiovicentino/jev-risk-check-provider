@@ -23,6 +23,19 @@ export interface ClientOptions {
    * on-chain settlement: allow more (e.g. 30000) with a paying fetch.
    */
   timeoutMs?: number | undefined;
+  /**
+   * A prepaid credit token (`x402c_…`, from `buyCredits`). Checks are then debited from its
+   * balance ($0.001, $0.005 when a transaction is simulated): no 402 round trip, no on-chain
+   * settlement per call. It is a bearer credential: keep it secret.
+   */
+  creditToken?: string | undefined;
+}
+
+export interface CreditPurchase {
+  /** A new token: only when the purchase was not a top-up. Shown once: store it like a password. */
+  token: string | undefined;
+  creditedUsd: string;
+  balanceUsd: string;
 }
 
 export interface CallOptions {
@@ -37,6 +50,8 @@ export interface ResponseInfo {
    * `{ success, transaction, network, payer, … }`.
    */
   paymentResponse: Record<string, unknown> | undefined;
+  /** Calls paid from prepaid credits: what this call cost and the balance left ("$0.001", "$0.999"). */
+  credits?: { chargedUsd: string; balanceUsd: string };
 }
 
 export interface X402CheckClient {
@@ -49,7 +64,17 @@ export interface X402CheckClient {
   checkWithInfo(request: RiskCheckRequest, options?: CallOptions): Promise<{ result: RiskCheckResult; info: ResponseInfo }>;
   /** `checkBatch` plus response metadata. */
   checkBatchWithInfo(requests: RiskCheckRequest[], options?: CallOptions): Promise<{ results: RiskCheckResult[]; info: ResponseInfo }>;
+  /**
+   * Buys prepaid credits ($0.10–$100, paid once via x402 through the configured fetch), or tops
+   * up `creditToken` when one is configured. Checks then debit the balance.
+   */
+  buyCredits(amountUsd: number, options?: CallOptions): Promise<CreditPurchase>;
+  /** The balance of `creditToken`. */
+  creditBalance(options?: CallOptions): Promise<{ balanceUsd: string }>;
 }
+
+const CREDIT_TOKEN = /^x402c_[A-Za-z0-9_-]{43}$/;
+const USD = /^\$\d{1,6}\.\d{2,6}$/;
 
 function normalizeBaseUrl(raw: string): string {
   let url: URL;
@@ -108,9 +133,12 @@ function retryAfterSeconds(header: string | null): number | undefined {
 }
 
 function responseInfo(res: FetchResponseLike): ResponseInfo {
+  const charged = res.headers.get("x-credits-charged") ?? "";
+  const balance = res.headers.get("x-credits-balance") ?? "";
   return {
     status: res.status,
     paymentResponse: decodeBase64Json(res.headers.get("payment-response") ?? res.headers.get("x-payment-response")),
+    ...(USD.test(charged) && USD.test(balance) ? { credits: { chargedUsd: charged, balanceUsd: balance } } : {}),
   };
 }
 
@@ -134,7 +162,14 @@ function httpError(res: FetchResponseLike, body: unknown): X402CheckError {
         index,
         message: `invalid request${field ? `: field "${field}"` : ""}${index !== undefined ? ` (batch index ${index})` : ""}`,
       });
+    case 401:
+      return new X402CheckError({ ...common, code: "invalid_credit_token", message: "the credit token was not accepted" });
     case 402: {
+      if (error === "insufficient_credits") {
+        const bal = isRecord(body) && typeof body.balance_usd === "string" && USD.test(body.balance_usd) ? body.balance_usd : undefined;
+        const cost = isRecord(body) && typeof body.cost_usd === "string" && USD.test(body.cost_usd) ? body.cost_usd : undefined;
+        return new X402CheckError({ ...common, code: "insufficient_credits", message: `insufficient credits${bal && cost ? `: balance ${bal}, this call costs ${cost}` : ""}` });
+      }
       const paymentRequired = decodePaymentRequired(res.headers.get("payment-required"));
       const rawPaymentError = res.headers.get("x-payment-error");
       const paymentError = rawPaymentError !== null && CODE.test(rawPaymentError) ? rawPaymentError : undefined;
@@ -180,13 +215,16 @@ export function createClient(options: ClientOptions = {}): X402CheckClient {
   // setTimeout clamps anything above 2^31−1 ms to 1 ms: reject instead of timing out every call.
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) throw new TypeError("timeoutMs must be between 1 and 2147483647");
   const fetchImpl: FetchLike = options.fetch ?? defaultFetch;
+  const creditToken = options.creditToken;
+  if (creditToken !== undefined && !CREDIT_TOKEN.test(creditToken)) throw new TypeError("creditToken must be an x402c_ token from buyCredits");
 
-  async function post(path: string, payload: unknown, call: CallOptions | undefined): Promise<{ body: unknown; info: ResponseInfo }> {
-    const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
+  async function send(method: "GET" | "POST", path: string, payload: unknown, call: CallOptions | undefined): Promise<{ body: unknown; info: ResponseInfo }> {
+    const headers: Record<string, string> = { Accept: "application/json", ...(method === "POST" ? { "Content-Type": "application/json" } : {}) };
+    if (creditToken) headers.Authorization = `Bearer ${creditToken}`;
     let res: FetchResponseLike;
     let text: string;
     try {
-      ({ res, text } = await exchange(fetchImpl, `${baseUrl}${path}`, { method: "POST", headers, body: JSON.stringify(payload) }, timeoutMs, call?.signal));
+      ({ res, text } = await exchange(fetchImpl, `${baseUrl}${path}`, { method, headers, ...(method === "POST" ? { body: JSON.stringify(payload) } : {}) }, timeoutMs, call?.signal));
     } catch (err) {
       const kind = err instanceof ExchangeError ? err.kind : "network";
       const cause = err instanceof ExchangeError ? err.cause : err;
@@ -199,6 +237,7 @@ export function createClient(options: ClientOptions = {}): X402CheckClient {
     if (res.status !== 200) throw httpError(res, body);
     return { body, info: responseInfo(res) };
   }
+  const post = (path: string, payload: unknown, call: CallOptions | undefined) => send("POST", path, payload, call);
 
   async function checkWithInfo(request: RiskCheckRequest, call?: CallOptions): Promise<{ result: RiskCheckResult; info: ResponseInfo }> {
     const { body, info } = await post("/v1/risk-check", request, call);
@@ -223,11 +262,32 @@ export function createClient(options: ClientOptions = {}): X402CheckClient {
     return { results, info };
   }
 
+  async function buyCredits(amountUsd: number, call?: CallOptions): Promise<CreditPurchase> {
+    if (typeof amountUsd !== "number" || !Number.isFinite(amountUsd) || amountUsd < 0.1 || amountUsd > 100) throw new TypeError("amountUsd must be between 0.10 and 100");
+    const { body } = await post("/v1/credits", { amount_usd: Math.round(amountUsd * 100) / 100 }, call);
+    const b = isRecord(body) ? body : {};
+    const token = typeof b.token === "string" && CREDIT_TOKEN.test(b.token) ? b.token : undefined;
+    const credited = typeof b.credited_usd === "string" && USD.test(b.credited_usd) ? b.credited_usd : undefined;
+    const balance = typeof b.balance_usd === "string" && USD.test(b.balance_usd) ? b.balance_usd : undefined;
+    if (!credited || !balance || (!creditToken && !token)) throw new X402CheckError({ code: "invalid_response", status: 200, body, message: "the credit purchase response is not well formed" });
+    return { token, creditedUsd: credited, balanceUsd: balance };
+  }
+
+  async function creditBalance(call?: CallOptions): Promise<{ balanceUsd: string }> {
+    if (!creditToken) throw new TypeError("creditBalance needs a creditToken");
+    const { body } = await send("GET", "/v1/credits", undefined, call);
+    const balance = isRecord(body) && typeof body.balance_usd === "string" && USD.test(body.balance_usd) ? body.balance_usd : undefined;
+    if (!balance) throw new X402CheckError({ code: "invalid_response", status: 200, body, message: "the credit balance response is not well formed" });
+    return { balanceUsd: balance };
+  }
+
   return {
     baseUrl,
     check: async (request, call) => (await checkWithInfo(request, call)).result,
     checkBatch: async (requests, call) => (await checkBatchWithInfo(requests, call)).results,
     checkWithInfo,
     checkBatchWithInfo,
+    buyCredits,
+    creditBalance,
   };
 }

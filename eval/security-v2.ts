@@ -6,7 +6,7 @@
 //
 //   X402CHECK_BASE=https://x402check.xyz npx tsx eval/security-v2.ts
 //
-// Budget: 7 paid evaluations (≈ $0.007); the other probes are unpriced 402/422 checks.
+// Budget: 7 paid evaluations (≈ $0.025 on Base at $0.0035 each); the other probes are unpriced 402/422 checks.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createPublicKey, createVerify, type JsonWebKey } from "node:crypto";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
@@ -120,16 +120,26 @@ const probes: Array<{ id: string; run: () => Promise<Omit<Outcome, "id">> }> = [
   {
     id: "v3-simulation-priced",
     run: async () => {
-      // $0.005 per item that simulates a transaction ($0.001 / $0.002 otherwise): read from the 402 challenge, nothing is paid.
+      // A simulated item costs $0.005, or its network's price when that is higher; a basic item
+      // costs the network's price (discovery → amounts_by_network). Read from the 402, nothing paid.
       const USER = "0x1111111111111111111111111111111111111111";
       const tx = { from: USER, to: ROUTER, value: "1" };
+      const disc = (await call("GET", "/.well-known/risk-check.json")).json as { pricing?: { amounts_by_network?: Record<string, string> } } | null;
+      const prices = disc?.pricing?.amounts_by_network ?? {};
+      const micro = (usd: string) => Math.round(Number(usd) * 1e6);
       const single = paymentRequired(await call("POST", "/v1/risk-check", { wallet: ROUTER, chain: "base", transaction: tx }));
       const mixed = paymentRequired(await call("POST", "/v1/risk-check/batch", { requests: [{ wallet: ROUTER, chain: "base", transaction: tx }, { wallet: WALLET }, { wallet: ROUTER, chain: "base" }] }));
-      if (!single.length || !mixed.length) return { status: "SKIP", detail: "no 402 challenge" };
-      const sol = (list: typeof single) => list.find((a) => a.network.startsWith("solana:"))?.amount;
-      const evm = (list: typeof single) => list.filter((a) => a.network.startsWith("eip155:")).map((a) => a.amount);
-      const ok = evm(single).every((a) => a === "5000") && sol(single) === "5000" && evm(mixed).every((a) => a === "7000") && sol(mixed) === "9000";
-      return ok ? { status: "PASS", detail: "simulated item $0.005 on every network; mixed batch (1 simulated + 2 basic) = $0.007 EVM, $0.009 Solana" } : { status: "FAIL", detail: `single ${JSON.stringify(single)} mixed ${JSON.stringify(mixed)}` };
+      if (!single.length || !mixed.length || !Object.keys(prices).length) return { status: "SKIP", detail: "no 402 challenge or no amounts_by_network" };
+      const bad: string[] = [];
+      for (const a of single) {
+        const unit = micro(prices[a.network] ?? "NaN");
+        if (Number(a.amount) !== Math.max(unit, 5000)) bad.push(`single ${a.network} ${a.amount} ≠ max(${unit}, 5000)`);
+      }
+      for (const a of mixed) {
+        const unit = micro(prices[a.network] ?? "NaN");
+        if (Number(a.amount) !== Math.max(unit, 5000) + 2 * unit) bad.push(`mixed ${a.network} ${a.amount} ≠ ${Math.max(unit, 5000) + 2 * unit}`);
+      }
+      return bad.length ? { status: "FAIL", detail: bad.join("; ") } : { status: "PASS", detail: `simulated item = max($0.005, network price) on all ${single.length} networks; mixed batch = simulated + 2 × network price (Base ${mixed.find((a) => a.network === "eip155:8453")?.amount} µUSDC)` };
     },
   },
   {

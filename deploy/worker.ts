@@ -9,6 +9,7 @@ import { OFAC_SDN_META } from "../src/data/ofac-sdn.js";
 import { sanctionsListMeta } from "../src/sanctions.js";
 import { PROVIDER_VERSION } from "../src/provider.js";
 import { KW, runKitWatch, type KitWatchStats } from "./kit-watch.js";
+import { CREDIT_PRICING, handleCredits } from "./credits.js";
 import type { ExecutionContext, ScheduledController, WorkerEnv } from "./runtime.js";
 // Bundled as a Wrangler Data module (see [[rules]] in wrangler.toml).
 import metamaskPhishing from "../src/data/metamask-phishing.bin";
@@ -81,14 +82,15 @@ async function status(env: WorkerEnv): Promise<Response> {
     refresh: { source: env.FEEDS_URL === "off" ? "off" : (env.FEEDS_URL ?? DEFAULT_FEEDS_URL), checked_at: fresh.checked_at ?? null, published_at: fresh.generated_at ?? null, error: fresh.error ?? null },
     checks: { onchain: env.ONCHAIN === "off" ? "off" : "on", simulation: env.SIMULATION === "off" ? "off" : "on", contract_verification: env.CONTRACT_INTEL === "off" ? "off" : "on" },
     payments: payments ?? { status: "unavailable" },
+    credits: env.CREDITS ? { status: "on", ...CREDIT_PRICING } : { status: "off" },
   }, { "Cache-Control": "public, max-age=60" });
 }
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, PAYMENT-SIGNATURE, X-PAYMENT",
-  "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, PAYMENT-REQUIRED, X-Payment-Error, Retry-After",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, PAYMENT-SIGNATURE, X-PAYMENT",
+  "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, PAYMENT-REQUIRED, X-Payment-Error, Retry-After, X-Credits-Balance, X-Credits-Charged",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -111,7 +113,9 @@ export default {
       res = await status(env);
     } else {
       const stack = await ensureStack(env, feedsFor(env));
-      if (PROTECTED.has(path)) {
+      if (path === "/v1/credits") {
+        res = await handleCredits(request, env, stack);
+      } else if (PROTECTED.has(path)) {
         // A cold isolate briefly waits for the first verified feed refresh (newer OFAC/MetaMask).
         if (request.method === "POST") await awaitColdStart();
         res = request.method !== "POST"
@@ -130,3 +134,6 @@ export default {
     ctx.waitUntil(runKitWatch(env).catch(() => null));
   },
 };
+
+// Durable Object classes must be exported by the main module (wrangler.toml [[durable_objects.bindings]]).
+export { CreditLedger } from "./credits.js";

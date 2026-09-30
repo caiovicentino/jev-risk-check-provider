@@ -102,6 +102,10 @@ export type RiskCheckDiscovery = {
     /** Price of an evaluation whose request includes a transaction that is simulated. */
     amount_with_transaction?: string;
     networks?: string[];
+    /** Price per evaluation by payment network (CAIP-2 → USD). */
+    amounts_by_network?: Record<string, string>;
+    /** Prepaid credits: one x402 payment buys a balance; checks debit it (Authorization: Bearer). */
+    credits?: { check_usd: string; simulated_check_usd: string; pack_min_usd: string; pack_max_usd: string; endpoint: string };
   };
   signals?: string[];
   chains_supported?: string[];
