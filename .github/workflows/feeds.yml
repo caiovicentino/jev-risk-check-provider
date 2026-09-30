@@ -50,6 +50,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # FEEDS_SIGNING_KEY is a secret of the `feeds` environment, which only main may use.
+    environment: feeds
     permissions:
       contents: write
     steps:

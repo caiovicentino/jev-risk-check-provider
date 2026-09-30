@@ -2,8 +2,8 @@
 
 - **Revisor:** Claude Opus 5.5
 - **Data:** 2026-09-29
-- **Base:** `7eaec6a`
-- **Resultado:** branch `independent-eval-fixes`, commits `fd0a14f` → `6caf5a4` + docs
+- **Base:** `b1a8e2d`
+- **Resultado:** branch `independent-eval-fixes`, commits `7ada4ac` → `0d5cab2` + docs
 - **Produção:** Worker `e1b8da98` em `x402check.xyz`, com deploy feito e validado (correções da 2ª revisão desde `161c912e`)
 
 ## 1. O que a primeira revisão (`ANALYSIS-OPUS.md`) não pegou
@@ -78,7 +78,7 @@
 
 Dois revisores independentes atacaram o código v0.2.0 e só reportaram achados que reproduziram.
 
-- **Backend: 9 achados, todos corrigidos em `1e27dff`**, com os testes em `test/review-regressions.test.ts`:
+- **Backend: 9 achados, todos corrigidos em `6e24b3d`**, com os testes em `test/review-regressions.test.ts`:
   - variante de caixa de endereço Base58Check listado;
   - codificação alternativa da mesma chave;
   - verificador comparando `sub` sem diferenciar maiúsculas;

@@ -14,8 +14,11 @@ import { sanctionsListMeta, setSanctionsList, type SanctionsRow } from "../src/s
 import type { ExecutionContext, WorkerEnv } from "./runtime.js";
 
 export const DEFAULT_FEEDS_URL = "https://raw.githubusercontent.com/caiovicentino/jev-risk-check-provider/feeds/";
-/** Ed25519 public key (raw, base64url) of the feeds publisher; the private key lives only in the workflow's secrets. */
-export const FEEDS_PUBLIC_KEY = "09bCB8LbxEr2WC_VWF5y83IDhD3Wli7AlE6FEwgRJEw";
+/**
+ * Ed25519 public key (raw, base64url) of the feeds publisher. The private key lives only in the
+ * `feeds` environment's secret (main only); rotated 2026-09-30, when it moved there.
+ */
+export const FEEDS_PUBLIC_KEY = "EYQvAYHDsXkqLXXmItsBqtgZc3nZxR2bK8uBevilQRw";
 const OK_INTERVAL_MS = 60 * 60 * 1000;
 const RETRY_INTERVAL_MS = 10 * 60 * 1000;
 const COLD_START_WAIT_MS = 400;

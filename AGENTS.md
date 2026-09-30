@@ -114,7 +114,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | Rate limit `UNPAID_LIMITER` | 60 requests a minute per IP for unpaid, unauthenticated requests to paid routes and for `/status`. |
 | Worker secrets (names only) | `AI_GATEWAY_API_KEY`, `JEV_ATTEST_PRIVATE_KEY`, `JEV_ATTEST_PUBLIC_JWK`, `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET`, and, only during a key rotation, `JEV_ATTEST_NEXT_PUBLIC_JWK` (§3.12). |
 | Worker vars | `PROVIDER_HOST`, `PAY_TO_EVM`, `PAY_TO_SOL`, and `GIT_COMMIT` (set by `scripts/deploy.sh`, shown in `/healthz`). |
-| GitHub | The `feeds` branch holds the published feeds. The feeds workflow signs them with `FEEDS_SIGNING_KEY`, a repository secret. |
+| GitHub | The `feeds` branch holds the published feeds. The feeds workflow signs them with `FEEDS_SIGNING_KEY`, a secret of the `feeds` environment that only `main` may use. Repository settings (2026-09-30): private vulnerability reporting, Dependabot alerts and security updates, secret scanning with push protection; Actions limited to GitHub-owned actions pinned by SHA, with a read-only default token; rulesets `main` (no force-push, no deletion) and `release tags` (`v*`, `client-v*`, `mcp-v*`: no update, no deletion). There is no required-status-check rule: agents push straight to `main`, and `scripts/deploy.sh` and the registry workflow refuse a commit whose CI did not pass. The history was rewritten once on 2026-09-30 (§4); rewriting it again means disabling the `main` ruleset first, and needs the owner. |
 | npm | Org `x402check`, owned by the owner. 2FA is a passkey: a publish needs his browser approval (§3.6). |
 | MCP Registry | `io.github.caiovicentino/x402check`, published by the workflow through GitHub OIDC. |
 
@@ -310,12 +310,13 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
 - Price changes.
 - Messages in his name: email, DMs, forms, social posts.
 - Deleting data, artifacts or published packages.
+- Rewriting git history, force-pushing, or weakening the repository's rulesets and security settings (§2.3).
 
 ---
 
 ## 5. State as of 2026-09-30 (update when it changes)
 
-- **Production:** v0.6.0, the audit release, deployed on 2026-09-30 from commit `339a883` with `scripts/deploy.sh`.
+- **Production:** v0.6.0, the audit release, deployed on 2026-09-30 from commit `7d1e3ab` with `scripts/deploy.sh`.
   - Single-use payments, payer screening, a checked attestation key (with next-key rotation), HTTPS only, rate limits, Workers Logs and settlement records;
   - the model canary and the ScamSniffer refresh on the cron;
   - credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;

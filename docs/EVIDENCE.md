@@ -1,6 +1,6 @@
 # Evidence — x402check v0.6 (v0.3.0–v0.6.0)
 
-**v0.6.0** is the audit release (2026-09-30). It closes paths around the rules rather than adding new ones, and it re-measures the signing guard. It was measured in production on v0.6.0 (Worker commit `339a883`) on 2026-09-30 (UTC); see the next section.
+**v0.6.0** is the audit release (2026-09-30). It closes paths around the rules rather than adding new ones, and it re-measures the signing guard. It was measured in production on v0.6.0 (Worker commit `7d1e3ab`) on 2026-09-30 (UTC); see the next section.
 
 **v0.5** changes how checks are paid, not how they are made. It adds per-network prices, facilitator routing by compatibility and cost, and prepaid credits. **v0.5.1** adds Coinbase CDP as a facilitator. Both were measured in production on 2026-09-30 (UTC) by `eval/security-v5.ts`, with `eval/security-v2.ts` re-run (§7).
 
@@ -24,7 +24,7 @@ Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked 
 
 ## v0.6.0 in production (new)
 
-The Worker at commit `339a883`, deployed with `scripts/deploy.sh` after CI passed. Every probe below was paid by the probe payer to our own `pay_to`, or from its prepaid credits.
+The Worker at commit `7d1e3ab`, deployed with `scripts/deploy.sh` after CI passed. Every probe below was paid by the probe payer to our own `pay_to`, or from its prepaid credits.
 
 | Probe | Result |
 |---|---|
@@ -353,7 +353,7 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run security:v4`: v0.4 kit watch and collision gate (Worker `5f8e17f0`) | **7/7 PASS** | 5 |
 | `npm run security:v5`: v0.5 prices, routing and prepaid credits (Worker `d9030314`, `security-v5-v0.5.0-report.json`) | **9/9 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack (one settlement) |
 | `npm run security:v5` on v0.5.1, settling through Coinbase CDP (Worker `08c5a2f6`) | **11/11 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack. Both settlements were sent by CDP signers |
-| `npm run security:v5` on v0.6.0 (commit `339a883`) | **11/11 PASS** | the same probes; per call 4,716 ms end to end, from credits 664 and 538 ms |
+| `npm run security:v5` on v0.6.0 (commit `7d1e3ab`) | **11/11 PASS** | the same probes; per call 4,716 ms end to end, from credits 664 and 538 ms |
 | `eval/replay.ts` on v0.6.0: three copies of one payment at once | **PASS** | one evaluated and settled; two `409 payment_already_used`; a later copy 409 |
 
 The `security:v5` probes cover:

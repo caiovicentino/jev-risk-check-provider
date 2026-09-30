@@ -1,6 +1,6 @@
 # ANALYSIS-OPUS — revisão adversarial independente (x402check)
 
-Revisor: Claude Opus 5.5 · Data: 2026-09-29 · Base: `b4c1036` (main). Todas as mudanças estão **não commitadas** no working tree. Nenhum deploy foi feito, então a produção (`x402check.xyz`) **ainda roda o código antigo**.
+Revisor: Claude Opus 5.5 · Data: 2026-09-29 · Base: `80bdbf3` (main). Todas as mudanças estão **não commitadas** no working tree. Nenhum deploy foi feito, então a produção (`x402check.xyz`) **ainda roda o código antigo**.
 
 ## 1. Resultados das evals
 
