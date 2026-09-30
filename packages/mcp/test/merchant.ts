@@ -6,7 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { normalizeHost, requestHash, toCaip2, type FetchInitLike, type FetchLike, type FetchResponseLike, type RiskCheckRequest, type RiskCheckResult } from "@x402check/client";
 import { createX402CheckServer, type ServerConfig } from "../src/server.js";
-import { DID_URL, didDocument, json, signedResult, USDC_BASE, type Issuer } from "./helpers.js";
+import { DID_URL, didDocument, json, pinned, signedResult, USDC_BASE, type Issuer } from "./helpers.js";
 
 export const MERCHANT = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4";
 export const X402CHECK_PAY_TO = "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178";
@@ -111,7 +111,7 @@ type ElicitAnswer = { action: "accept" | "decline" | "cancel"; content?: Record<
  * validates every result's structuredContent against the tool's outputSchema (error results too).
  */
 export async function session(config: ServerConfig, user?: (message: string, signal: AbortSignal) => ElicitAnswer | Promise<ElicitAnswer>) {
-  const server = createX402CheckServer(config);
+  const server = createX402CheckServer(pinned(config));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   // Every message the server sends (requests such as elicitations, and notifications).
   const serverSent: Array<{ id?: unknown; method?: string; params?: Record<string, unknown> }> = [];

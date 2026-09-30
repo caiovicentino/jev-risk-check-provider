@@ -1,7 +1,7 @@
 import type { webcrypto } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { FetchInitLike, FetchLike, RiskCheckResult } from "@x402check/client";
+import { jwkThumbprint, type FetchInitLike, type FetchLike, type RiskCheckResult } from "@x402check/client";
 import { createX402CheckServer, type ServerConfig } from "../src/server.js";
 
 export const ISSUER = "did:web:x402check.xyz";
@@ -11,16 +11,31 @@ export const KID = "jev-attest-v1";
 export const SPENDER = "0x7a3e8f0c2b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f";
 export const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
-export type Issuer = { privateKey: webcrypto.CryptoKey; jwk: Record<string, string> };
+/** A throwaway attestation key, and its RFC 7638 thumbprint (what the server pins). */
+export type Issuer = { privateKey: webcrypto.CryptoKey; jwk: Record<string, string>; thumbprint: string };
 
 function b64url(input: Uint8Array | string): string {
   return Buffer.from(typeof input === "string" ? new TextEncoder().encode(input) : input).toString("base64url");
 }
 
+/** The thumbprints of every fixture issuer made so far: the keys the test servers pin by default. */
+const FIXTURE_KEYS: string[] = [];
+
 export async function makeIssuer(): Promise<Issuer> {
   const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])) as webcrypto.CryptoKeyPair;
-  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
-  return { privateKey: pair.privateKey, jwk: { kty: "EC", crv: "P-256", x: jwk.x as string, y: jwk.y as string, kid: KID, alg: "ES256", use: "sig" } };
+  const exported = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const jwk = { kty: "EC", crv: "P-256", x: exported.x as string, y: exported.y as string, kid: KID, alg: "ES256", use: "sig" };
+  const thumbprint = await jwkThumbprint(jwk);
+  FIXTURE_KEYS.push(thumbprint);
+  return { privateKey: pair.privateKey, jwk, thumbprint };
+}
+
+/**
+ * A test server's configuration: the fixture issuers' keys are pinned, as the production key is
+ * pinned by default (a test about pinning sets `pinnedKeys` itself, even to undefined).
+ */
+export function pinned(config: ServerConfig): ServerConfig {
+  return "pinnedKeys" in config ? config : { ...config, pinnedKeys: [...FIXTURE_KEYS] };
 }
 
 export async function sign(issuer: Issuer, claims: Record<string, unknown>): Promise<string> {
@@ -111,7 +126,7 @@ export function json(status: number, body: unknown, headers: Record<string, stri
 
 /** Server + client over the SDK's linked in-memory transports. */
 export async function connect(config: ServerConfig): Promise<{ client: Client; close: () => Promise<void> }> {
-  const server = createX402CheckServer(config);
+  const server = createX402CheckServer(pinned(config));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "x402check-test", version: "0.0.0" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

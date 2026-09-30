@@ -10,7 +10,7 @@ import { normalizeHost, requestHash, toCaip2, type FetchInitLike, type RiskCheck
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { resourceUrl } from "../src/pay.js";
 import { createX402CheckServer, type ServerConfig } from "../src/server.js";
-import { API, callTool, connect, DID_URL, didDocument, json, makeIssuer, signedResult, USDC_BASE, type Issuer } from "./helpers.js";
+import { API, callTool, connect, DID_URL, didDocument, json, makeIssuer, pinned, signedResult, USDC_BASE, type Issuer } from "./helpers.js";
 
 const USDC_POLYGON = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
 const X402CHECK_PAY_TO = "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178";
@@ -108,7 +108,7 @@ function world(issuer: Issuer, o: Options = {}) {
 
 /** Server + a client that answers elicitations with `answer` (a user deciding in the client's UI). */
 async function connectWithUser(config: ServerConfig, answer: (message: string) => { action: "accept" | "decline" | "cancel"; content?: Record<string, unknown> }) {
-  const server = createX402CheckServer(config);
+  const server = createX402CheckServer(pinned(config));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "x402check-test", version: "0.0.0" }, { capabilities: { elicitation: { form: {} } } });
   const asked: string[] = [];

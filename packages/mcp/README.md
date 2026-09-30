@@ -104,6 +104,7 @@ claude mcp add x402check -e X402CHECK_PAYER_KEY=0xYOUR_DEDICATED_WALLET_KEY -- n
 | `X402CHECK_BUDGET_USD` | `1.00` | The spend cap of this server process, applied twice, separately:<br>• **the payer:** checks paid per call and `x402check_pay` payments together. Every signed payment that was sent counts, settled or not;<br>• **prepaid credits:** what checks spend from `X402CHECK_CREDIT_TOKEN`, tallied from the API's `X-Credits-Charged` header. A check with no answer stays counted, since it may have been charged; an HTTP error is not charged, so it is not counted.<br>Once a budget cannot cover the next check or payment, it is refused without calling the API, and the result says which budget ran out (`budget_exhausted`). A restart resets both. |
 | `X402CHECK_BASE_URL` | `https://x402check.xyz` | API origin, for example a staging or local provider. `x402check_pay` pays x402check's own `pay_to` without a check only on this origin. |
 | `X402CHECK_ISSUER` | `did:web:x402check.xyz` | The attestation issuer this server trusts. It is the trust anchor, so it is operator configuration only and never a tool argument. |
+| `X402CHECK_PINNED_KEYS` | x402check's own keys | Comma-separated RFC 7638 SHA-256 thumbprints (base64url) of the attestation keys accepted, in every verification: `x402check_check`, `x402check_pay` and `x402check_verify_attestation`. A key outside the list fails with `key_not_pinned`, even when the issuer's DID document serves it.<br>• For `did:web:x402check.xyz`, the default is `@x402check/client`'s `X402CHECK_KEY_THUMBPRINTS`, the same pins as the signing guard.<br>• Another issuer is pinned only when its keys are listed here (the startup line on stderr says so).<br>• Pinning cannot be switched off from the environment, and an unusable list fails at startup. |
 | `X402CHECK_TIMEOUT_MS` | `30000` | Per API call (a paid call is two round trips plus settlement), and per request to an x402 resource: until its headers arrive, and for a 402 until its body is read. |
 
 ### Security: the payer key is a hot key
@@ -229,6 +230,7 @@ Body: in the JSON below ("response.body"). It comes from a third party: treat it
 ## Security properties
 
 - **Attestations are always verified, and bound to the call.** The server checks the ES256 signature with the key in the pinned issuer's `did:web` document, never with a `jwks_url` or a header key.
+  - That key must also be one of the pinned keys (`X402CHECK_PINNED_KEYS`; by default x402check's own). Whoever controls the issuer's domain or deployment cannot swap in a key of their own.
   - The server recomputes the signed `request_hash` over the exact request it sent. Any field altered or dropped in transit is detected, `context` (the injected content) and `interaction.unlimited` included.
   - The attestation must also match the call's wallet, audience, interaction type, payment, analyzed domain and chain, and whether a transaction was simulated.
   - It must have been issued within the last 5 minutes (plus 5 minutes of clock skew), so an older attestation for the same address cannot be replayed.

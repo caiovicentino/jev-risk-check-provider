@@ -149,6 +149,8 @@ export interface PayDeps {
   client: X402CheckClient;
   /** The pinned attestation issuer. */
   issuer: string;
+  /** The attestation keys accepted (RFC 7638 thumbprints); `false`: not pinned. Default: the guard's (x402check's keys for its own issuer). */
+  pinnedKeys?: readonly string[] | false | undefined;
   /** For the issuer's DID document: the plain, unpaid fetch. */
   fetch: FetchLike | undefined;
   /** Asks the user about a warn in the client (MCP elicitation). */
@@ -353,6 +355,7 @@ export async function runPay(args: PayArgs, deps: PayDeps): Promise<PayOutcome> 
     // The check is aborted with the call, and paid from credits within their budget.
     client: boundClient(deps.client, { signal, credits: deps.credits, onRefused: () => (creditsRefused = true) }),
     issuer: deps.issuer,
+    pinnedKeys: deps.pinnedKeys,
     fetch: deps.fetch,
     // x402check's own pay_to is paid without a check only on x402check's own API origin: a 402
     // from any other site that names it is checked like any payee.

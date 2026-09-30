@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // x402check MCP server over stdio. stdout carries MCP messages only: diagnostics go to stderr.
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { DEFAULT_ISSUER } from "@x402check/client";
 import { configFromEnv, createPayer, createX402CheckServer, DEFAULT_BUDGET_USD, DEFAULT_MAX_PAYMENT_USD } from "./server.js";
 import { VERSION } from "./version.js";
 
@@ -22,6 +23,8 @@ Environment:
                              from prepaid credits
   X402CHECK_BASE_URL         API origin (default https://x402check.xyz)
   X402CHECK_ISSUER           trusted attestation issuer (default did:web:x402check.xyz)
+  X402CHECK_PINNED_KEYS      comma-separated RFC 7638 thumbprints of the attestation keys
+                             accepted (default: x402check's own keys, for its own issuer)
   X402CHECK_TIMEOUT_MS       per API call, and per request to a resource (default 30000)
 
 Tools: x402check_check, x402check_pay, x402check_verify_attestation, x402check_methodology`;
@@ -50,6 +53,9 @@ async function main(): Promise<void> {
     process.stderr.write(`x402check-mcp: paying from ${payer}: checks, and the resources x402check_pay clears (${limits})\n`);
   } else {
     process.stderr.write("x402check-mcp: no X402CHECK_CREDIT_TOKEN or X402CHECK_PAYER_KEY: checks are paid and will return not_verified until one is configured\n");
+  }
+  if (config.issuer && config.issuer !== DEFAULT_ISSUER && !config.pinnedKeys) {
+    process.stderr.write(`x402check-mcp: the attestation keys of ${config.issuer} are not pinned: set X402CHECK_PINNED_KEYS to their RFC 7638 thumbprints\n`);
   }
   await server.connect(new StdioServerTransport());
   const shutdown = (): void => {
