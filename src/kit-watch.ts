@@ -100,7 +100,24 @@ export type DelegateVerdict = {
   /** Forwarding probes run so far (behaviour is re-checked on a few authorities). */
   probes?: number;
   bytes?: number;
+  /** The delegate's code kind when classified ("tiny", "logic", "delegating", ...). */
+  code_kind?: string;
 };
+
+/**
+ * Forwarding observed on one account generalizes to every account delegated to the same code only
+ * when that code is a small, self-contained forwarder. A proxy or a larger implementation can
+ * forward for one account (its own configuration) and not for others, so there the behaviour is
+ * the probed account's alone: an attacker cannot flag the users of a shared delegate.
+ */
+export const FORWARDER_MAX_BYTES = 1024;
+export function forwardingGeneralizes(verdict: Pick<DelegateVerdict, "bytes" | "code_kind">): boolean {
+  return (verdict.code_kind === "tiny" || verdict.code_kind === "logic") && (verdict.bytes ?? Number.POSITIVE_INFINITY) <= FORWARDER_MAX_BYTES;
+}
+
+/** Authorizations recovered per scan, and authorities flagged per delegate per scan: bounds CPU and KV work. */
+const MAX_AUTHORIZATIONS_PER_SCAN = 1000;
+const MAX_FLAGGED_PER_DELEGATE = 100;
 
 export type Creation = { address: string; deployer: string; tx: string; block: number };
 export type Authorization = { delegate: string; tx: string; block: number; raw: RawAuthorization };
@@ -201,7 +218,7 @@ export type ScanResult = {
   entries: Array<{ address: string; entry: WatchEntry }>;
   /** Families the scan learned (auto-forwarding delegates): the caller adds them to the registry. */
   learned: Family[];
-  stats: { blocks: number; creations: number; authorizations: number; delegates_new: number; probes: number; kit_contracts: number; flagged_authorities: number };
+  stats: { blocks: number; creations: number; authorizations: number; delegates_new: number; probes: number; kit_contracts: number; flagged_authorities: number; degraded: number };
 };
 
 const REPROBE_AFTER_S = 6 * 3600;
@@ -213,14 +230,21 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
   const maxProbes = deps.maxProbes ?? 12;
   const entries: ScanResult["entries"] = [];
   const learned: Family[] = [];
-  const stats: ScanResult["stats"] = { blocks: blocks.length, creations: 0, authorizations: 0, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0 };
+  const stats: ScanResult["stats"] = { blocks: blocks.length, creations: 0, authorizations: 0, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0, degraded: 0 };
   const creations: Creation[] = [];
   const authorizations: Authorization[] = [];
   const blockTime = new Map<number, number>();
+  const seenSignatures = new Set<string>();
   for (const b of blocks) {
     const act = blockActivity(b, deps.chain);
     creations.push(...act.creations);
-    authorizations.push(...act.authorizations);
+    // The same signed authorization repeated (a replay inside the attacker's own transaction) is one authorization.
+    for (const a of act.authorizations) {
+      const key = `${a.raw.r}|${a.raw.s}`;
+      if (seenSignatures.has(key) || authorizations.length >= MAX_AUTHORIZATIONS_PER_SCAN) continue;
+      seenSignatures.add(key);
+      authorizations.push(a);
+    }
     blockTime.set(Number.parseInt(b.number, 16), Number.parseInt(b.timestamp, 16));
   }
   stats.creations = creations.length;
@@ -239,6 +263,8 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
     const codes = await deps.call(chunk.map((a) => ({ method: "eth_getCode", params: [a, "latest"] }))).catch(() => [] as unknown[]);
     chunk.forEach((a, k) => {
       if (typeof codes[k] === "string") facts.set(a, codeFacts(codes[k] as string));
+      // Code that could not be read is unknown, never "no code": it is retried when seen again.
+      else stats.degraded++;
     });
   }
   // Proxies are judged by what they run (as at evaluation time).
@@ -265,12 +291,14 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
   for (const [delegate, auths] of byDelegate) {
     let verdict = deps.delegates.get(delegate);
     if (!verdict) {
-      stats.delegates_new++;
       const f = facts.get(delegate);
+      // Its code could not be read this time: no verdict is cached, so it is classified when seen again.
+      if (!f) continue;
+      stats.delegates_new++;
       const family = f && !isGuarded(f) ? familyOf(deps.families, f) : undefined;
-      verdict = family ? { class: family.class, family: family.id, at: now(), ...(f ? { bytes: f.bytes } : {}) } : { class: "unprobed", at: now(), ...(f ? { bytes: f.bytes } : {}) };
+      verdict = family ? { class: family.class, family: family.id, at: now(), bytes: f.bytes, code_kind: f.kind } : { class: "unprobed", at: now(), bytes: f.bytes, code_kind: f.kind };
       // Code that cannot run as a delegate (empty, a 7702 designator itself) is not a threat.
-      if (!family && (!f || f.kind === "none" || f.kind === "delegated")) verdict = { class: "not_forwarding", at: now(), bytes: f?.bytes ?? 0, probes: MAX_PROBES_PER_DELEGATE };
+      if (!family && (f.kind === "none" || f.kind === "delegated")) verdict = { class: "not_forwarding", at: now(), bytes: f.bytes, code_kind: f.kind, probes: MAX_PROBES_PER_DELEGATE };
       deps.delegates.set(delegate, verdict);
     }
     const probeDue = (verdict.class === "unprobed" || reprobeDue(verdict)) && stats.probes < maxProbes;
@@ -280,42 +308,55 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
         stats.probes++;
         const probe = await probeForwarding(deps.simulate, authority.address);
         if (probe) {
-          const f = facts.get(delegate);
-          if (probe.forwards && !(f && isGuarded(f))) {
-            // Logic code becomes a family (its redeployments are known on sight); code with no
-            // logic fingerprint (tiny forwarders, proxies) is known by the delegate's address.
+          // Facts from this run, or those recorded with the verdict (an older verdict without a code kind never generalizes).
+          const f = facts.get(delegate) ?? (verdict.bytes !== undefined ? ({ kind: verdict.code_kind, bytes: verdict.bytes } as unknown as CodeFacts) : undefined);
+          const base = { at: now(), probes: (verdict.probes ?? 0) + 1, ...(f ? { bytes: f.bytes, code_kind: f.kind } : {}) };
+          if (probe.forwards && !(f && isGuarded(f)) && f && forwardingGeneralizes({ bytes: f.bytes, code_kind: f.kind })) {
+            // A small, self-contained forwarder: its logic becomes a family (redeployments are
+            // known on sight); code with no logic fingerprint is known by the delegate's address.
             let id = `fwd-at-${delegate.slice(2, 14)}`;
-            if (f?.fingerprint) {
+            if (f.fingerprint) {
               const family: Family = { id: `fwd-${f.fingerprint.slice(0, 12)}`, class: "forwarder", exact: [f.fingerprint], skeleton: [], sources: ["behaviour:auto-forward"], first_seen: new Date(now() * 1000).toISOString() };
               learned.push(family);
               deps.families.exact.set(f.fingerprint, family);
               id = family.id;
             }
-            verdict = { class: "forwarder", family: id, at: now(), probes: (verdict.probes ?? 0) + 1, ...(f ? { bytes: f.bytes } : {}) };
+            verdict = { class: "forwarder", family: id, ...base };
           } else {
-            verdict = { class: "not_forwarding", at: now(), probes: (verdict.probes ?? 0) + 1, ...(f ? { bytes: f.bytes } : {}) };
+            verdict = { class: "not_forwarding", ...base };
+            // Forwarding by a proxy or a larger implementation is the probed account's own behaviour.
+            if (probe.forwards && !(f && isGuarded(f))) {
+              stats.flagged_authorities++;
+              entries.push({ address: authority.address, entry: { k: "forwarding_delegation", c: deps.chain, f: `fwd-acct-${delegate.slice(2, 14)}`, t: seenAt(authority.auth.block), b: authority.auth.block, x: authority.auth.tx, d: delegate } });
+            }
           }
           deps.delegates.set(delegate, verdict);
-          // Only a plain wallet is recorded as a destination: a contract that receives forwarded ETH
-          // (WETH, a bridge, a vault) may serve countless legitimate users.
-          const destinations = verdict.class === "forwarder" ? probe.destinations : [];
-          const destCodes = destinations.length ? await deps.call(destinations.map((d) => ({ method: "eth_getCode", params: [d, "latest"] }))).catch(() => [] as unknown[]) : [];
-          destinations.forEach((d, i) => {
-            const code = destCodes[i];
-            if (typeof code !== "string" || isContractCode(codeFacts(code))) return;
-            entries.push({ address: d, entry: { k: "sweeper_destination", c: deps.chain, f: verdict?.family ?? "", t: seenAt(authority.auth.block), b: authority.auth.block, x: authority.auth.tx, d: delegate } });
-          });
+          // The addresses a forwarder sends to are chosen by whoever wrote it: they are never
+          // recorded against those addresses (anyone could otherwise flag a merchant's wallet).
         }
       }
     }
     if (verdict.class === "not_forwarding" || verdict.class === "unprobed" || verdict.class === "drainer_kit") continue;
     const kind: WatchKind = verdict.class === "poisoner" ? "poisoner_delegation" : verdict.class === "sweeper" ? "sweeper_delegation" : "forwarding_delegation";
-    for (const a of auths) {
+    // Only authorities whose account delegates to it right now: a stale or replayed authorization flags no one.
+    const recovered: Array<{ address: string; auth: Authorization }> = [];
+    for (const a of auths.slice(0, MAX_FLAGGED_PER_DELEGATE)) {
       const authority = await authorityOf(a.raw);
-      if (!authority) continue;
-      stats.flagged_authorities++;
-      entries.push({ address: authority, entry: { k: kind, c: deps.chain, f: verdict.family ?? "", t: seenAt(a.block), b: a.block, x: a.tx, d: delegate } });
+      if (authority && !recovered.some((r) => r.address === authority)) recovered.push({ address: authority, auth: a });
     }
+    if (!recovered.length) continue;
+    const codes = await deps.call(recovered.map((r) => ({ method: "eth_getCode", params: [r.address, "latest"] }))).catch(() => [] as unknown[]);
+    const designator = `0xef0100${delegate.slice(2)}`;
+    recovered.forEach(({ address, auth }, i) => {
+      const code = codes[i];
+      if (typeof code !== "string") {
+        stats.degraded++;
+        return;
+      }
+      if (code.toLowerCase() !== designator) return;
+      stats.flagged_authorities++;
+      entries.push({ address, entry: { k: kind, c: deps.chain, f: verdict?.family ?? "", t: seenAt(auth.block), b: auth.block, x: auth.tx, d: delegate } });
+    });
   }
   return { entries, learned, stats };
 }
@@ -369,7 +410,8 @@ export function kindForDelegate(verdict: DelegateVerdict | undefined): WatchKind
   if (!verdict) return null;
   if (verdict.class === "poisoner") return "poisoner_delegation";
   if (verdict.class === "sweeper") return "sweeper_delegation";
-  if (verdict.class === "forwarder") return "forwarding_delegation";
+  // Behaviour seen on one account applies to every account delegated to the same code only for small forwarders.
+  if (verdict.class === "forwarder") return forwardingGeneralizes(verdict) ? "forwarding_delegation" : null;
   return null;
 }
 

@@ -9,6 +9,9 @@ import { OFAC_SDN_META } from "../src/data/ofac-sdn.js";
 import { sanctionsListMeta } from "../src/sanctions.js";
 import { PROVIDER_VERSION } from "../src/provider.js";
 import { KW, runKitWatch, type KitWatchStats } from "./kit-watch.js";
+
+/** Seconds after which /status reports the kit watch as stale (the cron runs every minute). */
+const KIT_WATCH_STALE_S = 180;
 import { CREDIT_PRICING, handleCredits } from "./credits.js";
 import type { ExecutionContext, ScheduledController, WorkerEnv } from "./runtime.js";
 // Bundled as a Wrangler Data module (see [[rules]] in wrangler.toml).
@@ -53,10 +56,28 @@ async function status(env: WorkerEnv): Promise<Response> {
     const raw = env.KIT_WATCH !== "off" && env.RATE ? await env.RATE.get(KW.stats) : null;
     if (raw) {
       const st = JSON.parse(raw) as KitWatchStats;
+      // The cron runs every minute: stats older than 3 minutes mean the watch has stalled,
+      // whatever lag they last recorded.
+      const age = Math.max(0, Math.round((Date.now() - Date.parse(st.updated_at)) / 1000));
+      const stale = !Number.isFinite(age) || age > KIT_WATCH_STALE_S;
       kitWatch = {
+        status: stale ? "stale" : "ok",
         updated_at: st.updated_at,
+        age_s: Number.isFinite(age) ? age : null,
         chains: Object.fromEntries(
-          Object.entries(st.chains).map(([chain, c]) => [chain, { lag_blocks: Math.max(0, c.head - c.cursor), scanned_blocks: c.scanned_blocks, flagged: c.flagged, delegates_classified: c.delegates, gaps: c.gaps.length, ...(c.error ? { error: c.error } : {}) }]),
+          Object.entries(st.chains).map(([chain, c]) => [
+            chain,
+            {
+              lag_blocks: Math.max(0, c.head - c.cursor),
+              scanned_blocks: c.scanned_blocks,
+              flagged: c.flagged,
+              delegates_classified: c.delegates,
+              gaps: c.gaps.length,
+              ...(c.degraded ? { degraded_reads: c.degraded } : {}),
+              ...(c.dropped ? { dropped_entries: c.dropped } : {}),
+              ...(c.error ? { error: c.error } : {}),
+            },
+          ]),
         ),
         note: "EIP-7702 delegations to poisoners and sweepers, and new drainer-kit deployments, observed block by block; the list itself is private",
       };
@@ -136,7 +157,12 @@ export default {
 
   // Kit watch cron (wrangler.toml [triggers]): scans new Ethereum and Base blocks.
   async scheduled(_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runKitWatch(env).catch(() => null));
+    ctx.waitUntil(
+      runKitWatch(env).catch((err: unknown) => {
+        console.error(`kit watch run failed: ${String(err).slice(0, 300)}`);
+        return null;
+      }),
+    );
   },
 };
 

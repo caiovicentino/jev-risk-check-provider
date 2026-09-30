@@ -91,6 +91,76 @@ const PROBE_BATCH = 10; // some public RPCs cap JSON-RPC batches at 10 calls
 const BALANCE_HEADROOM = 10n ** 17n;
 
 const NATIVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+/** Assets whose value is known per network: [decimals, class]. Anything else is of unknown value. */
+type ValueClass = "usd" | "eth" | "btc" | "other";
+const VALUE_BOUNDS: Record<ValueClass, [number, number]> = { usd: [0.9, 1.1], eth: [100, 50_000], btc: [5_000, 1_000_000], other: [0.001, 10_000] };
+const KNOWN_VALUE: Record<string, { native: ValueClass; tokens: Record<string, [number, ValueClass]> }> = {
+  "eip155:1": {
+    native: "eth",
+    tokens: {
+      "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": [18, "eth"], // WETH
+      "0xae7ab96520de3a18e5e111b5eaab095312d7fe84": [18, "eth"], // stETH
+      "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0": [18, "eth"], // wstETH
+      "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": [6, "usd"], // USDC
+      "0xdac17f958d2ee523a2206206994597c13d831ec7": [6, "usd"], // USDT
+      "0x6b175474e89094c44da98b954eedeac495271d0f": [18, "usd"], // DAI
+      "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": [8, "btc"], // WBTC
+    },
+  },
+  "eip155:8453": {
+    native: "eth",
+    tokens: {
+      "0x4200000000000000000000000000000000000006": [18, "eth"], // WETH
+      "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": [18, "eth"], // cbETH
+      "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": [6, "usd"], // USDC
+      "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": [6, "usd"], // USDbC
+      "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": [18, "usd"], // DAI
+      "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": [8, "btc"], // cbBTC
+    },
+  },
+  "eip155:137": {
+    native: "other",
+    tokens: {
+      "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": [18, "other"], // WPOL
+      "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": [18, "eth"], // WETH
+      "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": [6, "usd"], // USDC
+      "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": [6, "usd"], // USDC.e
+      "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": [6, "usd"], // USDT
+    },
+  },
+  "eip155:42161": {
+    native: "eth",
+    tokens: {
+      "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": [18, "eth"], // WETH
+      "0xaf88d065e77c8cc2239327c5edb3a432268e5831": [6, "usd"], // USDC
+      "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8": [6, "usd"], // USDC.e
+      "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": [6, "usd"], // USDT
+      "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": [18, "usd"], // DAI
+    },
+  },
+  "eip155:10": {
+    native: "eth",
+    tokens: {
+      "0x4200000000000000000000000000000000000006": [18, "eth"], // WETH
+      "0x0b2c639c533813f4aa9d7837caf62653d097ff85": [6, "usd"], // USDC
+      "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58": [6, "usd"], // USDT
+      "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": [18, "usd"], // DAI
+    },
+  },
+  "eip155:56": {
+    native: "other",
+    tokens: {
+      "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c": [18, "other"], // WBNB
+      "0x55d398326f99059ff775485246999027b3197955": [18, "usd"], // USDT (18 decimals on BSC)
+      "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d": [18, "usd"], // USDC
+      "0xe9e7cea3dedca5984780bafc599bd69add087d56": [18, "usd"], // BUSD
+    },
+  },
+};
+/** A hidden recipient taking at least this share of an asset the sender lost is a drain even when an unvalued token comes back. */
+const MAJORITY_SHARE_NUM = 1n;
+const MAJORITY_SHARE_DEN = 2n;
 const ZERO = "0x0000000000000000000000000000000000000000";
 const PERMIT2 = "0x000000000022d473030f116ddee9f6b43ac78ba3";
 const T = {
@@ -203,6 +273,35 @@ export function netMovements(flows: Flow[], sender: string): Movements {
     }
   }
   return { outflows, inflows, beneficiaries };
+}
+
+/** USD bounds [min, max] of an amount of a known-value asset on a network, or null (unknown value). */
+function usdBounds(asset: string, amount: bigint, network: string | undefined): [number, number] | null {
+  const known = network ? KNOWN_VALUE[network] : undefined;
+  if (!known) return null;
+  const entry: [number, ValueClass] | undefined = asset === "native" ? [18, known.native] : known.tokens[asset];
+  if (!entry) return null;
+  const units = Number(amount) / 10 ** entry[0];
+  const [lo, hi] = VALUE_BOUNDS[entry[1]];
+  return [units * lo, units * hi];
+}
+
+/**
+ * What comes back to the sender: "value" (a known-value asset worth at least 1% of the
+ * known-value assets it lost), "unvalued" (only tokens or NFTs of unknown value), or "nothing"
+ * (no inflow, dust, or tokens emitted by the called contract or a recipient itself).
+ */
+export function comesBack(inflows: Flow[], outflows: Flow[], network: string | undefined, to: string | undefined, beneficiaries: Map<string, Flow[]>): "value" | "unvalued" | "nothing" {
+  const real = inflows.filter((f) => f.asset === "native" || (f.asset !== to && !beneficiaries.has(f.asset)));
+  if (real.length === 0) return "nothing";
+  const valued = real.map((f) => usdBounds(f.asset, f.amount, network)).filter((b): b is [number, number] => b !== null);
+  const lost = outflows.map((f) => usdBounds(f.asset, f.amount, network)).filter((b): b is [number, number] => b !== null);
+  if (valued.length > 0) {
+    const outMin = lost.reduce((sum, [lo]) => sum + lo, 0);
+    const inMax = valued.reduce((sum, [, hi]) => sum + hi, 0);
+    if (lost.length === 0 || inMax >= outMin * 0.01) return "value";
+  }
+  return real.length > valued.length ? "unvalued" : "nothing";
 }
 
 /**
@@ -409,6 +508,8 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
     }
     const { flows, approvals, truncated } = decodeLogs(logs);
     if (truncated) limits.push("flows_truncated");
+    // Padding the logs (or the flows) past the cap pushes the real transfer out of view: never read as a warn only.
+    const truncatedView = limits.includes("logs_truncated") || limits.includes("flows_truncated");
     const mine = approvals.filter((a) => a.owner === from);
     const { outflows, inflows, beneficiaries } = netMovements(flows, from);
 
@@ -449,11 +550,21 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
 
     const findings: string[] = [];
     const scopes = new Map([...beneficiaries.entries()].map(([a, fl]) => [a, coverage(a, fl, declared)] as const));
-    // Hidden recipient: assets leave the sender, nothing comes back, and a plain wallet
-    // the sender never named ends up with them (drainer "claim"/"verify" pattern,
-    // including value forwarded through the called contract).
+    const back = comesBack(inflows, outflows, network, to, beneficiaries);
+    // Hidden recipient: assets leave the sender, nothing of value comes back, and a plain wallet
+    // the sender never named ends up with them (drainer "claim"/"verify" pattern, including
+    // value forwarded through the called contract). A token the called contract or a recipient
+    // emits itself, or dust of a known asset, is not something coming back.
     const hiddenEoa = [...beneficiaries.keys()].filter((a) => isEoa(a) && scopes.get(a) === "hidden");
-    if (outflows.length > 0 && inflows.length === 0 && hiddenEoa.length > 0) findings.push("outflow_to_undisclosed_eoa");
+    if (outflows.length > 0 && back === "nothing" && hiddenEoa.length > 0) findings.push("outflow_to_undisclosed_eoa");
+    // Only a token of unknown value comes back while a hidden wallet takes most of an asset: review.
+    const majority = hiddenEoa.some((a) =>
+      (beneficiaries.get(a) ?? []).some((f) => {
+        const lost = outflows.find((o) => o.asset === f.asset && (o.token_id ?? "") === (f.token_id ?? ""));
+        return lost !== undefined && f.amount * MAJORITY_SHARE_DEN >= lost.amount * MAJORITY_SHARE_NUM;
+      }),
+    );
+    if (outflows.length > 0 && back === "unvalued" && majority) findings.push("undisclosed_recipient_unvalued_return");
     // A payee (payment, explicit transfer) receives a different asset than declared, or more.
     // Judged against payee scopes only: the native value sent to a router is not a payment.
     if ([...beneficiaries.entries()].some(([a, fl]) => coverage(a, fl, payees) === "exceeds")) findings.push("outflow_exceeds_declared");
@@ -464,7 +575,7 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
     // Assets parked with nothing in return in a contract (or a delegated account) the user
     // did not name: legitimate sinks (bridges, pools, WETH, staking) are source-verified;
     // drainer contracts that hold stolen funds for later withdrawal usually are not.
-    if (outflows.length > 0 && inflows.length === 0 && hiddenEoa.length === 0 && opts.contractIntel) {
+    if (outflows.length > 0 && back === "nothing" && hiddenEoa.length === 0 && opts.contractIntel) {
       const sinks = byAmount
         .map(([a]) => a)
         .filter((a) => coverage(a, beneficiaries.get(a) as Flow[], payees) !== "covered" && (isContract(a) || facts.get(a)?.kind === "delegated"))
@@ -484,6 +595,7 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
     if (mine.some((a) => a.unlimited)) findings.push("unlimited_approval");
     if (matches.length) findings.push("known_drainer_code");
     if (limits.length) findings.push("simulation_incomplete");
+    if (truncatedView) findings.push("simulation_truncated");
 
     const movement = (f: Flow, counterparty: string): AssetMovement => ({
       standard: f.standard,

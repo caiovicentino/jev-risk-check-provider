@@ -18,6 +18,12 @@ export const KW = {
 };
 export const WATCH_TTL_S = 365 * 86400;
 const DELEGATE_BENIGN_TTL_S = 30 * 86400;
+/**
+ * Watch entries written per chain per run. A Worker invocation may make at most 1,000 KV
+ * operations; each entry costs a read and a write, so both chains together stay far below it,
+ * whatever a crafted transaction flags. The most important kinds are written first.
+ */
+const MAX_WRITES_PER_CHAIN = 200;
 
 type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag: number };
 const PLAN: Record<WatchChain, ChainPlan> = {
@@ -36,6 +42,9 @@ export type ChainStats = {
   flagged: Partial<Record<WatchEntry["k"], number>>;
   delegates: number;
   gaps: Array<{ from: number; to: number; at: string }>;
+  /** Code reads that failed (retried later) and entries not written this run (over the per-run cap). */
+  degraded?: number;
+  dropped?: number;
   error?: string;
 };
 export type KitWatchStats = { updated_at: string; chains: Partial<Record<WatchChain, ChainStats>> };
@@ -67,12 +76,14 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   const learned: Family[] = [];
   const entries: ScanResult["entries"] = [];
   let scanned = 0;
+  let degraded = 0;
   for (let n = from; n <= to; n += SEGMENT) {
     const blocks = await rpc.blocks(n, Math.min(to, n + SEGMENT - 1));
     const res = await scanBlocks(blocks, { chain, call: rpc.call, simulate: rpc.simulate, families, delegates, maxProbes: 6 });
     entries.push(...res.entries);
     learned.push(...res.learned);
     scanned += blocks.length;
+    degraded += res.stats.degraded;
   }
   // First sighting wins; a stronger kind replaces a weaker one.
   const merged = new Map<string, WatchEntry>();
@@ -80,7 +91,9 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     const m = merged.get(address);
     if (!m || KIND_RANK[entry.k] > KIND_RANK[m.k]) merged.set(address, entry);
   }
-  for (const [address, entry] of merged) {
+  const ordered = [...merged].sort(([, a], [, b]) => KIND_RANK[b.k] - KIND_RANK[a.k]);
+  const dropped = Math.max(0, ordered.length - MAX_WRITES_PER_CHAIN);
+  for (const [address, entry] of ordered.slice(0, MAX_WRITES_PER_CHAIN)) {
     const existing = await kv.get(KW.address(address));
     const old = existing ? (JSON.parse(existing) as WatchEntry) : null;
     if (old && KIND_RANK[old.k] >= KIND_RANK[entry.k]) continue;
@@ -91,7 +104,17 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   const cutoff = Math.floor(Date.now() / 1000) - DELEGATE_BENIGN_TTL_S;
   for (const [d, v] of delegates) if ((v.class === "not_forwarding" || v.class === "unprobed") && v.at < cutoff) delegates.delete(d);
   if (JSON.stringify([...delegates]) !== delegatesBefore) await kv.put(KW.delegates(chain), JSON.stringify(Object.fromEntries(delegates)));
-  stats.chains[chain] = { ...prev, cursor: Math.max(to, prev.cursor, from - 1), head, last_run: new Date().toISOString(), scanned_blocks: prev.scanned_blocks + scanned, delegates: delegates.size };
+  stats.chains[chain] = {
+    ...prev,
+    cursor: Math.max(to, prev.cursor, from - 1),
+    head,
+    last_run: new Date().toISOString(),
+    scanned_blocks: prev.scanned_blocks + scanned,
+    delegates: delegates.size,
+    degraded: (prev.degraded ?? 0) + degraded,
+    dropped: (prev.dropped ?? 0) + dropped,
+  };
+  if (degraded || dropped) console.warn(`kit watch ${chain}: ${degraded} code reads failed, ${dropped} entries over the per-run cap`);
   delete stats.chains[chain]?.error;
   return learned;
 }
@@ -109,19 +132,24 @@ export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fet
   const families = indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] });
   const stats = await readJson<KitWatchStats>(env, KW.stats, { updated_at: "", chains: {} });
   const newlyLearned: Family[] = [];
-  for (const chain of WATCH_CHAINS) {
-    try {
-      newlyLearned.push(...(await scanChain(env, chain, families, stats, opts.fetchImpl)));
-    } catch (err) {
-      const prev = stats.chains[chain];
-      if (prev) prev.error = String(err).slice(0, 200);
-      else stats.chains[chain] = { cursor: 0, head: 0, last_run: new Date(now).toISOString(), scanned_blocks: 0, flagged: {}, delegates: 0, gaps: [], error: String(err).slice(0, 200) };
+  try {
+    for (const chain of WATCH_CHAINS) {
+      try {
+        newlyLearned.push(...(await scanChain(env, chain, families, stats, opts.fetchImpl)));
+      } catch (err) {
+        console.error(`kit watch ${chain} failed: ${String(err).slice(0, 200)}`);
+        const prev = stats.chains[chain];
+        if (prev) prev.error = String(err).slice(0, 200);
+        else stats.chains[chain] = { cursor: 0, head: 0, last_run: new Date(now).toISOString(), scanned_blocks: 0, flagged: {}, delegates: 0, gaps: [], error: String(err).slice(0, 200) };
+      }
     }
+    const fresh = newlyLearned.filter((f, i) => !learned.some((l) => l.id === f.id) && newlyLearned.findIndex((x) => x.id === f.id) === i);
+    if (fresh.length) await kv.put(KW.learned, JSON.stringify([...learned, ...fresh]));
+  } finally {
+    // The run is always recorded, so /status can tell a stalled watch from a quiet one.
+    stats.updated_at = new Date().toISOString();
+    await kv.put(KW.stats, JSON.stringify(stats));
   }
-  const fresh = newlyLearned.filter((f, i) => !learned.some((l) => l.id === f.id) && newlyLearned.findIndex((x) => x.id === f.id) === i);
-  if (fresh.length) await kv.put(KW.learned, JSON.stringify([...learned, ...fresh]));
-  stats.updated_at = new Date().toISOString();
-  await kv.put(KW.stats, JSON.stringify(stats));
   return stats;
 }
 

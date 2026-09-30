@@ -124,10 +124,9 @@ test("scan: poisoner and sweeper delegations, a learned forwarder, a kit deploym
   const res = await scanBlocks([block], { chain: "eip155:1", call, simulate: simulating({ [signer.address.toLowerCase()]: [{ to: dest, value: 10n ** 16n }], [signer3.address.toLowerCase()]: [{ to: dest, value: 10n ** 16n }] }), families, delegates, guarded, now: () => 1_000_000 });
   const merged = mergeEntries(res.entries);
   const me = signer.address.toLowerCase();
-  // The same key authorized a poisoner and a forwarder: the labelled family wins.
-  assert.equal(merged.get(me)?.k, "poisoner_delegation");
-  assert.equal(merged.get(me)?.f, "poisoner-x");
-  assert.equal(merged.get(dest)?.k, "sweeper_destination"); // a plain wallet (no code)
+  // The same key authorized a poisoner, then a forwarder: only the delegation in effect (the forwarder) counts.
+  assert.equal(merged.get(me)?.k, "forwarding_delegation");
+  assert.equal(merged.has(dest), false, "a forwarder's destinations are chosen by its author: never recorded");
   assert.equal(merged.has(dPoison), false);
   assert.equal(merged.get(kitAddress)?.k, "drainer_kit_contract"); // by template
   assert.equal(merged.get(deployer)?.k, "drainer_kit_deployer");
@@ -141,6 +140,7 @@ test("scan: poisoner and sweeper delegations, a learned forwarder, a kit deploym
   // A new poisoner deployment is classified before anyone delegates to it.
   assert.equal(delegates.get(newPoisoner)?.class, "poisoner");
   assert.equal(merged.get(me)?.t, 0x6400); // block time, not scan time
+  assert.equal(delegates.get(dForward)?.code_kind, "logic");
 });
 
 test("code families: what running them makes an address", () => {
@@ -216,10 +216,16 @@ test("provider: a wallet delegated to a sweeper family is caught by its code eve
 
 test("provider: a delegate the scan classified without a code family (tiny forwarder) still flags its wallets", async () => {
   const onchain = async () => ({ ...(await eoa()), code: { kind: "delegated" as const, bytes: 23, delegate: "0x00000000000000000000000000000000000000d9" } });
-  const kitWatch: KitWatchLookup = { ...lookup({}), delegate: async (_n, d) => (d === "0x00000000000000000000000000000000000000d9" ? { class: "forwarder", family: "fwd-at-0000000000d9", at: 1 } : undefined) };
+  const kitWatch: KitWatchLookup = { ...lookup({}), delegate: async (_n, d) => (d === "0x00000000000000000000000000000000000000d9" ? { class: "forwarder", family: "fwd-at-0000000000d9", at: 1, bytes: 7, code_kind: "tiny" } : undefined) };
   const e = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch }).evaluate(valid({ wallet: PAYEE, chain: "eip155:8453" }));
   assert.deepEqual(e.result.evidence?.kit_watch?.hits?.map((h) => [h.kind, h.family]), [["forwarding_delegation", "fwd-at-0000000000d9"]]);
   assert.ok((e.result.score as number) <= 40);
+  // A proxy or larger implementation forwarding for one account does not flag every account delegated to it.
+  for (const verdict of [{ class: "forwarder" as const, family: "fwd-at-x", at: 1, bytes: 45, code_kind: "delegating" }, { class: "forwarder" as const, family: "fwd-at-x", at: 1, bytes: 9000, code_kind: "logic" }, { class: "forwarder" as const, family: "fwd-at-x", at: 1 }]) {
+    const shared: KitWatchLookup = { ...lookup({}), delegate: async () => verdict };
+    const s = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: shared }).evaluate(valid({ wallet: PAYEE, chain: "eip155:8453" }));
+    assert.equal(s.result.evidence?.kit_watch?.hits, undefined, JSON.stringify(verdict));
+  }
 });
 
 test("provider: clear when nothing is known; unavailable (not clear) when the lookup fails", async () => {
@@ -258,7 +264,7 @@ test("cron: scans from the cursor, writes watch entries, cursor and stats; a lea
     const answer = (r: { id: number; method: string; params: unknown[] }) => {
       if (r.method === "eth_blockNumber") return { id: r.id, result: "0x200" };
       if (r.method === "eth_getBlockByNumber") return { id: r.id, result: block(Number.parseInt(r.params[0] as string, 16)) };
-      if (r.method === "eth_getCode") return { id: r.id, result: r.params[0] === dPoison ? POISONER : "0x" };
+      if (r.method === "eth_getCode") return { id: r.id, result: r.params[0] === dPoison ? POISONER : String(r.params[0]).toLowerCase() === signer.address.toLowerCase() ? `0xef0100${dPoison.slice(2)}` : "0x" };
       return { id: r.id, result: null };
     };
     return new Response(JSON.stringify(Array.isArray(req) ? req.map(answer) : answer(req)));
@@ -280,14 +286,45 @@ test("cron: scans from the cursor, writes watch entries, cursor and stats; a lea
   assert.equal(kitWatchLookup({ RATE: kv, KIT_WATCH: "off" }), null);
 });
 
-test("scan: a forwarder's destination is recorded only when it is a plain wallet", async () => {
+test("scan: a forwarder's destinations are never recorded, whether contracts or plain wallets", async () => {
   const dFwd = `0x${hex20(0xe1)}`;
   const weth = `0x${hex20(0xe2)}`; // a contract receiving forwarded ETH (say, WETH)
   const code: Record<string, string> = { [dFwd]: `0x6080604052${"63aabbccdd16".repeat(20)}00`, [weth]: WALLET, [signer.address.toLowerCase()]: `0xef0100${dFwd.slice(2)}` };
   const call = async (reqs: Array<{ method: string; params: unknown[] }>) => reqs.map((r) => (r.method === "eth_getCode" ? (code[r.params[0] as string] ?? "0x") : undefined));
   const block: RawBlock = { number: "0x30", timestamp: "0x10", transactions: [{ hash: "0xb1", from: signer.address, to: dFwd, nonce: "0x0", type: "0x4", authorizationList: [await auth(signer, dFwd, 1)] }] };
-  const res = await scanBlocks([block], { chain: "eip155:1", call, simulate: simulating({ [signer.address.toLowerCase()]: [{ to: weth, value: 10n ** 16n }] }), families: indexFamilies(null), delegates: new Map() });
+  const victim = `0x${hex20(0xe3)}`; // a merchant's wallet the forwarder's author picked
+  const res = await scanBlocks([block], { chain: "eip155:1", call, simulate: simulating({ [signer.address.toLowerCase()]: [{ to: weth, value: 10n ** 16n }, { to: victim, value: 1n }] }), families: indexFamilies(null), delegates: new Map() });
   const merged = mergeEntries(res.entries);
   assert.equal(merged.get(signer.address.toLowerCase())?.k, "forwarding_delegation");
   assert.equal(merged.has(weth), false);
+  assert.equal(merged.has(victim), false);
+});
+
+test("scan: forwarding by a proxy flags only the probed account; stale authorizations and unreadable code flag no one", async () => {
+  const dProxy = `0x${hex20(0xf1)}`;
+  // An EIP-1167 minimal proxy: its behaviour depends on the account's own configuration.
+  const proxyCode = `0x363d3d373d3d3d363d73${hex20(0xf9)}5af43d82803e903d91602b57fd5bf3`;
+  const code: Record<string, string> = { [dProxy]: proxyCode, [signer.address.toLowerCase()]: `0xef0100${dProxy.slice(2)}`, [signer2.address.toLowerCase()]: `0xef0100${dProxy.slice(2)}` };
+  const call = async (reqs: Array<{ method: string; params: unknown[] }>) => reqs.map((r) => (r.method === "eth_getCode" ? (code[r.params[0] as string] ?? "0x") : undefined));
+  const block: RawBlock = {
+    number: "0x40",
+    timestamp: "0x10",
+    transactions: [
+      { hash: "0xd1", from: signer.address, to: dProxy, nonce: "0x0", type: "0x4", authorizationList: [await auth(signer, dProxy, 1)] },
+      { hash: "0xd2", from: signer2.address, to: dProxy, nonce: "0x0", type: "0x4", authorizationList: [await auth(signer2, dProxy, 1)] },
+    ],
+  };
+  const delegates = new Map<string, DelegateVerdict>();
+  const res = await scanBlocks([block], { chain: "eip155:1", call, simulate: simulating({ [signer.address.toLowerCase()]: [{ to: `0x${hex20(0xee)}`, value: 10n ** 16n }] }), families: indexFamilies(null), delegates });
+  const merged = mergeEntries(res.entries);
+  assert.equal(merged.get(signer.address.toLowerCase())?.k, "forwarding_delegation", "the probed account forwards");
+  assert.equal(merged.has(signer2.address.toLowerCase()), false, "another account on the same proxy is not flagged");
+  assert.equal(delegates.get(dProxy)?.class, "not_forwarding");
+
+  // A delegate whose code cannot be read gets no cached verdict (retried when seen again).
+  const failing = async (reqs: Array<{ method: string; params: unknown[] }>) => reqs.map(() => undefined);
+  const again = new Map<string, DelegateVerdict>();
+  const r2 = await scanBlocks([block], { chain: "eip155:1", call: failing, simulate: simulating({}), families: indexFamilies(null), delegates: again });
+  assert.equal(again.size, 0);
+  assert.ok(r2.stats.degraded > 0);
 });
