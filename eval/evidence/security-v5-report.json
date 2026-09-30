@@ -1,0 +1,73 @@
+{
+  "timestamp": "2026-09-30T01:31:55.434Z",
+  "base": "https://x402check.xyz",
+  "paid_via": "eip155:8453",
+  "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 0
+  },
+  "outcomes": [
+    {
+      "id": "discovery_prices_and_credits",
+      "status": "PASS",
+      "detail": "version=0.5.0 amount=0.0035 by_network={\"eip155:8453\":\"0.0035\",\"eip155:137\":\"0.007\",\"eip155:42161\":\"0.009\",\"eip155:43114\":\"0.001\",\"eip155:143\":\"0.001\",\"eip155:1329\":\"0.002\",\"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp\":\"0.002\"} credits={\"check_usd\":\"0.001\",\"simulated_check_usd\":\"0.005\",\"pack_min_usd\":\"0.1\",\"pack_max_usd\":\"100\",\"endpoint\":\"/v1/credits\"}"
+    },
+    {
+      "id": "challenge_per_network_prices",
+      "status": "PASS",
+      "detail": "7 options; mismatches=[]; Base transfer=eip3009 (any wallet can pay); Solana fee payer=DeXterR2kQ…"
+    },
+    {
+      "id": "status_routes_and_margins",
+      "status": "PASS",
+      "detail": "8453:payai/eip3009 fee=0.00231 margin=32% · 137:payai/eip3009 fee=0.00489 margin=29.1% · 42161:payai/eip3009 fee=0.00663 margin=25.6% · 43114:payai/eip3009 fee=0.0001 margin=83% · 143:dexter/permit2 fee=0 margin=93% · 1329:payai/eip3009 fee=0.00077 margin=58% · solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:dexter/svm fee=0 margin=96.5%"
+    },
+    {
+      "id": "per_call_base",
+      "status": "PASS",
+      "detail": "HTTP 200 score=84 2709 ms end to end (402, payment, evaluation, settlement)"
+    },
+    {
+      "id": "credits_buy",
+      "status": "PASS",
+      "detail": "HTTP 200 token sha256:33e192e530ca balance=$0.10 (one settlement for 100 checks)"
+    },
+    {
+      "id": "credits_spend",
+      "status": "PASS",
+      "detail": "HTTP 200/200 charged $0.001 each; balance $0.099 → $0.098; 800 ms and 636 ms, no payment round trip, no settlement (per call: 2709 ms)"
+    },
+    {
+      "id": "credits_balance",
+      "status": "PASS",
+      "detail": "HTTP 200 balance=$0.098"
+    },
+    {
+      "id": "credits_insufficient",
+      "status": "PASS",
+      "detail": "HTTP 402 insufficient_credits cost=$0.125; balance still $0.098"
+    },
+    {
+      "id": "credits_bad_tokens",
+      "status": "PASS",
+      "detail": "malformed → 401; unknown token → 402 insufficient_credits (never an unpaid evaluation)"
+    }
+  ],
+  "settlements": [
+    {
+      "probe": "POST /v1/risk-check",
+      "success": true,
+      "transaction": "0xeb0d2a7d3580dd7b75a10f305084ca54454fc57a9e0c7db193eaf98a4acda32a",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    },
+    {
+      "probe": "POST /v1/credits",
+      "success": true,
+      "transaction": "0x34728b50bc5d135e4952072713b2deb66c67d8d6dfadbd601dfc4c45b8288713",
+      "network": "eip155:8453",
+      "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
+    }
+  ]
+}

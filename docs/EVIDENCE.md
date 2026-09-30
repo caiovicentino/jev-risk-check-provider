@@ -1,6 +1,8 @@
-# Evidence — x402check v0.4 (v0.3.0–v0.4.0)
+# Evidence — x402check v0.5 (v0.3.0–v0.5.0)
 
-All numbers were measured on 2026-09-29. **v0.4** adds the kit watch and the first shadow of a facilitator's real traffic (§0); it was measured on the v0.4.0 code without model calls:
+**v0.5** changes how checks are paid, not how they are made. It adds per-network prices, facilitator routing by compatibility and cost, and prepaid credits. It was measured in production on 2026-09-30 (UTC) by `eval/security-v5.ts`, with `eval/security-v2.ts` re-run (§7).
+
+All other numbers were measured on 2026-09-29. **v0.4** adds the kit watch and the first shadow of a facilitator's real traffic (§0); it was measured on the v0.4.0 code without model calls:
 
 - the kit watch backfill (`scripts/hunt-kits.ts`, the same code the Worker cron runs);
 - `eval/kit-watch.ts`: precision on held-out legitimate code, template recall, the poisoner audit and the forwarder audit;
@@ -224,10 +226,11 @@ Reading: the model detects risk that is **present in the content it is given**. 
 
 ## 7. Production (`https://x402check.xyz`)
 
-**Every evaluation below was paid through x402 and settled on-chain in USDC on Base**, and the transaction hashes are in the reports.
+**Every evaluation below was paid.** Each was either settled on-chain in USDC on Base through x402, or (v0.5) paid from prepaid credits bought that way. The transaction hashes are in the reports.
 
 - `prod` ran on Worker `d230e4a5`: the paid-only v0.3 code with EVM settlement through PayAI.
 - `security:v2` and `security:v3` ran on v0.3.2 (`3045ce10`), which adds simulation pricing.
+- `security:v5` ran on v0.5.0 (`d9030314`): per-network prices, routing and prepaid credits. `security:v2` was re-run there: 12/12 PASS, with its 6 evaluations settled at the v0.5 prices.
 
 | Suite | Result | Paid evaluations |
 |---|---|---|
@@ -235,6 +238,41 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run security:v2`: v0.2 fixes, "no free evaluations", simulation pricing (v0.3.2) | **12/12 PASS** | 6 |
 | `npm run security:v3`: v0.3 features (v0.3.2: two simulated evaluations settled at $0.005) | **8/8 PASS** | 3 |
 | `npm run security:v4`: v0.4 kit watch and collision gate (Worker `5f8e17f0`) | **7/7 PASS** | 5 |
+| `npm run security:v5`: v0.5 prices, routing and prepaid credits (Worker `d9030314`) | **9/9 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack (one settlement) |
+
+The `security:v5` probes cover:
+- **the price table:** the discovery document and the 402 carry the seven per-network prices, and none mismatches. Base is offered through EIP-3009, so any wallet can pay it gaslessly;
+- **the routes:** `/status` → `payments` states each network's facilitator, transfer method, fee and margin (below). None is below its facilitator's floor;
+- **a per-call check on Base:** $0.0035, **2,709 ms** end to end (402, payment, evaluation, settlement);
+- **credits:**
+  - a **$0.10 pack** was bought with one settlement;
+  - **two checks** were paid from it, at $0.001 each, in **800 ms and 636 ms**, with no payment round trip and no settlement. The balance went $0.099 → $0.098;
+  - a batch that costs more than the balance ($0.125) was refused with 402 `insufficient_credits`, and the balance was untouched;
+  - a malformed token got 401, and an unknown one 402. Neither ever produced an unpaid evaluation.
+
+The token appears in the report only as a SHA-256 prefix.
+
+Routes and margins in production (from `/status`, fees from PayAI's live `/pricing`; the margin also deducts the model's ~$0.00007):
+
+| Network | Price per call | Facilitator (transfer) | Settlement fee to us | Margin |
+|---|---|---|---|---|
+| Base | $0.0035 | PayAI (EIP-3009) | $0.00231 | $0.00112 (32%) |
+| Polygon | $0.007 | PayAI (EIP-3009) | $0.00489 | $0.00204 (29%) |
+| Arbitrum | $0.009 | PayAI (EIP-3009) | $0.00663 | $0.00230 (26%) |
+| Avalanche | $0.001 | PayAI (EIP-3009) | $0.0001 | $0.00083 (83%) |
+| Sei | $0.002 | PayAI (EIP-3009) | $0.00077 | $0.00116 (58%) |
+| Monad | $0.001 | Dexter (Permit2), the only one offering it | $0 (floor $0.00027) | $0.00093 (93%) |
+| Solana | $0.002 | Dexter | $0 (floor $0.0013) | $0.00193 (96.5%) |
+| **Prepaid credits** | **$0.001 per check** | one settlement per pack | one fee per pack ($0.00231 on Base) | 91% on a $0.10 pack, 93% from $1 |
+
+**Found and corrected in v0.5, by reading the facilitators' terms and paying for real:**
+- **The v0.4 unit economics were wrong.**
+  - The "~93% margin" counted only the model call.
+  - Since 2026-09-21, PayAI bills the receiving merchant each settlement's gas + 30%, separately from the price: $0.00231 on Base. So a $0.001 check paid per call on Base cost more to settle than it earned.
+  - v0.5 prices each network above its route's cost. The $0.001 price moves to prepaid credits, where one settlement pays for up to 100,000 checks.
+- **Dexter's EVM route is Permit2.**
+  - Its fee is zero, but a payer must first grant Permit2 an allowance, and a plain key-only wallet, such as the MCP server's payer, cannot pay through it.
+  - Routing now prefers the facilitator every wallet can pay through (EIP-3009), then the lower fee, then the configured order.
 
 The `security:v4` probes cover:
 - a poisoning look-alike from the watchlist, observed on Ethereum and evaluated on Base, capped at **20/critical**. `address_poisoning` is signed as `x402check-kit-watch@<scan time>:hit`;
@@ -309,9 +347,10 @@ npx tsx scripts/kit-catalog.ts && npx tsx scripts/legit-corpus.ts && npx tsx scr
 npx tsx scripts/hunt-kits.ts --chain eip155:1 --hours 24 && npx tsx scripts/hunt-kits.ts --chain eip155:8453 --hours 6
 npm run eval:kit-watch -- --sample 40 && npm run eval:kit-watch -- --second-holdout
 npx tsx scripts/payai-shadow.ts --days 7
+PAY_NETWORK=eip155:8453 npm run security:v5    # spends $0.1035: one per-call check and a $0.10 credit pack
 PAY_NETWORK=eip155:8453 npm run security:v4
 PAY_NETWORK=eip155:8453 npm run security:v3 && PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
-# ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.07 in total)
+# ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.35 in total at v0.5 prices)
 ```
 
 Historical meta-evaluations (`audit-report.json`, `crosslabel-report.json`, 2026-09-27) used the same model family to judge its own verdicts. They measure framing stability, not correctness, and are kept for the record.

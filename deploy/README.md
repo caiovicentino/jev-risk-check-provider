@@ -4,18 +4,21 @@
 
 | Route | What |
 |---|---|
-| `POST /v1/risk-check` | single evaluation, paid with x402 ($0.001; $0.002 on Solana; $0.005 when a `transaction` is simulated) |
+| `POST /v1/risk-check` | single evaluation: from prepaid credits (`Authorization: Bearer x402c_…`, $0.001), or paid per call with x402 at the payment network's price ($0.0035 on Base; $0.005 when a `transaction` is simulated) |
 | `POST /v1/risk-check/batch` | up to 25 evaluations, billed per item |
+| `POST /v1/credits` / `GET /v1/credits` | buy or top up prepaid credits ($0.10–$100, one x402 payment) / read a token's balance |
 | `GET /.well-known/risk-check.json` | discovery: pricing networks, data sources, attestation claims |
 | `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation key (`kid jev-attest-v1`), `did:web` document |
 | `GET /healthz` | liveness and version |
-| `GET /status` | data freshness and payments. It shows the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. It also shows each payment network's facilitator, its published floor and whether the price clears it. Edge-cached 60 s |
+| `GET /status` | data freshness and payments. It shows the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. It also shows each payment network's facilitator, transfer method, fee, floor and margin, and the credit terms. Edge-cached 60 s |
 
 ## Layout
 
 - `worker.ts` — entry point: routing, CORS, `/healthz`, `/status`, embedded MetaMask and Forta sets (`.bin` Data modules)
 - `fresh-feeds.ts` — runtime refresh of OFAC and MetaMask from the `feeds` branch (checksums, counts, no large shrink), in the background
-- `protected.ts` — the paid flow: validate → price (per item; $0.005 when simulated) → verify payment → evaluate → settle → release; facilitator routing and `/status` payment routes
+- `protected.ts` — the paid flow: validate → price (per item and network) → verify payment → evaluate → settle → release; facilitator routing by compatibility and cost, and `/status` payment routes
+- `pricing.ts` — prices by payment network, the simulation price, micro-dollar arithmetic
+- `credits.ts` — prepaid credits: the `CreditLedger` Durable Object (one per token), purchase, balance and spending
 - `feeds.ts` — ScamSniffer blobs (domains, addresses, drainer-code fingerprints) read from KV at runtime (GPL-3.0 data: never bundled or committed)
 - `runtime.ts` — minimal Workers types, so `deploy/` type-checks with the rest of the repo (`npm run typecheck`)
 
@@ -26,9 +29,22 @@
    - **Price:** the x402 price is unit × units, 1 unit per evaluation, so a batch of *n* costs *n*. `adapter.getBody()` exposes the validated body to the SDK's dynamic price.
    - **Unpaid request:** it gets the `402` challenge with the accepted options.
    - **Paid request:** verify → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed` and no attestation is returned.
-3. **Facilitator routing** (`mainnetFacilitators` in `protected.ts`): PayAI for the EVM networks it supports, then Dexter for Solana, Monad and any EVM network PayAI lacks. Dexter refuses payments below its published gas-cost floor, which is above $0.001 on Base, Polygon, Arbitrum and Avalanche. `/status` → `payments` lists each network's facilitator, floor and `below_floor`.
-4. **Pricing** (`priceMilli`): $0.001 per evaluation ($0.002 on Solana). An item whose `transaction` will be simulated costs $0.005 on every network; that is a supported simulation chain, with `SIMULATION` not off. A batch is the sum of its items. The discovery document states both prices (`amount`, `amount_with_transaction`).
-5. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei ($0.001) and Solana ($0.002). `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
+3. **Facilitator routing** (`paymentRouting` in `protected.ts`, recomputed every 10 minutes). For each network the router picks, in order:
+   1. a facilitator that accepts our price (Dexter refuses payments below its floor);
+   2. one every payer can pay through: PayAI's EIP-3009 over Dexter's EVM Permit2, which needs an on-chain allowance most wallets lack;
+   3. the one cheapest to us: PayAI's live fee table (gas + 30% per settlement) against Dexter's zero.
+
+   The resource server gets each facilitator scoped to its networks, first. `/status` → `payments` shows the facilitator, transfer method, fee, floor and margin of every route.
+4. **Pricing** (`deploy/pricing.ts`, in micro-dollars):
+   - per network: Base $0.0035, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009;
+   - an item whose `transaction` will be simulated costs $0.005, or the network's price if higher. That applies on a supported simulation chain, with `SIMULATION` not off;
+   - a batch is the sum of its items;
+   - the discovery document states `amounts_by_network`, `amount_with_transaction` and the `credits` terms.
+5. **Prepaid credits** (`deploy/credits.ts`, Durable Object binding `CREDITS`, migration `v3`):
+   - **Purchase:** a pack costs its face value on every network. After settlement the token's ledger is credited, keyed by the settlement's transaction, so it is credited once.
+   - **Checks:** a check with the token debits the ledger atomically, runs, and is refunded when no verdict is produced. There is no 402 and no settlement.
+   - **Storage:** the token is shown once. Only its SHA-256, the ledger's name, is stored.
+6. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
 
 ## Secrets and variables
 

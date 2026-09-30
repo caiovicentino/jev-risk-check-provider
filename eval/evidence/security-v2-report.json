@@ -1,46 +1,46 @@
 {
-  "timestamp": "2026-09-29T20:00:31.361Z",
+  "timestamp": "2026-09-30T01:32:57.605Z",
   "endpoint": "https://x402check.xyz",
   "receipts": [
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0xb9cf8807224463365838980d030d2f3f15a01015096e529a614c44d2a97c585d",
+      "transaction": "0x799b5e96cc8d626b62215fa393b94d0fcad00a06967a9ab4ba32a85469abed99",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     },
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0x67ae7e04e5a8427a9bcd7c95f2f37ec69f3e5e94f97c228d89957e73f14c2434",
+      "transaction": "0x7717e2fe9d7fa13a76bdbb5e7633d2ffb618c471d199988296adaad3ba533cce",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     },
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0x145aabb29bc8251faea7490c9f299abae227f9f05ab67b5e725c50acd88b9136",
+      "transaction": "0xdcf2686b01602f60f9ef5600d77f3b5cd2276a3e2c57a6d4160c505d7a186cb0",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     },
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0x84a980785b399085ee42ce2e8600de85219a07334c5c64a92cf4791b8bdb3939",
+      "transaction": "0x4cfacbcfa0343da8eeb6183037ac0b87933297211d7b838fe64e1356f8d1f9da",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     },
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0xd5447cf1394b4ad29bda76212727f88221efc22583ce7488e83a389d32011525",
+      "transaction": "0x6326e9c1369a48a5af32c7e2b0520854050ae9bbac793010fb26c56f16adb684",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     },
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0xdf20a8e69ed3d4c7b7aa1cde1ec4a91f95e29d60c6183bf0e0e4421e6655e074",
+      "transaction": "0x3a76c893823902e6621559423774d0d46579d23c5062451838af545b94ad4317",
       "network": "eip155:8453",
       "payer": "0xb48057e647b2572f5eae241b515fbc58b7ce249e"
     }
@@ -52,7 +52,7 @@
     {
       "id": "v2-discovery",
       "status": "PASS",
-      "detail": "v0.3.2; pricing networks=7 (no testnets); https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML (publis…"
+      "detail": "v0.5.0; pricing networks=7 (no testnets); https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML (publis…"
     },
     {
       "id": "v2-no-testnet-payments",
@@ -62,12 +62,12 @@
     {
       "id": "v2-batch-priced-per-item",
       "status": "PASS",
-      "detail": "25-item batch = 25 × unit on all 7 networks (e.g. eip155:8453 1000 → 25000)"
+      "detail": "25-item batch = 25 × unit on all 7 networks (e.g. eip155:8453 3500 → 87500)"
     },
     {
       "id": "v3-simulation-priced",
       "status": "PASS",
-      "detail": "simulated item $0.005 on every network; mixed batch (1 simulated + 2 basic) = $0.007 EVM, $0.009 Solana"
+      "detail": "simulated item = max($0.005, network price) on all 7 networks; mixed batch = simulated + 2 × network price (Base 12000 µUSDC)"
     },
     {
       "id": "v2-validation-before-payment",
@@ -97,7 +97,7 @@
     {
       "id": "v2-caller-clean-is-not-a-bypass",
       "status": "PASS",
-      "detail": "self-asserted clean on a described listing → 51/high; claim 'asserted' marks it as unverified"
+      "detail": "self-asserted clean on a described listing → 45/high; claim 'asserted' marks it as unverified"
     },
     {
       "id": "v2-approval-to-fresh-eoa",
@@ -107,7 +107,7 @@
     {
       "id": "v2-evidence-and-signed-checks",
       "status": "PASS",
-      "detail": "evidence{sanctions,onchain=ok,feeds=5} + signed checks/payment/aud/jti; iss pinned via did:web"
+      "detail": "evidence{sanctions,onchain=ok,feeds=6} + signed checks/payment/aud/jti; iss pinned via did:web"
     }
   ]
 }

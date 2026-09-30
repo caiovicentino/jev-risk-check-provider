@@ -1,6 +1,6 @@
 # x402check — pre-payment risk checks for x402 agents and wallets
 
-**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · $0.001 per evaluation ($0.005 with transaction simulation), paid with x402 · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
+**LIVE**: [https://x402check.xyz](https://x402check.xyz) · `did:web:x402check.xyz` · $0.001 per evaluation with prepaid credits, or per call via x402 ($0.0035 on Base; $0.005 with transaction simulation) · [discovery](https://x402check.xyz/.well-known/risk-check.json) · [DID document](https://x402check.xyz/.well-known/did.json) · [JWKS](https://x402check.xyz/.well-known/jwks.json)
 
 x402check is an x402 `risk-check` provider (wire format of [x402 PR #2422](https://github.com/x402-foundation/x402/pull/2422)). You call it before an agent or a wallet pays or signs, and it checks the counterparty. It combines provider-verified evidence with a typed model:
 
@@ -46,7 +46,10 @@ Caller-supplied `screening` and `authorization` fields are recorded as `asserted
 
 ## Quickstart
 
-Every evaluation is paid per call with x402, so the call is made through an x402 client, which pays when it gets the 402 and retries.
+Every evaluation is paid; there is no free tier. There are two ways to pay:
+
+- **Prepaid credits:** one x402 payment buys a balance, and each check then costs $0.001 with no payment round trip. This is the cheapest and fastest option.
+- **Per call:** an x402 client pays when it gets the 402 and retries.
 
 1. **See the price.** An unpaid call returns `402` with the accepted mainnet options in the `PAYMENT-REQUIRED` header:
 
@@ -189,9 +192,20 @@ if (v.tier === "high" || v.tier === "critical") warnOrBlock(v);
 
 Every evaluation is paid; there is no free tier.
 
-- **Price:** $0.001 per evaluation ($0.002 on Solana), and **$0.005 when the request includes a `transaction` that is simulated.** The simulated price covers the simulation, the classification of every recipient and spender, and code fingerprints through delegations and proxies. It is charged only on chains where simulation runs. A batch is billed per item.
+**Prepaid credits (recommended):**
+- `POST /v1/credits {"amount_usd": 1}` returns a 402 for $1.00 on any network. Pay it with any x402 client and the response carries a **token** (`x402c_…`, shown once) and its balance. Packs run from $0.10 to $100.
+- Send `Authorization: Bearer x402c_…` with `/v1/risk-check`. Each check costs **$0.001** ($0.005 when a transaction is simulated), debited atomically.
+- Such a check has no 402 round trip and no on-chain settlement, so it is also several times faster.
+- `GET /v1/credits` with the token returns the balance. `POST /v1/credits` with the token tops it up.
+- If a verdict is not produced, the check is refunded.
+
+**Per call:**
+- **Price by payment network** (the 402 lists every option): Base **$0.0035**, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009.
+- A request whose `transaction` is simulated costs **$0.005**, or the network's price if that is higher. The simulated price covers the simulation, the classification of every recipient and spender, and code fingerprints through delegations and proxies. It is charged only on chains where simulation runs.
+- A batch is billed per item.
+- **Why the prices differ:** every x402 payment is an on-chain settlement, and its cost is ours. PayAI settles EVM payments with EIP-3009, which any wallet can pay gaslessly, and bills us the network's gas + 30% per settlement (about $0.0023 on Base). Dexter bills nothing, but on EVM networks it settles only through Permit2, which most payers' wallets cannot use without an on-chain approval.
+- **Routing:** each network settles through the facilitator any payer can pay through, and among those the cheapest to us: PayAI for EVM, Dexter for Solana and Monad. [`/status`](https://x402check.xyz/status) → `payments` shows each network's facilitator, transfer method, fee and margin, live.
 - **Settlement:** USDC via x402 v2 (`PAYMENT-SIGNATURE`), **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The x402 "exact" scheme is gasless for the payer, so USDC alone is enough.
-- **Facilitators:** EVM payments settle through PayAI, and Solana and Monad through Dexter. Dexter's published gas-cost floors are above $0.001 on Base, Polygon, Arbitrum and Avalanche. [`/status`](https://x402check.xyz/status) shows each network's facilitator and floor against the price.
 - **An unpaid request** gets `402` with the accepted options in `PAYMENT-REQUIRED`. Any x402 client pays and retries.
 - **Invalid input** is rejected (`422`/`413`) before anything is priced.
 - **Release after settlement:** the attestation is returned only once the payment settles. If the evaluation cannot be produced, nothing is settled (`503`, no charge).
@@ -204,15 +218,22 @@ import { privateKeyToAccount } from "viem/accounts";
 
 const payer = new x402Client();
 payer.register("eip155:*", new ExactEvmScheme(privateKeyToAccount(process.env.PAYER_KEY as `0x${string}`)));
-payer.setSpendControls({ maxAmountPerPayment: "$0.05" }); // a batch of 25 costs $0.025
-const x402check = createClient({ fetch: wrapFetchWithPayment(fetch, payer) });
+payer.setSpendControls({ maxAmountPerPayment: "$1" });
+
+// Once: buy credits (one x402 payment). Store the token like a password.
+const { token } = await createClient({ fetch: wrapFetchWithPayment(fetch, payer) }).buyCredits(1);
+
+// Every check after that: $0.001 from the balance, no payment round trip.
+const x402check = createClient({ creditToken: token });
 const verdict = await x402check.check({ wallet: "0x…", chain: "base" });
+
+// Or pay per call instead: createClient({ fetch: wrapFetchWithPayment(fetch, payer) }).
 ```
 
 ## Architecture
 
 ```
-request ─► validate (422 names the field) ─► x402 payment (per item) ─► Provider
+request ─► validate (422 names the field) ─► credits debit, or x402 payment (per item) ─► Provider
                                                                          │
       deterministic, provider-side ──────────────────────────────────────┤
         OFAC SDN screen ── listed? ──► score 0 · critical (no model call)│
@@ -223,7 +244,7 @@ request ─► validate (422 names the field) ─► x402 payment (per item) ─
       model ─ Jev typed questions over provider checks + context ────────┤
       code  ─ weights, deterministic caps, tiers (src/scoring.ts) ───────┤
                                                                          ▼
-         settle payment ─► release ES256 attestation: checks · asserted · payment · jti
+         settle payment (per call) ─► release ES256 attestation: checks · asserted · payment · jti
 ```
 
 Source layout:
@@ -236,7 +257,7 @@ Source layout:
 - `scripts/`: data refresh, the feeds publisher and the verifier.
 - `docs/`: [METHODOLOGY](docs/METHODOLOGY.md), [EVIDENCE](docs/EVIDENCE.md), [STRATEGY](docs/STRATEGY.md).
 
-## Evidence (v0.4)
+## Evidence (v0.4–v0.5)
 
 | What | Result |
 |---|---|
@@ -257,7 +278,8 @@ Source layout:
 | Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
-| **Production, every evaluation paid and settled in USDC on Base** | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 · `security:v3` 8/8 · `security:v4` 7/7 |
+| **Payments in production (v0.5):** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7 s end to end · **$0.001, 0.64–0.80 s**, with no settlement per check |
+| **Production, every evaluation paid** (settled in USDC on Base, or from credits bought that way) | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 (re-run on v0.5) · `security:v3` 8/8 · `security:v4` 7/7 · `security:v5` 9/9 |
 
 Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). How each verdict is formed, with every cap: [docs/METHODOLOGY.md](docs/METHODOLOGY.md). Earlier evidence documents are kept as historical records with correction notes.
 
@@ -281,10 +303,12 @@ Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deplo
   - `interpret` applies the fail-closed policy. Its verdicts come from the **signed** claims only, never from the unsigned body.
 - **[`@x402check/mcp`](packages/mcp)** is an MCP server for any agent (Claude Code, Claude Desktop, other MCP clients), with the tools `x402check_check`, `x402check_verify_attestation` and `x402check_methodology`.
   - Every verdict is verified before the agent sees an action.
-  - It pays each check itself via x402 (USDC on Base, gasless for the payer), with a per-payment cap and a total budget.
+  - It pays each check from prepaid credits (`X402CHECK_CREDIT_TOKEN`) or itself via x402 (USDC on Base, gasless for the payer), with a per-payment cap and a total budget. Both secrets are redacted from every output.
 
 ```bash
-# once published to npm; use a dedicated wallet with a small USDC balance on Base
+# once published to npm. With prepaid credits ($0.001 a check, no payment round trip):
+claude mcp add x402check -e X402CHECK_CREDIT_TOKEN=x402c_… -- npx -y @x402check/mcp
+# or paying per call from a dedicated wallet with a small USDC balance on Base:
 claude mcp add x402check -e X402CHECK_PAYER_KEY=0x… -e X402CHECK_BUDGET_USD=1 -- npx -y @x402check/mcp
 ```
 

@@ -39,14 +39,25 @@ Every answer comes back as a signed attestation that a merchant, a facilitator, 
 
 ## Business model
 
-Every evaluation is paid per call via x402: $0.001 in USDC ($0.002 on Solana), and $0.005 when the request includes a transaction that is simulated. A batch is billed per item. There is no free tier.
+Every evaluation is paid; there is no free tier. The unit economics are set by what settling a payment costs, not by the model.
 
-- The simulation is priced higher because it is the most valuable layer: what the transaction will actually do, and whose code it runs.
-
-- The price is the product: an agent or wallet pays for a signed, evidence-backed verdict at the moment it matters.
-- The price is also the anti-abuse control: nothing is evaluated without settlement, and the attestation is released only after the payment settles.
-- Partners get the same per-call economics through x402. Volume pricing is on the roadmap, not a free tier.
-- **Operational risk:** facilitators can set gas-cost floors above the price. Routing picks a facilitator that settles at our price, and `/status` exposes each network's floor so a rising floor is visible immediately.
+- **Prepaid credits (the product we steer to):** one x402 payment buys a balance ($0.10–$100). Each check then costs **$0.001**, or $0.005 when a transaction is simulated, with no payment round trip.
+  - Our cost per check is one model call, about $0.00007, plus a share of one settlement: on a $1 pack, about $0.0000023 per check.
+  - Margin: **about 93%**.
+- **Per call:** x402 exact, priced by payment network so that each price clears the cost of its route. Margins are measured live (`/status` → `payments`):
+  - **Base: $0.0035, 32%.** PayAI bills gas + 30%, about $0.0023 per settlement.
+  - Solana: $0.002, 96%. Dexter sponsors the gas.
+  - Avalanche: $0.001, 83%.
+  - Sei: $0.002, 58%.
+  - Polygon: $0.007, 29%.
+  - Arbitrum: $0.009, 26%.
+  - Monad: $0.001, 93%.
+- **Why settlement dominates:** every x402 exact payment is an on-chain transaction.
+  - PayAI's EIP-3009 route, which any wallet can pay without gas, costs us gas + 30% per settlement (since 2026-09-21).
+  - Dexter's route is free to us, but on EVM networks it settles only through Permit2, which most payers cannot use without an on-chain approval. Routing therefore prefers what every payer can pay, then what is cheapest.
+  - A single price of $0.001 per call would lose about $0.0014 per check on Base. The earlier "~93% margin" counted only the model cost; this corrects it.
+- **The price is also the anti-abuse control:** nothing is evaluated without payment. A per-call attestation is released only after the payment settles. A check paid from credits is refunded when no verdict is produced.
+- **Operational risk:** facilitators change fees and floors. PayAI switched to cost-plus on 2026-09-21. The router reads PayAI's live fee table and Dexter's floors every 10 minutes and re-routes, and `/status` shows every route's margin, so a change is visible the day it happens.
 
 ## Distribution
 
