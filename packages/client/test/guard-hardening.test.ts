@@ -126,6 +126,11 @@ describe("guardAccount: what cannot be read is not signed", () => {
     assert.deepEqual([deploy.action, deploy.code], ["not_verified", "not_simulated"]);
     const self = await refused(g.signTransaction(tx(base.address, "0x9517e29f00000000000000000000000000000000000000000000000000000000000000010000000000000000000000002222222222222222222222222222222222222222")));
     assert.deepEqual([self.action, self.code], ["not_verified", "unreadable_self_call"]);
+    // A well-formed ERC-7579 installModule on the signer's own account is a control change: blocked locally.
+    const word = (hex: string) => hex.replace(/^0x/, "").padStart(64, "0");
+    const install = `0x9517e29f${word("1")}${word("2222222222222222222222222222222222222222")}${word("60")}${word("0")}` as Hex;
+    const control = await refused(g.signTransaction(tx(base.address, install)));
+    assert.deepEqual([control.action, control.code], ["block", "local_danger"]);
     const padded = await refused(g.signTransaction(tx(SWEEPER, `0x4e71d92d${"00".repeat(25_000)}` as Hex)));
     assert.deepEqual([padded.action, padded.code], ["not_verified", "not_simulated"]);
     assert.equal(raw.length, 0);
