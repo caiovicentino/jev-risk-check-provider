@@ -120,39 +120,50 @@ function healthz(): Response {
   return json(200, { ok: true, version: PROVIDER_VERSION }, { "Cache-Control": "public, max-age=60" });
 }
 
+/** The request router; `fetch` wraps it, so that nothing escapes as an HTML error page. */
+async function handle(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
+  if (incoming.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+  // HEAD is GET without a body (RFC 9110): discovery tools check /favicon.ico and pages with HEAD.
+  const head = incoming.method === "HEAD";
+  const request = head ? new Request(incoming.url, { method: "GET", headers: incoming.headers }) : incoming;
+  const path = new URL(request.url).pathname;
+  maybeRefreshFeeds(env, ctx, EMBEDDED);
+  let res: Response;
+  if (request.method === "GET" && path === "/healthz") {
+    res = healthz();
+  } else if (request.method === "GET" && path === "/status") {
+    res = await status(env);
+  } else if (request.method === "GET" && path === "/openapi.json") {
+    res = json(200, openApi(env), { "Cache-Control": "public, max-age=300" });
+  } else {
+    const stack = await ensureStack(env, feedsFor(env));
+    if (path === "/v1/credits") {
+      res = await handleCredits(request, env, stack);
+    } else if (PROTECTED.has(path)) {
+      // A cold isolate briefly waits for the first verified feed refresh (newer OFAC/MetaMask).
+      if (request.method === "POST") await awaitColdStart();
+      res = request.method !== "POST"
+        ? json(405, usageFor(path), { Allow: "POST" })
+        : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
+    } else {
+      res = await createHandler(stack.deps)(request);
+    }
+  }
+  for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+  return head ? new Response(null, { status: res.status, headers: res.headers }) : res;
+}
+
 export default {
   async fetch(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
-    if (incoming.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    try {
+      return await handle(incoming, env, ctx);
+    } catch (err) {
+      // Never an HTML error page or a stack trace: a JSON 500, logged without request data.
+      console.error(`unhandled: ${String(err).slice(0, 300)}`);
+      return new Response(JSON.stringify({ error: "internal_error" }), { status: 500, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS } });
     }
-    // HEAD is GET without a body (RFC 9110): discovery tools check /favicon.ico and pages with HEAD.
-    const head = incoming.method === "HEAD";
-    const request = head ? new Request(incoming.url, { method: "GET", headers: incoming.headers }) : incoming;
-    const path = new URL(request.url).pathname;
-    maybeRefreshFeeds(env, ctx, EMBEDDED);
-    let res: Response;
-    if (request.method === "GET" && path === "/healthz") {
-      res = healthz();
-    } else if (request.method === "GET" && path === "/status") {
-      res = await status(env);
-    } else if (request.method === "GET" && path === "/openapi.json") {
-      res = json(200, openApi(env), { "Cache-Control": "public, max-age=300" });
-    } else {
-      const stack = await ensureStack(env, feedsFor(env));
-      if (path === "/v1/credits") {
-        res = await handleCredits(request, env, stack);
-      } else if (PROTECTED.has(path)) {
-        // A cold isolate briefly waits for the first verified feed refresh (newer OFAC/MetaMask).
-        if (request.method === "POST") await awaitColdStart();
-        res = request.method !== "POST"
-          ? json(405, usageFor(path), { Allow: "POST" })
-          : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
-      } else {
-        res = await createHandler(stack.deps)(request);
-      }
-    }
-    for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
-    return head ? new Response(null, { status: res.status, headers: res.headers }) : res;
   },
 
   // Kit watch cron (wrangler.toml [triggers]): scans new Ethereum and Base blocks.

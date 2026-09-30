@@ -44,6 +44,9 @@ export function toCaip2(chain: string): string | null {
   if (!v || v.length > 64 || v !== chain) return null;
   const alias = CHAIN_ALIASES.get(v.toLowerCase());
   if (alias) return alias;
+  // "eip155:08453" is chain 8453 to x402: canonicalized, as the provider accepts only canonical ids.
+  const evm = /^eip155:0*(\d{1,20})$/.exec(v);
+  if (evm) return `eip155:${BigInt(evm[1] as string)}`;
   return CAIP2.test(v) ? v : null;
 }
 

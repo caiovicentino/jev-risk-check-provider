@@ -12,7 +12,8 @@ export const BLOCKSCOUT_HOSTS: Record<string, string> = {
   "eip155:42161": "arbitrum.blockscout.com",
 };
 
-export type ContractIntel = (address: string, network: string | undefined) => Promise<{ verified?: boolean }>;
+/** verified: the explorer's answer · unavailable: the lookup failed on a supported chain (unknown, never "verified") · {}: unsupported. */
+export type ContractIntel = (address: string, network: string | undefined) => Promise<{ verified?: boolean; unavailable?: boolean }>;
 
 const TTL_MS = 24 * 60 * 60 * 1000;
 // "Not verified" can change at any moment (a deployer verifies after the fact) and anyone
@@ -32,7 +33,8 @@ export function createContractIntel(opts: { hosts?: Record<string, string>; time
     if (hit && Date.now() - hit.at < (hit.verified ? TTL_MS : UNVERIFIED_TTL_MS)) return { verified: hit.verified };
     try {
       const res = await doFetch(`https://${host}/api/v2/addresses/${address}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) return {};
+      // A 404 (not indexed yet: a fresh contract), a 429 or a 5xx is unknown, and not cached.
+      if (!res.ok) return { unavailable: true };
       const body = (await res.json()) as { is_contract?: unknown; is_verified?: unknown; implementations?: unknown };
       if (body.is_contract !== true || typeof body.is_verified !== "boolean") return {};
       // A proxy the explorer resolved to a verified implementation runs verified code.
@@ -42,7 +44,7 @@ export function createContractIntel(opts: { hosts?: Record<string, string>; time
       cache.set(key, { at: Date.now(), verified });
       return { verified };
     } catch {
-      return {};
+      return { unavailable: true };
     }
   };
 }

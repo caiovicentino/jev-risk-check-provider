@@ -93,6 +93,8 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
   const obj = body as Record<string, unknown>;
   const subject = typeof obj.wallet === "string" ? parseSubject(obj.wallet) : null;
   if (typeof obj.wallet !== "string" || !subject) return invalid("wallet");
+  // A CAIP-10 wallet's chain must be a canonical one too ("eip155:0008453" is refused).
+  if (subject.caip2 && normalizeChain(subject.caip2)?.caip2 !== subject.caip2) return invalid("wallet");
   const req: RiskCheckRequest = { wallet: obj.wallet };
 
   if (obj.chain !== undefined) {
@@ -117,14 +119,14 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
 
   if (obj.screening !== undefined) {
     const s = obj.screening as Record<string, unknown> | null;
-    if (!s || typeof s !== "object" || Array.isArray(s) || !(s.sanctions === "clean" || s.sanctions === "flagged" || s.sanctions === "unknown")) {
+    if (!s || typeof s !== "object" || Array.isArray(s) || Object.keys(s).some((k) => k !== "sanctions") || !(s.sanctions === "clean" || s.sanctions === "flagged" || s.sanctions === "unknown")) {
       return invalid("screening");
     }
     req.screening = { sanctions: s.sanctions };
   }
   if (obj.authorization !== undefined) {
     const a = obj.authorization as Record<string, unknown> | null;
-    if (!a || typeof a !== "object" || Array.isArray(a) || typeof a.pre_authorized !== "boolean") return invalid("authorization");
+    if (!a || typeof a !== "object" || Array.isArray(a) || Object.keys(a).some((k) => k !== "pre_authorized" && k !== "source") || typeof a.pre_authorized !== "boolean") return invalid("authorization");
     if (a.source !== undefined && (typeof a.source !== "string" || a.source.length > MAX_FIELD_LEN.source)) return invalid("authorization.source");
     req.authorization = { pre_authorized: a.pre_authorized, source: typeof a.source === "string" ? a.source : undefined };
   }
@@ -148,7 +150,12 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
     if (!effective || !effective.startsWith("eip155:")) return invalid("chain");
     req.transaction = transaction;
   }
-  req.request_hash = requestHash(obj);
+  try {
+    req.request_hash = requestHash(obj);
+  } catch {
+    // Values JSON can carry but RFC 8785 cannot canonicalize (1e400 → Infinity), or nesting too deep.
+    return invalid("body");
+  }
   return { ok: true, value: req };
 }
 

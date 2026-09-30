@@ -8,7 +8,7 @@ import type { Declared, SimulationEvidence, Simulator } from "./simulation.js";
 import { parseSubject, type Subject } from "./address.js";
 import type { ContractIntel } from "./contract-intel.js";
 import { fingerprintsOf } from "./code-fingerprint.js";
-import { familyOf, kindForCode, kindForDelegate, runningFamily, type FamilyIndex, type KitWatchHit, type KitWatchLookup, type WatchKind } from "./kit-watch.js";
+import { EOA_KINDS, familyOf, kindForCode, kindForDelegate, runningFamily, WATCH_CHAINS, type FamilyIndex, type KitWatchHit, type KitWatchLookup, type WatchEntry, type WatchKind } from "./kit-watch.js";
 import { createHash } from "node:crypto";
 import { GRANTING_INTERACTIONS, type Answer, type Evidence, type KitWatchEvidence, type RiskCheckDiscovery, type RiskCheckRequest, type RiskCheckResult, type RiskTier } from "./types.js";
 
@@ -239,7 +239,8 @@ async function kitWatchEvidence(
   called: string | undefined,
 ): Promise<KitWatchEvidence> {
   const hits: KitWatchHit[] = [];
-  let failed = subjectEntries === null || families === null;
+  // Code-based detection needs the subject's code: without on-chain facts the watch did not fully run.
+  let failed = subjectEntries === null || families === null || onchain.status !== "ok";
   const iso = (t: number) => new Date(t * 1000).toISOString();
   for (const [address, e] of subjectEntries ?? []) hits.push({ address, role: "subject", kind: e.k, family: e.f, chain: e.c, first_seen: iso(e.t), via: "watchlist" });
   // The code the subject runs right now: its own, or its delegate's (EIP-7702) or implementation's.
@@ -303,7 +304,8 @@ export class Provider {
 
     const checks = deriveChecks(req);
     if (!checks.subject || !checks.sanctions) return fail("invalid_subject");
-    const network = checks.subject.caip2 ?? req.chain;
+    // The chain: the CAIP-10 wallet's, the request's, or the payment's.
+    const network = checks.subject.caip2 ?? req.chain ?? req.payment?.network;
     const onchainP: Promise<OnchainEvidence> = this.config.onchain
       ? this.config.onchain(checks.subject, network).catch(() => ({ status: "unavailable" as const, ...(network ? { network } : {}) }))
       : Promise.resolve({ status: "unsupported" as const, ...(network ? { network } : {}) });
@@ -337,6 +339,14 @@ export class Provider {
     const kw = this.config.kitWatch && checks.subject.format === "evm" && network?.startsWith("eip155:") ? this.config.kitWatch : null;
     const kwFamilies: FamilyIndex | null = kw ? await kw.families().catch(() => null) : null;
     const kwSubjectP = kw && network ? kw.addresses([checks.subject.canonical], network).catch(() => null) : Promise.resolve(null);
+    // No chain named: the watchlist's wallet kinds hold on every chain, so they are still looked up.
+    const anyChain = !kw && !network && this.config.kitWatch && checks.subject.format === "evm" ? this.config.kitWatch : null;
+    const subjectCanonical = checks.subject.canonical;
+    const kwAnyChainP: Promise<Map<string, WatchEntry> | null | undefined> = anyChain
+      ? Promise.all(WATCH_CHAINS.map((n) => anyChain.addresses([subjectCanonical], n)))
+          .then((maps) => new Map(maps.flatMap((m) => [...m].filter(([, e]) => EOA_KINDS.has(e.k)))))
+          .catch(() => null)
+      : Promise.resolve(undefined);
     const codeMatch = codeMatcher(feeds, kwFamilies);
     const simulationP: Promise<SimulationEvidence | undefined> =
       req.transaction && this.config.simulator
@@ -349,8 +359,8 @@ export class Provider {
     // grants it control over assets, and the lookup is the slowest external call.
     const subjectIntelP =
       granting && this.config.contractIntel && checks.subject.format === "evm"
-        ? this.config.contractIntel(checks.subject.canonical, network).catch(() => ({}) as { verified?: boolean })
-        : Promise.resolve({} as { verified?: boolean });
+        ? this.config.contractIntel(checks.subject.canonical, network).catch(() => ({ unavailable: true }) as { verified?: boolean; unavailable?: boolean })
+        : Promise.resolve({} as { verified?: boolean; unavailable?: boolean });
 
     const questions = buildQuestions();
     let answers: JevAnswers;
@@ -358,6 +368,7 @@ export class Provider {
     let onchain: OnchainEvidence;
     let simulation: SimulationEvidence | undefined;
     let subjectVerified: boolean | undefined;
+    let subjectVerificationFailed = false;
     try {
       const [call, facts, sim, intel] = await Promise.all([jev.systemOne(buildState(req, checks, feedResults), questions), onchainP, simulationP, subjectIntelP]);
       answers = call.answers;
@@ -365,16 +376,19 @@ export class Provider {
       onchain = facts;
       simulation = sim;
       subjectVerified = intel.verified;
+      subjectVerificationFailed = intel.unavailable === true;
     } catch (err) {
       return fail(String(err));
     }
     // Approvals granted inside the simulated transaction to contracts: check their
     // verification too (at most two, bounded latency).
     let simSpenderUnverified = false;
+    let simSpenderVerificationFailed = false;
     if (simulation?.status === "ok" && this.config.contractIntel) {
       const spenders = [...new Set((simulation.approvals ?? []).filter((a) => a.spender_is_contract === true).map((a) => a.spender))].slice(0, 2);
-      const results = await Promise.all(spenders.map((s) => (this.config.contractIntel as ContractIntel)(s, network).catch(() => ({}) as { verified?: boolean })));
+      const results = await Promise.all(spenders.map((s) => (this.config.contractIntel as ContractIntel)(s, network).catch(() => ({ unavailable: true }) as { verified?: boolean; unavailable?: boolean })));
       simSpenderUnverified = results.some((r) => r.verified === false);
+      simSpenderVerificationFailed = results.some((r) => r.unavailable === true);
     }
     if (subjectVerified !== undefined) onchain = { ...onchain, verified: subjectVerified };
     if (!answersComplete(answers, questions)) return fail("jev_malformed_answers", usage);
@@ -383,6 +397,13 @@ export class Provider {
     if (kw && network) {
       kitWatch = await kitWatchEvidence(kw, kwFamilies, await kwSubjectP, checks.subject.canonical, network, onchain, simulation, req.transaction?.to);
       feedResults = [...feedResults, { source: "x402check-kit-watch", kind: "address", as_of: kitWatch.as_of, status: kitWatch.status }];
+    } else if (anyChain) {
+      const entries = await kwAnyChainP;
+      const hits: KitWatchHit[] = [...(entries ?? [])].map(([address, e]) => ({ address, role: "subject" as const, kind: e.k, family: e.f, chain: e.c, first_seen: new Date(e.t * 1000).toISOString(), via: "watchlist" as const }));
+      const strong = hits.filter((h) => !KIT_WATCH_INFORMATIONAL.has(h.kind));
+      const asOf = await anyChain.asOf().catch(() => "");
+      kitWatch = { as_of: asOf, status: strong.length ? "hit" : entries === null ? "unavailable" : "clear", ...(hits.length ? { hits } : {}) };
+      feedResults = [...feedResults, { source: "x402check-kit-watch", kind: "address", as_of: asOf, status: kitWatch.status }];
     }
 
     // Drainer-kit code fingerprints: the subject's own code, plus the called contract,
@@ -430,6 +451,12 @@ export class Provider {
     const unavailable = [
       ...(granting && onchain.status === "unavailable" ? ["onchain_unavailable"] : []),
       ...(req.transaction && simulation?.status === "unavailable" ? ["simulation_unavailable"] : []),
+      // A verification lookup that failed on a supported chain is unknown, never "verified".
+      ...((granting && onchain.is_contract === true && subjectVerificationFailed) || simSpenderVerificationFailed ? ["contract_verification_unavailable"] : []),
+      // The watch could not run (a lookup, or the code it reads, failed): never signed as clear.
+      ...(kitWatch?.status === "unavailable" ? ["kit_watch_unavailable"] : []),
+      // An EVM grant with no chain named cannot be classified (contract or wallet, delegated or not).
+      ...(granting && checks.subject.format === "evm" && !network ? ["chain_unknown"] : []),
     ];
     const breakdown = computeScore(inputs, undefined, {
       callerFlagged,

@@ -44,6 +44,9 @@ export function parseSubject(raw: string): ParsedSubject | null {
   if (singleCase && CASHADDR.test(lower)) {
     return { address, canonical: lower.replace(/^bitcoincash:/, ""), format: "cashaddr", ...withChain };
   }
+  // A mixed-case bech32 or cashaddr string is invalid, not a "base58" address that no list contains;
+  // TRON's hex form ("41" + 20 bytes) is not screened by its base58 listing: both are rejected (as the provider does).
+  if (BECH32.test(lower) || CASHADDR.test(lower) || /^41[0-9a-fA-F]{40}$/.test(address)) return null;
   if (BASE58.test(address)) return { address, canonical: address, format: "base58", ...withChain };
   return null;
 }

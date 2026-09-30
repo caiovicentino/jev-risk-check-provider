@@ -41,6 +41,9 @@ export function parseSubject(raw: string): Subject | null {
     if (!cashaddrHash20(lower)) return null;
     return { address, canonical: lower.replace(/^bitcoincash:/, ""), format: "cashaddr", ...(caip2 ? { caip2 } : {}) };
   }
+  // A mixed-case bech32 or cashaddr string is invalid, not a "base58" address that no list contains;
+  // TRON's hex form ("41" + 20 bytes) is not screened by its base58 listing: both are rejected.
+  if (BECH32.test(lower) || CASHADDR.test(lower) || /^41[0-9a-fA-F]{40}$/.test(address)) return null;
   if (BASE58.test(address)) {
     // Base58Check formats (BTC/LTC/DOGE/DASH/BCH legacy/TRX/ZEC t-addr) must carry a
     // valid checksum, so a case-flipped variant of a listed address is rejected

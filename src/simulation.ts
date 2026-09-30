@@ -584,12 +584,14 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
       // is judged by the code it runs: fresh Safes are unverified on explorers, their singleton is not.
       const intel = await Promise.all(
         sinks.map(async (a) => {
-          const own = await (opts.contractIntel as ContractIntel)(verificationTarget(a, facts.get(a)), network).catch(() => ({}) as { verified?: boolean });
+          const own = await (opts.contractIntel as ContractIntel)(verificationTarget(a, facts.get(a)), network).catch(() => ({ unavailable: true }) as { verified?: boolean; unavailable?: boolean });
           if (own.verified !== false || verificationTarget(a, facts.get(a)) === a) return own;
-          return (opts.contractIntel as ContractIntel)(a, network).catch(() => ({}) as { verified?: boolean });
+          return (opts.contractIntel as ContractIntel)(a, network).catch(() => ({ unavailable: true }) as { verified?: boolean; unavailable?: boolean });
         }),
       );
       if (intel.some((r) => r.verified === false)) findings.push("outflow_to_unverified_contract");
+      // A sink whose verification could not be read is unknown: the result is incomplete, not clear.
+      else if (intel.some((r) => (r as { unavailable?: boolean }).unavailable === true)) limits.push("verification_unavailable");
     }
     if (mine.some((a) => isEoa(a.spender))) findings.push("approval_to_eoa");
     if (mine.some((a) => a.unlimited)) findings.push("unlimited_approval");

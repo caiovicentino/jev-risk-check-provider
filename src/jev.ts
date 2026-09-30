@@ -1,4 +1,5 @@
 import type { Answer, RiskCheckRequest, SystemOneResponse } from "./types.js";
+import { redactSecrets } from "../packages/client/src/decode/util.js";
 import { analyzeDomain, type DomainAnalysis } from "./domain-analysis.js";
 import { parseSubject, type Subject } from "./address.js";
 import { screenSubject, type SanctionsEvidence } from "./sanctions.js";
@@ -74,7 +75,9 @@ export function buildState(req: RiskCheckRequest, checks: DerivedChecks = derive
     },
     payment: req.payment ?? null,
     interaction: req.interaction ?? null,
-    operation_context: req.context ?? "unspecified x402 payment",
+    // Secrets the agent pasted (keys, seed phrases, tokens) never reach the model vendor;
+    // request_hash still covers the context exactly as sent.
+    operation_context: req.context ? redactContext(req.context) : "unspecified x402 payment",
   };
 }
 
@@ -216,4 +219,13 @@ export type JevLike = {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 12 to 24 lowercase words of 3 to 8 letters in a row: a seed phrase shape. */
+const MNEMONIC_RE = /(?<![A-Za-z])(?:[a-z]{3,8}[ \t\r\n,]{1,4}){11,23}[a-z]{3,8}(?![A-Za-z])/gu;
+const CREDIT_TOKEN_RE = /x402c_[A-Za-z0-9_-]{20,}/gu;
+
+/** The context the model reads, with private keys, seed phrases, JWTs and credit tokens removed. */
+export function redactContext(context: string): string {
+  return redactSecrets(context.replace(MNEMONIC_RE, "[redacted]").replace(CREDIT_TOKEN_RE, "[redacted]"));
 }

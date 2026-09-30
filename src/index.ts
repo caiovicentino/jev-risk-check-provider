@@ -10,8 +10,8 @@ import { createContractIntel } from "./contract-intel.js";
 
 const typesafeKey = process.env.TYPESAFE_API_KEY;
 const gatewayKey = process.env.AI_GATEWAY_API_KEY;
-const host = process.env.PROVIDER_HOST ?? "localhost:8787";
-const port = Number(process.env.PORT ?? 8787);
+const host = process.env.PROVIDER_HOST ?? "localhost:8799";
+const port = Number(process.env.PORT ?? 8799);
 const baseUrl = process.env.TYPESAFE_BASE_URL;
 
 const jev = typesafeKey
