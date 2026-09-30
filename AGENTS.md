@@ -240,6 +240,7 @@ Each paid probe spends from the probe payer to our own `pay_to`, or from its pre
    ```
 
    Run it in the background. Send the `https://www.npmjs.com/auth/cli/…` link to the owner, and kill the `sleep` when done.
+   **The link expires on npm's side after about 5 minutes** (then `npm error 404 … /-/v1/done?authId=…`); the `sleep` only keeps the CLI waiting. Generate links only when the owner is at the keyboard and has said so; if one expires, run the publish again for a new link.
 4. npm may hold a new version in **staged publishing** (placeholder `0.0.0-stage`). It releases itself, or the owner approves it under *Staged Packages*.
 5. Verify with `npx -y --prefer-online @x402check/mcp@<v> --help`.
 6. Tag `client-vX.Y.Z` and `mcp-vX.Y.Z` on a commit of `main` that passed CI. The `mcp-v` tag publishes to the MCP Registry; the workflow refuses a commit whose CI did not pass.
