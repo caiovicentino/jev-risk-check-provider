@@ -1,13 +1,13 @@
 {
-  "timestamp": "2026-09-30T18:50:37.943Z",
+  "timestamp": "2026-09-30T22:13:32.646Z",
   "base": "https://x402check.xyz",
-  "server": "@x402check/mcp 0.2.0 (packages/mcp/dist/index.js over stdio)",
-  "duration_ms": 3570,
+  "server": "@x402check/mcp 0.3.0 (packages/mcp/dist/index.js over stdio)",
+  "duration_ms": 4800,
   "outcome": "paid",
   "payment_sent": true,
   "action": "allow",
   "reasons": [
-    "payment to x402check itself (trusted payee): not checked"
+    "payment to x402check itself for checks (trusted payee, small amount): not checked"
   ],
   "payment": {
     "network": "eip155:8453",
@@ -16,7 +16,7 @@
     "amount": "3500",
     "amount_usd": 0.0035,
     "settled": true,
-    "transaction": "0x4468b7d45af0fc5fc7bc22167b9588627b56b8a26e5855dab04c01b3610b6680",
+    "transaction": "0x74d5477988a6d781fa7734c8deddb8b2e32ef9618ef0aaa62f5726d1b70107d2",
     "payer": "0xB48057E647B2572f5eAe241b515fBc58B7cE249E",
     "spent_usd": 0.0035,
     "budget_usd": 0.01
@@ -29,13 +29,13 @@
   },
   "secrets_in_output_or_stderr": false,
   "text": [
-    "x402check_pay: PAID. The payee is x402check's own address (a trusted payee): paid without a check.",
+    "x402check_pay: PAID. The payee is x402check's own address, on x402check's own site (a trusted payee): paid without a check.",
     "Resource: POST https://x402check.xyz/v1/risk-check → HTTP 200",
     "Paid: $0.0035 (3500 atomic units of 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) on eip155:8453 to 0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178",
     "x402check: ALLOW",
     "Why:",
-    "- payment to x402check itself (trusted payee): not checked",
-    "Settlement: settled on eip155:8453 · tx 0x4468b7d45af0fc5fc7bc22167b9588627b56b8a26e5855dab04c01b3610b6680",
+    "- payment to x402check itself for checks (trusted payee, small amount): not checked",
+    "Settlement: settled on eip155:8453 · tx 0x74d5477988a6d781fa7734c8deddb8b2e32ef9618ef0aaa62f5726d1b70107d2",
     "Payer budget: $0.0035 of $0.010 spent by this server (checks and payments)"
   ]
 }

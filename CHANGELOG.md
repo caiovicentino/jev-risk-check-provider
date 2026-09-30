@@ -2,6 +2,39 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.0 — 2026-09-30: the audit release
+
+A full multi-agent audit (security, payments, operations, supply chain, evidence) found no critical issue and 11 high ones. This release fixes every finding that code can fix; the rest are owner settings (see the release notes).
+
+- **Payments are single-use.** Each x402 payment is claimed once, after it verifies (a `PaymentClaim` Durable Object per payload): a copy gets 409 `payment_already_used` instead of a second evaluation, settlement or credit token. A claim store that cannot be reached refuses the payment (503, no charge).
+- **The payer is screened.** A wallet on the OFAC SDN list gets 403 `payer_sanctioned`, per call and for credit packs.
+- **The attestation key is checked at load.** Both secrets must be present, the private key must match the published JWK, and a canary must sign and verify. Otherwise paid routes refuse all work with no charge (503 `attestation_key_unavailable`) and `/healthz` answers 503. A next key can be published ahead of a rotation (`JEV_ATTEST_NEXT_PUBLIC_JWK`), and the discovery document names the live kid.
+- **Payments survive a facilitator outage.** `/supported` has 5 s, verify and settle 30 s; a failed stack build is never cached; a network whose facilitator is down leaves the 402 challenge; identity documents and the site never wait for the payment stack. Monad's option says `assetTransferMethod: "permit2"`, the only method its facilitator settles. Only x402 v2 payloads are processed. Solana blockhashes come from publicnode.
+- **Credits.** A pack whose ledger write fails after settlement returns its token anyway (202, credited by the cron). The simulation surcharge is refunded when the simulation did not run. A thrown or abandoned evaluation is refunded, even after the client disconnects. The 1 KiB body cap is enforced while streaming.
+- **Verdicts.** A drainer's own fake Transfer event, dust of a real asset, or padded logs no longer turn the simulation's drain finding off. Lookups that fail (contract verification, the kit watch, an unknown chain) raise a review floor instead of passing as clear. Chain ids have one spelling. Mixed-case bech32/cashaddr and TRON hex forms are rejected, and XRP addresses are now screened (the one XRP SDN listing was unreachable). Secrets pasted into `context` never reach the model.
+- **The kit watch cannot be poisoned** into flagging an arbitrary wallet: forwarding destinations are no longer recorded, a delegation must be in effect, and a failed `eth_getCode` is never cached as benign. One transaction cannot exhaust the KV budget, and `/status` shows a stalled cron as `stale`.
+- **The model.** The revision that answered is signed in `checks.model_id`. The gateway offers no pinned revision, so twice a day the cron runs fixed cases (an injected instruction, a drain request, a configured payment) through the live model; `/status` → `model` shows the result. The model call has an 8 s total deadline.
+- **Feeds.** The cron rebuilds the ScamSniffer domain and address sets twice a day (GPL: runtime KV only, parsed as a stream). `/status` marks the feed stale after 3 days.
+- **HTTP.** Plain HTTP is redirected (pages) or refused (API). HSTS, `nosniff` and `Referrer-Policy` on every response; a strict CSP and `frame-ancestors 'none'` on the site; `/.well-known/security.txt` and `SECURITY.md`. Unpaid requests to paid routes and `/status` are rate-limited per IP. Workers Logs are on, and every settlement is recorded for reconciliation.
+- **Operations.** `scripts/deploy.sh` deploys only a clean, pushed, CI-green `main` and stamps `/healthz` with the commit. wrangler is pinned. CI bundles the Worker, rebuilds the Snap against its manifest and audits production dependencies; actions are pinned to SHAs with least-privilege tokens; Dependabot is on; the MCP Registry publish waits for green CI and verifies its publisher binary.
+- **Evidence hygiene.** Committed reports carry ScamSniffer-only entries as hashes, and tests use synthetic entries. The eval flag parser read `argv[0]` when a flag was absent (pay-guard's "seed 402" sample was drawn with seed 0). Historical suites stop before paying against another version. `scripts/verify-attest.ts` binds a verdict to its request, payment and a maximum age, and pins the key.
+- Local development moved off ports 8787–8789 (now 8799, and 8800–8802 for the demo).
+
+## `@x402check/client` 0.4.0 — 2026-09-30
+
+- **Attestation keys are pinned** by thumbprint (`X402CHECK_KEY_THUMBPRINTS`, the `pinnedKeys` option of `verifyAttestation` and every guard): a key the DID document serves but the package does not know fails with `key_not_pinned`.
+- **The guard fails closed on everything it cannot read, simulate or bind:** `sign({ hash })` and opaque bytes (`raw_hash_signing`), content the decoders mark unreadable (`opaque_signature`), deployments with value and calldata too large to simulate (`not_simulated`), undecoded calls to the signer's own account (`unreadable_self_call`), signatures valid on every chain (`every_chain_authorization`), requests with no chain (`no_chain`), an optional fee cap (`fee_cap`), and signing methods it does not intercept (`unguarded_method`). What it checks is a copy, and the copy is what gets signed.
+- **New decoders (from the Snap):** x402 Permit2 payments check the witness payee; limit orders on 1inch, 0x, CoW and UniswapX are priced (selling for nothing or dust, or to another receiver, is refused locally); ERC-4337 user operations, Safe 4337, ERC-2771 forwards and ERC-7739 wrappers are unwrapped; owner, module and upgrade changes of the signer's own account are refused locally.
+- **Solana:** Stake-program authority changes, priority-fee drains (`maxSolanaFeeLamports`), MintTo, AssignWithSeed and durable nonces are read; Sign-In With Solana checks the requesting origin.
+- Payments to x402check's own `pay_to` skip the check only up to $0.25 (`trustedPayeeMaxAmount`). `createClient` refuses a plain-http `baseUrl` outside localhost. Types carry `model_id`.
+
+## `@x402check/mcp` 0.3.0 — 2026-09-30
+
+- **`x402check_pay` hardened:** MCP cancellation stops a check and never signs afterwards; a 402 body is read with a size and time limit; redirects are refused even through a custom fetch; private and special-use addresses are refused, including through DNS, with connections pinned to the checked addresses; third-party header text is never shown raw; x402check's own `pay_to` skips the check only for the configured API; refusals are classified by the payer's own hooks, never by error text; authorizations longer than 15 minutes are refused, and messages state when one expires.
+- `x402check_verify_attestation` shows signed claims only in their expected formats.
+- `X402CHECK_BUDGET_USD` also bounds what the process spends from prepaid credits.
+- Attestation keys are pinned in every verification (`X402CHECK_PINNED_KEYS`; the default is the client's pins). Needs `@x402check/client` 0.4.0.
+
 ## `@x402check/client` 0.3.0 — 2026-09-30
 
 - **The signing guard covers Solana:** `guardSolanaSigner(signer)` wraps a `@solana/kit` signer (`signTransactions`, `signMessages`, and their modifying and sending variants).

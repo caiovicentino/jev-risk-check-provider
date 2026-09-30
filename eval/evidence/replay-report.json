@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-09-30T22:12:38.646Z",
+  "base": "https://x402check.xyz",
+  "payment_signature_sha256": "380e7a00c2a87a8a",
+  "concurrent": [
+    {
+      "who": "original",
+      "status": 409,
+      "error": "payment_already_used",
+      "settled": false
+    },
+    {
+      "who": "copy 1",
+      "status": 200,
+      "error": null,
+      "settled": true,
+      "transaction": "0x775138c099b65682c77a9f83634f545acca87d76b2c6289effc4cc7030b44464"
+    },
+    {
+      "who": "copy 2",
+      "status": 409,
+      "error": "payment_already_used",
+      "settled": false
+    }
+  ],
+  "after_settlement": {
+    "who": "after settlement",
+    "status": 409,
+    "error": "payment_already_used",
+    "settled": false
+  },
+  "pass": true
+}

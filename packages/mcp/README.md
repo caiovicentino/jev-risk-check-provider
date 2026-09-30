@@ -209,7 +209,7 @@ Arguments: `url`, `method` (`GET` by default), `body`, `headers`, `max_usd`, `co
 ```text
 x402check_pay: PAID. x402check cleared the payee right before the payment was signed.
 Resource: GET https://api.example.com/v1/forecast?city=Lisbon → HTTP 200
-Paid: $0.010 (10000 atomic units of 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) on eip155:8453 to 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4
+Paid: $0.010 (10000 atomic units of 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) on eip155:8453 to 0x7d2c4e6f8a0b1c3d5e7f9a1b3c5d7e9f1a3b5c7d
 x402check: ALLOW · tier low · score 88/100 · attestation verified (jti 7d0f3a52-1c4b-4e8a-9f6d-2b3c4d5e6f70)
 Why:
 - No check fired: risk tier low, score 88/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe

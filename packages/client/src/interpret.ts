@@ -37,10 +37,11 @@ export interface InterpretOptions {
   now?: Date | number | undefined;
 }
 
-const ACTION_BY_TIER: Record<RiskTier, Action> = { low: "allow", medium: "warn", high: "block", critical: "block" };
+/** What each tier means for a caller (the discovery document's guidance is generated from it). */
+export const ACTION_BY_TIER: Readonly<Record<RiskTier, Action>> = { low: "allow", medium: "warn", high: "block", critical: "block" };
 
 /** Deterministic findings (lists, code fingerprints, simulated overpayment): block whatever the tier. */
-const HARD_BLOCK = new Set(["sanctioned_address", "known_scam_address", "phishing_domain", "known_drainer_code", "outflow_exceeds_declared", "address_poisoning", "compromised_wallet", "drainer_operator"]);
+export const HARD_BLOCK: ReadonlySet<string> = new Set(["sanctioned_address", "known_scam_address", "phishing_domain", "known_drainer_code", "outflow_exceeds_declared", "address_poisoning", "compromised_wallet", "drainer_operator"]);
 
 /**
  * Checks that did not fully run, or evidence that needs a human: never an unremarked allow. The

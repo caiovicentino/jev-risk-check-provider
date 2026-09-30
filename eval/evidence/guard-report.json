@@ -1,18 +1,18 @@
 {
-  "timestamp": "2026-09-30T17:28:29.054Z",
+  "timestamp": "2026-09-30T22:17:45.238Z",
   "cases_from": "eval/evidence/simulation-report.json (2026-09-29T18:55:02.779Z)",
   "provider": "in process, same code as production; ScamSniffer feed OFF (circular); neutral model; simulation on public mainnet RPCs at the latest block",
-  "duration_s": 112,
-  "fetched": 282,
+  "duration_s": 71,
+  "fetched": 284,
   "drainer": {
-    "transactions": 54,
+    "transactions": 56,
     "verdicts": {
-      "allow": 32,
+      "allow": 34,
       "warn": 0,
       "block": 22,
       "not_verified": 0
     },
-    "refused_for_an_autonomous_agent": "22/54",
+    "refused_for_an_autonomous_agent": "22/56",
     "among_simulated_ok_in_the_simulation_eval": {
       "transactions": 33,
       "blocked": "22/33",
@@ -360,6 +360,20 @@
         ]
       },
       {
+        "tx": "0x4fc8764358694b01382629f7941486767b89e95f5a411ef0aab9c05f3160af0e",
+        "action": "allow",
+        "counterparty": "ss:f7f21c504d86da36",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
         "tx": "0xba0dfb32ab048b4d2a1957b1515f5843d06c292cf1253594579663185b425cad",
         "action": "allow",
         "counterparty": "ss:3881d697676519f4",
@@ -375,6 +389,20 @@
       },
       {
         "tx": "0xe2eae395368264cdde8615bcc7b0d1a8a0bf0591b7de6003f7acaf9c2b5e7a71",
+        "action": "allow",
+        "counterparty": "ss:3881d697676519f4",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x39299e46bfac1c17376ffaba9c9e728a905f78bc22ffdb54df7f775fe5b7661d",
         "action": "allow",
         "counterparty": "ss:3881d697676519f4",
         "categories": [
@@ -434,12 +462,12 @@
   "legit": {
     "transactions": 228,
     "verdicts": {
-      "allow": 228,
+      "allow": 227,
       "warn": 0,
       "block": 0,
-      "not_verified": 0
+      "not_verified": 1
     },
-    "refused_for_an_autonomous_agent": "0/228",
+    "refused_for_an_autonomous_agent": "0/227",
     "among_simulated_ok_in_the_simulation_eval": {
       "transactions": 84,
       "blocked": "0/84",
@@ -1151,7 +1179,20 @@
     {
       "label": "drainer",
       "tx": "0x4fc8764358694b01382629f7941486767b89e95f5a411ef0aab9c05f3160af0e",
-      "fetched": false
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:f7f21c504d86da36",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
     },
     {
       "label": "drainer",
@@ -1300,7 +1341,20 @@
     {
       "label": "drainer",
       "tx": "0x39299e46bfac1c17376ffaba9c9e728a905f78bc22ffdb54df7f775fe5b7661d",
-      "fetched": false
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:3881d697676519f4",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
     },
     {
       "label": "drainer",
@@ -2833,13 +2887,10 @@
       "score": 100,
       "categories": [
         "intent_risk",
-        "behavioral",
-        "simulation_reverted"
+        "behavioral"
       ],
-      "simulation": "reverted",
-      "findings": [
-        "simulation_reverted"
-      ]
+      "simulation": "ok",
+      "findings": []
     },
     {
       "label": "legit",
@@ -3579,15 +3630,12 @@
     {
       "label": "legit",
       "tx": "0xe28897c7dc09bbb4563f7240032a2d19872adf151c838866d359549519d2ca3e",
-      "action": "allow",
-      "code": null,
-      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
-      "tier": "low",
-      "score": 100,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
+      "action": "not_verified",
+      "code": "not_simulated",
+      "counterparty": null,
+      "tier": null,
+      "score": null,
+      "categories": [],
       "simulation": null,
       "findings": []
     },
@@ -4723,13 +4771,10 @@
       "score": 100,
       "categories": [
         "intent_risk",
-        "behavioral",
-        "simulation_reverted"
+        "behavioral"
       ],
-      "simulation": "reverted",
-      "findings": [
-        "simulation_reverted"
-      ]
+      "simulation": "ok",
+      "findings": []
     },
     {
       "label": "legit",

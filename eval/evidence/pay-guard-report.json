@@ -1,29 +1,71 @@
 {
-  "timestamp": "2026-09-30T18:21:24.160Z",
+  "timestamp": "2026-09-30T22:14:07.011Z",
   "base": "https://x402check.xyz",
   "catalog": {
     "source": "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources",
-    "total_resources": 19725,
-    "pages_read": 2,
+    "total_resources": 19735,
+    "pages_read": 8,
     "distinct_base_usdc_payees": 83,
-    "seed": null
+    "seed": 402
   },
   "method": "each payee checked as x402check_pay checks a payment right before signing it: payee, eip155:8453, USDC, the listed amount, the resource's site; attestation verified and bound (createGuard.check, kind x402_payment). Nothing was paid.",
   "credit_token": "sha256:fefd35455433",
-  "balance_before": "$0.074",
-  "balance_after": "$0.049",
+  "balance_before": "$0.044",
+  "balance_after": "$0.019",
   "verdicts": {
-    "allow": 24,
-    "warn": 1,
+    "allow": 25,
+    "warn": 0,
     "block": 0,
     "not_verified": 0
   },
-  "allowed_rate": "96.0% (95% CI 80.5–99.3%) of 25 decided",
+  "allowed_rate": "100.0% (95% CI 86.7–100.0%) of 25 decided",
   "rows": [
     {
-      "host": "weight402endpoint.vercel.app",
-      "pay_to": "0xA3068CfAe6217Ae906958250072bdf51B7F910c3",
-      "amount_usd": 0.0025,
+      "host": "api.solenrich.com",
+      "pay_to": "0x8EdE9eD2E6ACdd9B2BaFa42ff4078d3F3263607c",
+      "amount_usd": 0.005,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 92,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 971
+    },
+    {
+      "host": "x402-factory.com",
+      "pay_to": "0xCc42Ed39a06b6cF3f484307eF76B88Bf56Fb305f",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 729
+    },
+    {
+      "host": "x402.orthogonal.com",
+      "pay_to": "0x68E8bCC127cd079a79A48e9B7Fa3934DE40a2443",
+      "amount_usd": 0.313,
       "action": "allow",
       "code": null,
       "tier": "low",
@@ -35,14 +77,444 @@
       "payee": {
         "contract": false,
         "activity": "some",
-        "tx_count": 5
+        "tx_count": 1
       },
       "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 1085
+      "ms": 754
+    },
+    {
+      "host": "x402.orthogonal.com",
+      "pay_to": "0x6013D764502369012dF405A21C7DCBb6eFD1507b",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 1
+      },
+      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 837
     },
     {
       "host": "api.maxwellinternational.ai",
       "pay_to": "0x5976376b0c2125655e01d0a7758c744c43fb6d93",
+      "amount_usd": 0.005,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 89,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 1
+      },
+      "reason": "No check fired: risk tier low, score 89/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 819
+    },
+    {
+      "host": "agentshelf.syntexa.ch",
+      "pay_to": "0x1D61FAA032d3f40D9C470D2bf3A3f53De0E55a38",
+      "amount_usd": 0.009,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 2
+      },
+      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 562
+    },
+    {
+      "host": "x402.orthogonal.com",
+      "pay_to": "0xaC9ad2609466fB92C69640fa2b9Ee7B22a76E8fe",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 1
+      },
+      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 728
+    },
+    {
+      "host": "api.losbeto.xyz",
+      "pay_to": "0xd5Ba9711a3D052846a3695C70e7fcb8b3168FE7d",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 92,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 59
+      },
+      "reason": "No check fired: risk tier low, score 92/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 509
+    },
+    {
+      "host": "minia2a.uk",
+      "pay_to": "0xAb62452b4b019bC4402BFfCca6C706d16d72A7Bf",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 110
+      },
+      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 710
+    },
+    {
+      "host": "api.zerion.io",
+      "pay_to": "0xD07C06a650a88bBCF4f0c4fbf2c6c08c9a60AcC6",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 97,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 513
+    },
+    {
+      "host": "grove.g-datalabs.com",
+      "pay_to": "0xe01c0cb99db28df5e996416129577e559442c167",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 92,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 16
+      },
+      "reason": "No check fired: risk tier low, score 92/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 681
+    },
+    {
+      "host": "contextiq.trango-compute.com",
+      "pay_to": "0x4eba5ea3cf0f3fc307099317e17e54390f7a4c58",
+      "amount_usd": 0.02,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 519
+    },
+    {
+      "host": "enclave402.com",
+      "pay_to": "0xbeF3e7CFd486C14dD8c3aA5911134bF361B973C5",
+      "amount_usd": 0.002,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 678
+    },
+    {
+      "host": "x402.orthogonal.com",
+      "pay_to": "0x059a69c76CEA4D2b319cc05021A093ab3FD9bAFb",
+      "amount_usd": 0.00625,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 1
+      },
+      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 736
+    },
+    {
+      "host": "x402.orthogonal.com",
+      "pay_to": "0x9f7556c65392E5cBCB342010618C2b407E64A8EA",
+      "amount_usd": 0.03,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 94,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 1
+      },
+      "reason": "No check fired: risk tier low, score 94/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 663
+    },
+    {
+      "host": "chain.openverbs.com",
+      "pay_to": "0xb3f4de103F34b99f0Da19B4F16D6B53a14C2194A",
+      "amount_usd": 0.004,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 769
+    },
+    {
+      "host": "snowsignals-x402.snowsignals.workers.dev",
+      "pay_to": "0x9273429D71565154fA0FDf4Bf0f404Eb02C91518",
+      "amount_usd": 0.20826,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 92,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 547
+    },
+    {
+      "host": "stable-people-data-git-pdl-signoz-usage-alarms-merit-systems.vercel.app",
+      "pay_to": "0x7f33B3C113915a0f2981070553BA9538C0f90171",
+      "amount_usd": 0.04,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 90,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 693
+    },
+    {
+      "host": "x402endpoint-924155002144.us-west2.run.app",
+      "pay_to": "0xc3426919D3C3E822fdE601187ada28EF41c5f85d",
+      "amount_usd": 0.3,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 619
+    },
+    {
+      "host": "api.locus.report",
+      "pay_to": "0xF121fbeceC43e1B616D47285851c20d5fC64431b",
+      "amount_usd": 0.05,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 92,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 514
+      },
+      "reason": "No check fired: risk tier low, score 92/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 703
+    },
+    {
+      "host": "www.api-xpay.com",
+      "pay_to": "0x589a2314a2E05F45e40C4823Da3Ba58D421dB3d8",
+      "amount_usd": 0.005,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "some",
+        "tx_count": 162
+      },
+      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 609
+    },
+    {
+      "host": "x402.forgemesh.io",
+      "pay_to": "0x850363a27F0aC6fEb9C7a3eC4C1d295262dF9432",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 94,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 639
+    },
+    {
+      "host": "x402.orthogonal.com",
+      "pay_to": "0xA049EBF67b048ebCd76Db2063ff68e500CE96a94",
+      "amount_usd": 0.0125,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 93,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 614
+    },
+    {
+      "host": "stable-supabase-git-ben-test-agentcash-rou-586785-merit-systems.vercel.app",
+      "pay_to": "0xdEdd050dfE4212D52f2a6eD6a2d5d3289DE0D5Ac",
+      "amount_usd": 0.01,
+      "action": "allow",
+      "code": null,
+      "tier": "low",
+      "score": 91,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "new_address"
+      ],
+      "payee": {
+        "contract": false,
+        "activity": "none",
+        "tx_count": 0
+      },
+      "reason": "New address: no on-chain history",
+      "ms": 619
+    },
+    {
+      "host": "twin.unykorn.org",
+      "pay_to": "0x7d9a65d06dcc435a52D5880C6310Bd6E96c156DB",
       "amount_usd": 0.002,
       "action": "allow",
       "code": null,
@@ -55,477 +527,10 @@
       "payee": {
         "contract": false,
         "activity": "some",
-        "tx_count": 1
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 642
-    },
-    {
-      "host": "api.exa.ai",
-      "pay_to": "0x6d6E695b09861467c7d462f5AAF31cF3540B9192",
-      "amount_usd": 0.007,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 21
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 552
-    },
-    {
-      "host": "tools.speccy.cloud",
-      "pay_to": "0x0Cb12Df486381A0EBeBc0EF338dA80657f68f9cB",
-      "amount_usd": 0.05,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 9
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 680
-    },
-    {
-      "host": "cheaptokens.ai",
-      "pay_to": "0x213c8d7434E2ae7AA1C392767c5120778D413215",
-      "amount_usd": 1,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 92,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": true,
-        "activity": "some",
-        "tx_count": 1
-      },
-      "reason": "No check fired: risk tier low, score 92/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 679
-    },
-    {
-      "host": "cron402-api.user-defaults.workers.dev",
-      "pay_to": "0x641891413331c59c2dd62CEb63569bfF1BB258DE",
-      "amount_usd": 0.008,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 4
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 706
-    },
-    {
-      "host": "stablestudio.dev",
-      "pay_to": "0x07F067959297767c887dbfA3C72379c66E82a045",
-      "amount_usd": 0.01,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 3
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 661
-    },
-    {
-      "host": "vaaya.ai",
-      "pay_to": "0x7c655d3d3944Bd27994dD81A036C3aFB19806C40",
-      "amount_usd": 0.4,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 227
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 661
-    },
-    {
-      "host": "x402.spendthebits.com",
-      "pay_to": "0xF52ceDE1a0f2b95dfa703790005F2542CBA45678",
-      "amount_usd": 0.003,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 94,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": true,
-        "activity": "some",
-        "tx_count": 1
-      },
-      "reason": "No check fired: risk tier low, score 94/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 575
-    },
-    {
-      "host": "pro-api.coingecko.com",
-      "pay_to": "0x110cdBba7FE6434Ec4CE3464CC523942ad6Fb784",
-      "amount_usd": 0.01,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 92,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 0
-      },
-      "reason": "No check fired: risk tier low, score 92/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 578
-    },
-    {
-      "host": "dicex402.vercel.app",
-      "pay_to": "0xBf0Df63A4A47e5A72A976ecE1D78aefecCC773a0",
-      "amount_usd": 0.001,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 2
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 537
-    },
-    {
-      "host": "agentpay.tools",
-      "pay_to": "0xE8B25A72dD6aeF69515452a61AD231C7DF2843b7",
-      "amount_usd": 0.01,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 92,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 8
-      },
-      "reason": "No check fired: risk tier low, score 92/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 696
-    },
-    {
-      "host": "rubric-protocol.com",
-      "pay_to": "0xaB6731A0BcDf511c2842C768a03448075aB654ca",
-      "amount_usd": 0.001,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral",
-        "new_address"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "none",
-        "tx_count": 0
-      },
-      "reason": "New address: no on-chain history",
-      "ms": 663
-    },
-    {
-      "host": "gas.apitoll.cloud",
-      "pay_to": "0xcc69d619E6053F88A4845066518f465bD06Fc96c",
-      "amount_usd": 0.001,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral",
-        "new_address"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "none",
-        "tx_count": 0
-      },
-      "reason": "New address: no on-chain history",
-      "ms": 762
-    },
-    {
-      "host": "x402wordoftheday.vercel.app",
-      "pay_to": "0x2af91Df69bD04ccF82D6477aDC046C815B7aE129",
-      "amount_usd": 0.0015,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 3
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 629
-    },
-    {
-      "host": "www.stratalize.com",
-      "pay_to": "0x5d51ECC50813E0937a5c43be298E9146796ad60d",
-      "amount_usd": 0.02,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
         "tx_count": 8
       },
       "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 531
-    },
-    {
-      "host": "x402.donnyautomation.com",
-      "pay_to": "0x2740651e046c59aB2A6510401140643292d3a96F",
-      "amount_usd": 0.01,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 91,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 2
-      },
-      "reason": "No check fired: risk tier low, score 91/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 622
-    },
-    {
-      "host": "api.oblique.markets",
-      "pay_to": "0x970007590aCC5C938cd51345B17AF51B1B40D3Ab",
-      "amount_usd": 0.01,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral",
-        "new_address"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "none",
-        "tx_count": 0
-      },
-      "reason": "New address: no on-chain history",
-      "ms": 795
-    },
-    {
-      "host": "hyperliquid-predict.use.x402atlas.com",
-      "pay_to": "0xA55B06462A2e48661bAdF22f5841F95aE654b716",
-      "amount_usd": 0.005,
-      "action": "warn",
-      "code": null,
-      "tier": "medium",
-      "score": 62,
-      "categories": [
-        "intent_risk",
-        "behavioral",
-        "fraud_signal",
-        "new_address"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "none",
-        "tx_count": 0
-      },
-      "reason": "Fraud signals in the content",
-      "ms": 624
-    },
-    {
-      "host": "roastx402endpoint.vercel.app",
-      "pay_to": "0xBbBA34E9e10130CE852Aa9f1D651cd73C36206d4",
-      "amount_usd": 0.0017,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 93,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 4
-      },
-      "reason": "No check fired: risk tier low, score 93/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 505
-    },
-    {
-      "host": "x402.twit.sh",
-      "pay_to": "0x9dBA414637c611a16BEa6f0796BFcbcBdc410df8",
-      "amount_usd": 0.006,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 92,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 95
-      },
-      "reason": "No check fired: risk tier low, score 92/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 625
-    },
-    {
-      "host": "api.relaystation.ai",
-      "pay_to": "0x5F7254f252eF9b9f92B6B4F2cF91205eD7A96C7A",
-      "amount_usd": 0.01,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 94,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 9
-      },
-      "reason": "No check fired: risk tier low, score 94/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 565
-    },
-    {
-      "host": "crypto.apitoll.cloud",
-      "pay_to": "0x3dA40A9aD36640a2C0F533BAC368490095574664",
-      "amount_usd": 0.001,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 92,
-      "categories": [
-        "intent_risk",
-        "behavioral",
-        "new_address"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "none",
-        "tx_count": 0
-      },
-      "reason": "New address: no on-chain history",
-      "ms": 535
-    },
-    {
-      "host": "google-trends.use.x402atlas.com",
-      "pay_to": "0x9AACeabAD8E1858b72fcEA1665381B168841b2fa",
-      "amount_usd": 0.05,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 91,
-      "categories": [
-        "intent_risk",
-        "behavioral"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "some",
-        "tx_count": 1
-      },
-      "reason": "No check fired: risk tier low, score 91/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
-      "ms": 596
-    },
-    {
-      "host": "surf.cascade.fyi",
-      "pay_to": "0xC751344Ee09B5159160173F77D4a1169bCd386A1",
-      "amount_usd": 0.004,
-      "action": "allow",
-      "code": null,
-      "tier": "low",
-      "score": 94,
-      "categories": [
-        "intent_risk",
-        "behavioral",
-        "new_address"
-      ],
-      "payee": {
-        "contract": false,
-        "activity": "none",
-        "tx_count": 0
-      },
-      "reason": "New address: no on-chain history",
-      "ms": 521
+      "ms": 532
     }
   ]
 }

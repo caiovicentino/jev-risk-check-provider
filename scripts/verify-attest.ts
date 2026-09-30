@@ -4,8 +4,8 @@
 //
 //   --request <json | @file>   the exact request body the verdict must answer: binds request_hash
 //                              (and sub, aud, interaction, payment, domain, chain) to it
-//   --max-age <seconds>        refuse a verdict older than this (a reused verdict is still valid
-//                              for its full hour otherwise)
+//   --max-age <seconds>        refuse a verdict older than this, plus the SDK's 300 s clock-skew
+//                              allowance (without it, a reused verdict stays valid for its full hour)
 //   --aud <url>                required audience        --sub <wallet>   expected subject
 //   --interaction <type>       expected interaction     --issuer <did>   default did:web:x402check.xyz
 //   --pay-to <addr> --amount <atomic> --network <caip2> --asset <addr>   expected payment binding

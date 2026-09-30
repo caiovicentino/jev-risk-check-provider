@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-30T11:47:21.037Z",
+  "timestamp": "2026-09-30T22:13:05.626Z",
   "base": "https://x402check.xyz",
   "paid_via": "eip155:8453",
   "summary": {
@@ -11,7 +11,7 @@
     {
       "id": "discovery_prices_and_credits",
       "status": "PASS",
-      "detail": "version=0.5.1 amount=0.0035 by_network={\"eip155:8453\":\"0.0035\",\"eip155:137\":\"0.007\",\"eip155:42161\":\"0.009\",\"eip155:43114\":\"0.001\",\"eip155:143\":\"0.001\",\"eip155:1329\":\"0.002\",\"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp\":\"0.002\"} credits={\"check_usd\":\"0.001\",\"simulated_check_usd\":\"0.005\",\"pack_min_usd\":\"0.1\",\"pack_max_usd\":\"100\",\"endpoint\":\"/v1/credits\"}"
+      "detail": "version=0.6.0 amount=0.0035 by_network={\"eip155:8453\":\"0.0035\",\"eip155:137\":\"0.007\",\"eip155:42161\":\"0.009\",\"eip155:43114\":\"0.001\",\"eip155:143\":\"0.001\",\"eip155:1329\":\"0.002\",\"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp\":\"0.002\"} credits={\"check_usd\":\"0.001\",\"simulated_check_usd\":\"0.005\",\"pack_min_usd\":\"0.1\",\"pack_max_usd\":\"100\",\"endpoint\":\"/v1/credits\"}"
     },
     {
       "id": "challenge_per_network_prices",
@@ -21,7 +21,7 @@
     {
       "id": "status_routes_and_margins",
       "status": "PASS",
-      "detail": "8453:cdp/eip3009 fee=0.001 margin=69.4% · 137:cdp/eip3009 fee=0.001 margin=84.7% · 42161:cdp/eip3009 fee=0.001 margin=88.1% · 43114:payai/eip3009 fee=0.0001 margin=83% · 143:dexter/permit2 fee=0 margin=93% · 1329:payai/eip3009 fee=0.00077 margin=58% · solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:dexter/svm fee=0 margin=96.5%"
+      "detail": "8453:cdp/eip3009 fee=0.001 margin=69.4% · 137:cdp/eip3009 fee=0.001 margin=84.7% · 42161:cdp/eip3009 fee=0.001 margin=88.1% · 43114:payai/eip3009 fee=0.00011 margin=82% · 143:dexter/permit2 fee=0 margin=93% · 1329:payai/eip3009 fee=0.00071 margin=61% · solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:dexter/svm fee=0 margin=96.5%"
     },
     {
       "id": "status_facilitators",
@@ -31,17 +31,17 @@
     {
       "id": "per_call_base",
       "status": "PASS",
-      "detail": "HTTP 200 score=85 3713 ms end to end (402, payment, evaluation, settlement)"
+      "detail": "HTTP 200 score=84 4716 ms end to end (402, payment, evaluation, settlement)"
     },
     {
       "id": "credits_buy",
       "status": "PASS",
-      "detail": "HTTP 200 token sha256:b3fbb9f8c4ff balance=$0.10 (one settlement for 100 checks)"
+      "detail": "HTTP 200 token sha256:e3d54270a0f0 balance=$0.10 (one settlement for 100 checks)"
     },
     {
       "id": "credits_spend",
       "status": "PASS",
-      "detail": "HTTP 200/200 charged $0.001 each; balance $0.099 → $0.098; 716 ms and 513 ms, no payment round trip, no settlement (per call: 3713 ms)"
+      "detail": "HTTP 200/200 charged $0.001 each; balance $0.099 → $0.098; 664 ms and 538 ms, no payment round trip, no settlement (per call: 4716 ms)"
     },
     {
       "id": "credits_balance",
@@ -61,21 +61,21 @@
     {
       "id": "settled_by_routed_facilitator",
       "status": "PASS",
-      "detail": "POST /v1/risk-check: 0xa32ccda9… → cdp · POST /v1/credits: 0x59b7ebc6… → cdp (Base route: cdp)"
+      "detail": "POST /v1/risk-check: 0x64cc42b1… → cdp · POST /v1/credits: 0x8cda3672… → cdp (Base route: cdp)"
     }
   ],
   "settlements": [
     {
       "probe": "POST /v1/risk-check",
       "success": true,
-      "transaction": "0xea05559c593429bbc24c8ec92d62b9b73ec99d9b265aa815c3274a157ae62267",
+      "transaction": "0xa64a5c646d0de26b16051af2103a5486a73dcc6a7b347ad9fbecbf0ba2c53f49",
       "network": "eip155:8453",
       "payer": "0xB48057E647B2572f5eAe241b515fBc58B7cE249E"
     },
     {
       "probe": "POST /v1/credits",
       "success": true,
-      "transaction": "0x1021dd610fcc4b704d245b529d8f8ace9c1b489745d9abb46c4cb0c2d116271b",
+      "transaction": "0xdb0d2e83ee8a908bff387aae535dabc10dd0ae46fe7d88c4134c85c538e36f14",
       "network": "eip155:8453",
       "payer": "0xB48057E647B2572f5eAe241b515fBc58B7cE249E"
     }
@@ -83,14 +83,14 @@
   "settled_by": [
     {
       "probe": "POST /v1/risk-check",
-      "transaction": "0xea05559c593429bbc24c8ec92d62b9b73ec99d9b265aa815c3274a157ae62267",
-      "from": "0xa32ccda98ba7529705a059bd2d213da8de10d101",
+      "transaction": "0xa64a5c646d0de26b16051af2103a5486a73dcc6a7b347ad9fbecbf0ba2c53f49",
+      "from": "0x64cc42b1ce598e3abcfbb64df4688521ddbf1f0a",
       "facilitator": "cdp"
     },
     {
       "probe": "POST /v1/credits",
-      "transaction": "0x1021dd610fcc4b704d245b529d8f8ace9c1b489745d9abb46c4cb0c2d116271b",
-      "from": "0x59b7ebc67a3d627fabaf06768c818638452ae704",
+      "transaction": "0xdb0d2e83ee8a908bff387aae535dabc10dd0ae46fe7d88c4134c85c538e36f14",
+      "from": "0x8cda367232d78c067116e3260da881d2da8ffa39",
       "facilitator": "cdp"
     }
   ]

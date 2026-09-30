@@ -1,4 +1,5 @@
 import { INTERACTION_TYPES } from "../src/types.js";
+import { ACTION_BY_TIER, HARD_BLOCK } from "../packages/client/src/interpret.js";
 import { MAX_FIELD_LEN } from "../src/validate.js";
 
 // x402 Bazaar discovery (the `bazaar` extension of x402 v2). The paid routes declare how to
@@ -131,6 +132,14 @@ export const BATCH_DISCOVERY = postJson(
  * use the API. Prices are ranges because they depend on the payment network and on
  * simulation (deploy/pricing.ts).
  */
+/** "low → proceed; medium → ask the user; high or critical → stop", from the SDK's own policy. */
+function tierGuidance(): string {
+  const words = { allow: "proceed", warn: "ask the user", block: "stop" } as const;
+  const groups = new Map<string, string[]>();
+  for (const [tier, action] of Object.entries(ACTION_BY_TIER)) groups.set(action, [...(groups.get(action) ?? []), tier]);
+  return [...groups].map(([action, tiers]) => `${tiers.join(" or ")} → ${words[action as keyof typeof words]}`).join("; ");
+}
+
 export function openApiDocument(version: string, prices: { minUsd: string; maxUsd: string; creditUsd: string; simulatedUsd: string; basePerCallUsd: string }): Record<string, unknown> {
   const x402 = (min: string, max: string) => ({ price: { mode: "dynamic", currency: "USD", min, max }, protocols: [{ x402: {} }] });
   const result = { type: "object", properties: { checked: { type: "boolean" }, score: { type: "integer", minimum: 0, maximum: 100 }, tier: { type: "string", enum: ["low", "medium", "high", "critical"] }, categories: { type: "array", items: { type: "string" } }, evidence: { type: "object" }, jws: { type: "string", description: "ES256 attestation from did:web:x402check.xyz" }, checked_at: { type: "string" }, expires_at: { type: "string" } }, required: ["checked"] };
@@ -146,7 +155,7 @@ export function openApiDocument(version: string, prices: { minUsd: string; maxUs
       title: "x402check",
       version,
       description: "Pre-payment risk checks for x402 agents and wallets: OFAC SDN, phishing and drainer feeds, a live watch of drainer infrastructure, transaction simulation and injected-instruction analysis. Every verdict is an ES256 attestation that states which checks ran.",
-      "x-guidance": `Call POST /v1/risk-check before an agent sends funds, signs an approval, permit or order, or pays an x402 invoice. Send the real counterparty as "wallet" (recipient, spender, operator or pay_to), the chain, the site ("domain"), and the content that led you to act ("context"), verbatim. Add "transaction" (EVM from/to/value/data) to have it simulated. Then follow the tier: low → proceed; medium or high → ask the user; critical, or checked: false → stop. Pay per call with x402 (from $${prices.basePerCallUsd} on Base), or buy prepaid credits once (POST /v1/credits {"amount_usd": 1}) and send Authorization: Bearer <token>: $${prices.creditUsd} a check ($${prices.simulatedUsd} simulated). Verify the attestation against did:web:x402check.xyz before relying on it.`,
+      "x-guidance": `Call POST /v1/risk-check before an agent sends funds, signs an approval, permit or order, or pays an x402 invoice. Send the real counterparty as "wallet" (recipient, spender, operator or pay_to), the chain, the site ("domain"), and the content that led you to act ("context", as written, leaving out secrets and personal data). Add "transaction" (EVM from/to/value/data) to have it simulated. Then follow the tier: ${tierGuidance()}; checked: false, or an attestation that does not verify or does not bind to your request → stop. These categories stop at any tier: ${[...HARD_BLOCK].join(", ")}. Pay per call with x402 (from $${prices.minUsd}; $${prices.basePerCallUsd} on Base), or buy prepaid credits once (POST /v1/credits {"amount_usd": 1}) and send Authorization: Bearer <token>: $${prices.creditUsd} a check ($${prices.simulatedUsd} simulated). Verify the attestation against did:web:x402check.xyz, bound to your request (@x402check/client verifyAttestation with request), before relying on it.`,
       contact: { name: "x402check", url: "https://github.com/caiovicentino/jev-risk-check-provider/issues" },
       license: { name: "MIT", url: "https://github.com/caiovicentino/jev-risk-check-provider/blob/main/LICENSE" },
     },

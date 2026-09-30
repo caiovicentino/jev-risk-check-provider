@@ -21,6 +21,7 @@
 // No money moves: nothing is signed or sent. The model makes no calls.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createGuard, type GuardVerdict } from "../packages/client/src/guard.js";
+import { jwkThumbprint } from "../packages/client/src/verify.js";
 import { createHandler } from "../src/handler.js";
 import { Provider } from "../src/provider.js";
 import { generateKeyPair } from "../src/jws.js";
@@ -97,9 +98,12 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promis
 async function main(): Promise<void> {
   const sim = JSON.parse(readFileSync(new URL("./evidence/simulation-report.json", import.meta.url), "utf8")) as { timestamp: string; sample: SampleRow[] };
   const contractIntel = createContractIntel({ timeoutMs: 8000 });
+  // The in-process provider signs with its own key: the guard pins that key (as it pins
+  // production's), so verification runs exactly as in production.
+  const keyPair = generateKeyPair("jev-attest-v1");
   const provider = new Provider({
     host: "x402check.xyz",
-    keyPair: generateKeyPair("jev-attest-v1"),
+    keyPair,
     jev: { systemOne: async () => ({ answers: NEUTRAL, usage: { inputTokens: 0, outputTokens: 0 } }) },
     onchain: createOnchainLookup({ timeoutMs: 4000 }),
     feeds: (() => {
@@ -112,7 +116,7 @@ async function main(): Promise<void> {
   const handler = createHandler({ provider });
   const inProcess = async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string }) =>
     handler(new Request(url, { method: init?.method ?? "GET", headers: init?.headers ?? {}, ...(init?.body !== undefined ? { body: init.body } : {}) }));
-  const guard = createGuard({ fetch: inProcess as never, timeoutMs: 60_000 });
+  const guard = createGuard({ fetch: inProcess as never, timeoutMs: 60_000, pinnedKeys: [await jwkThumbprint(keyPair.publicJwk)] });
 
   const started = Date.now();
   const rows: Row[] = await pool(sim.sample, CONCURRENCY, async (s, i): Promise<Row> => {
