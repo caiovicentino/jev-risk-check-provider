@@ -114,7 +114,7 @@ export function discoveryDocument(host: string, pricing?: PricingInfo, kid = "je
     name: "x402check",
     version: PROVIDER_VERSION,
     description:
-      "Pre-payment risk checks for x402 agent commerce and wallets: deterministic OFAC SDN address screening and domain-impersonation analysis, provider-observed on-chain facts, and a Jev typed-model evaluation of the operation content for injected or manipulated intent. Every verdict is an ES256 attestation that states which checks the provider actually ran.",
+      "Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, phishing and drainer feeds, x402check's own kit watch of drainer infrastructure on Ethereum and Base, transaction simulation, drainer-kit code fingerprints, domain-impersonation analysis, on-chain facts, and a typed-model reading of the content the agent acted on for injected instructions. Every verdict is an ES256 attestation that states which checks the provider actually ran and binds the exact request.",
     endpoint: "/v1/risk-check",
     batch_endpoint: "/v1/risk-check/batch",
     method: "POST",

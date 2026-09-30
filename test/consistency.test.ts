@@ -121,3 +121,24 @@ test("the client parses addresses and chains as the provider does", () => {
   // One deliberate difference: the client canonicalizes a zero-padded chain id before sending; the provider refuses it.
   assert.deepEqual([toCaip2("eip155:08453"), normalizeChain("eip155:08453")], ["eip155:8453", null]);
 });
+
+test("docs agree with the code and with each other (audit docev-11)", async () => {
+  const minor = PROVIDER_VERSION.split(".").slice(0, 2).join(".");
+  // The evidence document and the MCP server's methodology text name the running API version.
+  assert.match(read("docs/EVIDENCE.md").split("\n")[0] as string, new RegExp(`v${minor.replace(".", "\\.")}\\b`), "EVIDENCE.md's title names the current version");
+  const { API_VERSION, METHODOLOGY } = await import("../packages/mcp/src/methodology.js");
+  assert.equal(API_VERSION, minor, "packages/mcp/src/methodology.ts API_VERSION");
+  assert.doesNotMatch(METHODOLOGY, /API v0\.[0-4]\b/);
+  // Every MCP tool is listed where the README lists them.
+  for (const tool of ["x402check_check", "x402check_pay", "x402check_verify_attestation", "x402check_methodology"]) {
+    assert.ok(read("README.md").includes(`\`${tool}\``), `README.md lists ${tool}`);
+    assert.ok(read("packages/mcp/README.md").includes(`\`${tool}\``), `packages/mcp/README.md lists ${tool}`);
+  }
+  // One figure for unlisted phishing domains caught without a feed: 0–4 of 60.
+  for (const path of ["README.md", "docs/EVIDENCE.md", "docs/METHODOLOGY.md", "packages/mcp/README.md", "packages/mcp/src/methodology.ts"]) {
+    assert.doesNotMatch(read(path), /0[–-]3 of 60|0[–-]3\/60/, `${path}: the unlisted-phishing figure is 0–4 of 60`);
+  }
+  // The client README documents the credit methods and the guard's key pinning.
+  const client = read("packages/client/README.md");
+  for (const name of ["buyCredits", "creditBalance", "creditToken", "pinnedKeys", "trustedPayeeMaxAmount"]) assert.ok(client.includes(name), `packages/client/README.md documents ${name}`);
+});

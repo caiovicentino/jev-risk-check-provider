@@ -590,7 +590,9 @@ describe("x402check_methodology", () => {
       assert.match(r.text, /Unknown drainers receiving a plain transfer are NOT detectable from the address alone \(0\/30/);
       assert.match(r.text, /Unlisted phishing domains are mostly NOT caught without a feed \(0 to 4 of 60\)/);
       assert.match(r.text, /real drainer transactions on Ethereum 18\/25 flagged when assets move \(72%\), against 0\/84 legitimate transactions to 19 well-known contracts/);
-      assert.match(r.text, /40\/82 listed contracts at creation from earlier deployments; on held-out legitimate code the gated code sets have 0 false positives among 1,737/);
+      assert.match(r.text, /40\/82 listed contracts at creation from earlier deployments; on held-out legitimate code the gated code sets matched 1 of 1,737 fingerprintable contracts on Ethereum and 0 of 2,935 on Base, and that one match was a real, unlisted drainer/);
+      assert.match(r.text, /\(API v0\.6\)/);
+      assert.doesNotMatch(r.text, /v0\.4\)|API v0\.4/);
       assert.match(r.text, /Kit watch.*address_poisoning.*compromised_wallet.*auto_forwarding_wallet.*drainer_operator/s);
       assert.doesNotMatch(r.text, /0 collisions among 9,625/);
       assert.match(r.text, /Price: \$0\.001 per evaluation from prepaid credits .* \(\$0\.0035 on Base, \$0\.002 on Solana; the 402 challenge lists them all\); \$0\.005 when a transaction is simulated\. There is no free tier/);

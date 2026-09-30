@@ -78,7 +78,7 @@ export const RESULT_EXAMPLE = {
   checked: true,
   score: 40,
   tier: "high",
-  provider: "x402check.xyz",
+  provider: "did:web:x402check.xyz",
   categories: ["approval_to_eoa", "unlimited_approval", "new_address"],
   evidence: { sanctions: { status: "not_listed", list: "ofac-sdn" }, onchain: { is_contract: false, activity: "none" } },
   jws: "eyJhbGciOiJFUzI1NiIsImtpZCI6Impldi1hdHRlc3QtdjEiLCJ0eXAiOiJyaXNrLWNoZWNrK2p3dCJ9…",
