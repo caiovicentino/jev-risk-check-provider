@@ -1,0 +1,66 @@
+# Dependabot version updates for the Worker (root), the published packages
+# (@x402check/client, @x402check/mcp), the Snap and the GitHub Actions pins.
+#
+# - Weekly. Minor and patch updates arrive grouped: runtime dependencies (what the Worker
+#   bundle and npm users get: review them closely, the MCP server holds a payer key) in one
+#   group, development tooling in another. Each major update gets its own PR.
+# - Cooldown: a release is proposed only once it has been public for 7 days, so a hijacked
+#   version that npm or GitHub pulls within days never reaches a PR. Security updates are
+#   not delayed (cooldown applies to version updates only).
+# - Dependabot alerts and security updates are repository settings, enabled separately.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/packages/client"
+      - "/packages/mcp"
+      - "/snap"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    ignore:
+      # Node's type definitions follow the Node major CI runs (22), not the latest.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # The MCP server links the client from this repository (file:../client).
+      - dependency-name: "@x402check/*"
+    groups:
+      runtime:
+        applies-to: version-updates
+        patterns: ["*"]
+        dependency-type: production
+        update-types: [minor, patch]
+      development:
+        applies-to: version-updates
+        patterns: ["*"]
+        dependency-type: development
+        update-types: [minor, patch]
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
