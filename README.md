@@ -283,7 +283,7 @@ Source layout:
 | Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
-| **Payments in production (v0.5):** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7 s end to end · **$0.001, 0.64–0.80 s**, with no settlement per check |
+| **Payments in production (v0.5):** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7–3.7 s end to end, one sample each through PayAI and Coinbase CDP · **$0.001, 0.5–0.8 s**, with no settlement per check |
 | **Production, every evaluation paid** (settled in USDC on Base, or from credits bought that way) | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 (re-run on v0.5) · `security:v3` 8/8 · `security:v4` 7/7 · `security:v5` 9/9, and 11/11 settling through Coinbase CDP (v0.5.1) |
 
 Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). How each verdict is formed, with every cap: [docs/METHODOLOGY.md](docs/METHODOLOGY.md). Earlier evidence documents are kept as historical records with correction notes.
@@ -323,7 +323,7 @@ Both packages are ready to publish, but not yet published.
 
 `snap/` has `onTransaction` / `onSignature` insights that decode the request locally and show the real counterparty, the amounts (including UNLIMITED approvals) and local danger findings.
 
-**Checks are paid per call and a Snap cannot pay yet.** So 0.3.0 sends **nothing** to x402check.xyz and has no network permission. Every insight says "NOT verified by x402check" and never shows an all-clear.
+**Every check is paid, and this Snap version cannot pay yet.** So 0.3.0 sends **nothing** to x402check.xyz and has no network permission. Every insight says "NOT verified by x402check" and never shows an all-clear.
 
 The paid mode is complete and tested behind a single flag (`src/config.ts`), ready for when wallet-side payment exists. It checks the counterparty, simulates the transaction ("You send 1.5 ETH → 0x… (wallet)"), and renders the signed verdict with its evidence and warnings for hidden recipients and known drainer code.
 
