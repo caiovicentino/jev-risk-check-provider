@@ -1,4 +1,4 @@
-import { isSafeId, normalizeEvidence, parseSubject, RISK_TIERS, sanitizeText, X402CheckError } from "@x402check/client";
+import { INTERACTION_TYPES, isSafeId, normalizeEvidence, parseSubject, RISK_TIERS, sanitizeText, X402CheckError } from "@x402check/client";
 import type { PaymentRefused } from "./payer.js";
 import type {
   Action,
@@ -36,10 +36,21 @@ export function sanitizeDeep(value: unknown, depth = 0): unknown {
 
 const JTI = /^[A-Za-z0-9-]{1,64}$/;
 const DID_WEB = /^did:web:[A-Za-z0-9.%-]{1,253}(?::[A-Za-z0-9._~-]+)*$/;
+/** Any DID (W3C DID syntax), for an audience. */
+const DID = /^did:[a-z0-9]{1,32}:[A-Za-z0-9._%-]+(?::[A-Za-z0-9._%-]+)*$/;
 const JWS = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const HTTPS_URL = /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?(?:\/[A-Za-z0-9._~/-]*)?$/;
+/** A host name with at least one dot. */
+const HOST = /^(?=.{4,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const FEED_CHECK = /^[a-z0-9][a-z0-9_-]{0,47}@[0-9A-Za-z.:+/-]{0,40}:[a-z_]{1,20}$/;
+const HEX64 = /^[0-9a-fA-F]{64}$/;
+/** An identifier, date, network or version ("not_listed", "2026-09-23", "eip155:8453", "jev-wallet-risk/v6"). */
+const WORD = /^[A-Za-z0-9_.:/-]{1,64}$/;
+const CLAIM_KEY = /^[a-z][a-z0-9_]{0,31}$/;
+const ASSET_SYMBOL = /^[A-Za-z0-9._-]{1,32}$/;
+/** Shown instead of a value that is not in its expected format (it may be free text). */
+export const NOT_SHOWN = "(not shown: unexpected format)";
 
 export interface PaymentView {
   settled?: boolean;
@@ -126,6 +137,138 @@ export function safeResult(result: RiskCheckResult): Record<string, unknown> {
   const evidence = normalizeEvidence(result.evidence);
   if (evidence) out.evidence = evidence;
   return out;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** An audience in one of its expected shapes (an http(s) URL, a DID, a host name), or NOT_SHOWN. */
+function audience(value: unknown): string {
+  return typeof value === "string" && value.length <= 256 && (HTTPS_URL.test(value) || DID.test(value) || HOST.test(value)) ? value : NOT_SHOWN;
+}
+
+function wordValue(value: unknown): unknown {
+  if (typeof value === "string") return WORD.test(value) ? value : NOT_SHOWN;
+  return typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)) ? value : NOT_SHOWN;
+}
+
+/** The payment binding, each field in its expected format. */
+function safePayment(value: unknown): unknown {
+  if (!isRecord(value)) return NOT_SHOWN;
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (!CLAIM_KEY.test(key)) continue;
+    const s = typeof v === "string" ? v : undefined;
+    const ok =
+      s !== undefined &&
+      (key === "network"
+        ? /^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/.test(s)
+        : key === "pay_to"
+          ? parseSubject(s) !== null
+          : key === "amount"
+            ? /^\d{1,78}$/.test(s)
+            : key === "asset"
+              ? s === "native" || parseSubject(s) !== null || ASSET_SYMBOL.test(s)
+              : key === "resource"
+                ? s.length <= 512 && HTTPS_URL.test(s)
+                : false);
+    out[key] = ok ? s : NOT_SHOWN;
+  }
+  return out;
+}
+
+/** The provider-verified checks, as identifiers, dates and networks. */
+function safeChecks(value: unknown): unknown {
+  if (!isRecord(value)) return NOT_SHOWN;
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (!CLAIM_KEY.test(key)) continue;
+    if (key === "feeds") out.feeds = Array.isArray(v) ? v.filter((f): f is string => typeof f === "string" && FEED_CHECK.test(f)) : NOT_SHOWN;
+    else if (key === "model") out.model = wordValue(v);
+    else if (isRecord(v)) {
+      out[key] = Object.fromEntries(
+        Object.entries(v)
+          .filter(([k]) => CLAIM_KEY.test(k))
+          .map(([k, x]) => [k, k === "findings" ? (Array.isArray(x) ? x.filter(isSafeId) : NOT_SHOWN) : wordValue(x)]),
+      );
+    } else out[key] = NOT_SHOWN;
+  }
+  return out;
+}
+
+/**
+ * Attestation claims for an agent to read: every value in its expected format (a DID, an
+ * address, a URL or host for the audience, numbers, enums, identifiers), anything else replaced
+ * by NOT_SHOWN. A genuinely signed claim can still carry a caller's free text (e.g. `aud`): the
+ * signature proves who signed it, not that it is safe to read as instructions.
+ */
+export function safeClaims(claims: unknown): Record<string, unknown> | null {
+  if (!isRecord(claims)) return null;
+  const out: Record<string, unknown> = {};
+  const num = (v: unknown): unknown => (typeof v === "number" && Number.isFinite(v) ? v : NOT_SHOWN);
+  for (const [key, value] of Object.entries(claims)) {
+    if (!CLAIM_KEY.test(key)) continue;
+    switch (key) {
+      case "iss":
+        out.iss = typeof value === "string" && value.length <= 256 && DID.test(value) ? value : NOT_SHOWN;
+        break;
+      case "sub":
+        out.sub = typeof value === "string" && parseSubject(value) ? value : NOT_SHOWN;
+        break;
+      case "aud":
+        out.aud = Array.isArray(value) ? value.slice(0, 16).map(audience) : audience(value);
+        break;
+      case "iat":
+      case "exp":
+      case "nbf":
+        out[key] = num(value);
+        break;
+      case "score":
+        out.score = typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : NOT_SHOWN;
+        break;
+      case "tier":
+        out.tier = (RISK_TIERS as readonly unknown[]).includes(value) ? value : NOT_SHOWN;
+        break;
+      case "jti":
+        out.jti = typeof value === "string" && JTI.test(value) ? value : NOT_SHOWN;
+        break;
+      case "categories":
+        out.categories = Array.isArray(value) ? value.filter(isSafeId) : NOT_SHOWN;
+        break;
+      case "input_hash":
+      case "request_hash":
+        out[key] = typeof value === "string" && HEX64.test(value) ? value : NOT_SHOWN;
+        break;
+      case "interaction":
+        out.interaction = (INTERACTION_TYPES as readonly unknown[]).includes(value) ? value : NOT_SHOWN;
+        break;
+      case "payment":
+        out.payment = safePayment(value);
+        break;
+      case "checks":
+        out.checks = safeChecks(value);
+        break;
+      case "asserted":
+        out.asserted = isRecord(value)
+          ? Object.fromEntries(
+              Object.entries(value)
+                .filter(([k]) => CLAIM_KEY.test(k))
+                .map(([k, v]) => [k, k === "screening" ? (v === "clean" || v === "flagged" || v === "unknown" ? v : NOT_SHOWN) : k === "pre_authorized" && typeof v === "boolean" ? v : NOT_SHOWN]),
+            )
+          : NOT_SHOWN;
+        break;
+      default:
+        out[key] = NOT_SHOWN;
+    }
+  }
+  return out;
+}
+
+function isoTime(seconds: unknown): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return NOT_SHOWN;
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? NOT_SHOWN : date.toISOString();
 }
 
 function short(address: string): string {
@@ -331,12 +474,17 @@ function verificationText(v: VerificationResult): string {
       ...(shown.length > 0 ? [`Unverified claims: ${shown.join(", ")}`] : []),
     ].join("\n");
   }
+  // Signed is not the same as safe to read: a caller chooses some signed values (e.g. `aud`), so
+  // every value is shown only in its expected format, and NOT_SHOWN otherwise.
   const c = v.claims;
   const jti = typeof c.jti === "string" && JTI.test(c.jti) ? c.jti : "none";
+  const subject = typeof c.sub === "string" && parseSubject(c.sub) ? c.sub : NOT_SHOWN;
+  const tier = (RISK_TIERS as readonly unknown[]).includes(c.tier) ? c.tier : NOT_SHOWN;
+  const score = typeof c.score === "number" && Number.isFinite(c.score) ? `${c.score}/100` : NOT_SHOWN;
   const lines = [
     `x402check attestation: VALID. Signed by ${clean(v.issuer, 100)}${v.verificationMethod ? ` (${clean(v.verificationMethod, 160)})` : ""}.`,
-    `Subject ${clean(c.sub, 160)} · tier ${c.tier} · score ${c.score}/100 · jti ${jti}`,
-    `Issued ${new Date(c.iat * 1000).toISOString()} · expires ${new Date(c.exp * 1000).toISOString()}`,
+    `Subject ${subject} · tier ${tier} · score ${score} · jti ${jti}`,
+    `Issued ${isoTime(c.iat)} · expires ${isoTime(c.exp)}`,
   ];
   const categories = (Array.isArray(c.categories) ? c.categories : []).filter((x) => isSafeId(x) && x !== "intent_risk" && x !== "behavioral");
   if (categories.length > 0) lines.push(`Findings: ${categories.join(", ")}`);
@@ -354,11 +502,13 @@ function verificationText(v: VerificationResult): string {
     parts.push(`model ${word(checks.model)}`);
     lines.push(clean(`Provider-verified checks: ${parts.join(" · ")}`, 1200));
   }
-  if (c.payment && typeof c.payment === "object") {
-    lines.push(clean(`Bound to payment: ${Object.entries(c.payment).map(([k, val]) => `${clean(k, 16)}=${clean(val, 120)}`).join(", ")}`, 800));
+  if (c.payment !== undefined) {
+    const payment = safePayment(c.payment);
+    const shown = isRecord(payment) ? Object.entries(payment).map(([k, val]) => `${k}=${String(val)}`) : [];
+    lines.push(clean(`Bound to payment: ${shown.length > 0 ? shown.join(", ") : NOT_SHOWN}`, 1200));
   }
-  if (typeof c.interaction === "string") lines.push(`Bound to interaction: ${clean(c.interaction, 32)}`);
-  if (c.aud !== undefined) lines.push(`Audience: ${clean(Array.isArray(c.aud) ? c.aud.join(", ") : c.aud, 256)}`);
+  if (c.interaction !== undefined) lines.push(`Bound to interaction: ${(INTERACTION_TYPES as readonly unknown[]).includes(c.interaction) ? String(c.interaction) : NOT_SHOWN}`);
+  if (c.aud !== undefined) lines.push(`Audience: ${(Array.isArray(c.aud) ? c.aud.slice(0, 16).map(audience) : [audience(c.aud)]).join(", ") || NOT_SHOWN}`);
   if (c.asserted) lines.push("Note: `asserted` fields were self-reported by the caller and NOT verified by the provider.");
   return lines.join("\n");
 }

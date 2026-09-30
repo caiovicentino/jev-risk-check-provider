@@ -21,7 +21,7 @@ import { z } from "zod";
 import { METHODOLOGY } from "./methodology.js";
 import { runPay, PAY_DESCRIPTION, PAY_OUTPUT_SCHEMA, payInput, payOutput, type PayArgs, type PayOutcome, type PayStructured } from "./pay.js";
 import { createPayer, PaymentRefused, type Payer } from "./payer.js";
-import { paymentView, renderCheck, renderVerification, safePaymentRequired, safeResult, sanitizeDeep, type PaymentView } from "./render.js";
+import { paymentView, renderCheck, renderVerification, safeClaims, safePaymentRequired, safeResult, sanitizeDeep, type PaymentView } from "./render.js";
 import { VERSION } from "./version.js";
 
 export { METHODOLOGY, EVIDENCE_URL, METHODOLOGY_URL } from "./methodology.js";
@@ -235,7 +235,10 @@ const verifyOutput = {
   failures: z.array(z.string()),
   issuer: z.string(),
   verification_method: z.string().optional(),
-  claims: z.record(z.string(), z.unknown()).nullable().describe("Decoded claims. Untrusted unless valid is true."),
+  claims: z
+    .record(z.string(), z.unknown())
+    .nullable()
+    .describe('Decoded claims, each value in its expected format (otherwise "(not shown: unexpected format)"). Untrusted unless valid is true.'),
 };
 
 /** `{ a: X | undefined }` → `{ a?: X }`: the keys whose value is undefined are dropped. */
@@ -495,7 +498,8 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
           failures: v.failures,
           issuer: v.issuer,
           verification_method: v.verificationMethod,
-          claims: (v.claims as Record<string, unknown> | null) ?? null,
+          // Signed values can still be a caller's free text (e.g. `aud`): shown only in their expected formats.
+          claims: safeClaims(v.claims),
         }),
       ) as Record<string, unknown>;
       const rendered = renderVerification(v);
