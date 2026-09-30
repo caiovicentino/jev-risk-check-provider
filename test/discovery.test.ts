@@ -6,7 +6,7 @@ import { x402ResourceServer, type FacilitatorClient } from "@x402/core/server";
 import { x402HTTPResourceServer, type PaymentOption, type RouteConfig } from "@x402/core/http";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { BATCH_DISCOVERY, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "../deploy/discovery.js";
-import { paidRoutes, usageFor } from "../deploy/protected.js";
+import { handleProtected, openApi, paidRoutes, usageFor, type Stack } from "../deploy/protected.js";
 import { fetchAdapter } from "../deploy/http-util.js";
 import { validateBatch, validateRequest } from "../src/validate.js";
 import { createHandler } from "../src/handler.js";
@@ -71,11 +71,58 @@ test("the real x402 402 challenge carries the Bazaar extension and the service m
   assert.equal(challenge.accepts[0]?.amount, "3500", "Base per-call price");
 });
 
-test("the service icon is served", async () => {
+test("the service icon and the favicon are served", async () => {
   const handler = createHandler({ provider: new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("jev-attest-v1"), jev: null }) });
   const res = await handler(new Request("https://x402check.xyz/icon.png"));
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("Content-Type"), "image/png");
   const bytes = new Uint8Array(await res.arrayBuffer());
   assert.deepEqual([...bytes.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47], "PNG signature");
+  const ico = await handler(new Request("https://x402check.xyz/favicon.ico"));
+  assert.equal(ico.headers.get("Content-Type"), "image/x-icon");
+  assert.deepEqual([...new Uint8Array(await ico.arrayBuffer()).slice(0, 4)], [0, 0, 1, 0], "ICO header");
+});
+
+test("a discovery probe (unpaid POST, no body) gets the 402 for one item; a paid or authenticated empty body gets 422", async () => {
+  const priced: string[] = [];
+  const stack = {
+    deps: { provider: new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("jev-attest-v1"), jev: null }) },
+    http: {
+      processHTTPRequest: async (ctx: { path: string; adapter: { getBody?: () => unknown }; paymentHeader?: string }) => {
+        priced.push(`${ctx.path} ${JSON.stringify(ctx.adapter.getBody?.())}`);
+        return ctx.paymentHeader ? { type: "payment-verified" } : { type: "payment-error", response: { status: 402, headers: { "PAYMENT-REQUIRED": "challenge" }, body: {} } };
+      },
+    },
+  } as unknown as Stack;
+  const evaluated: string[] = [];
+  const serve = async (req: Request) => {
+    evaluated.push(req.url);
+    return new Response("{}", { status: 200 });
+  };
+  const post = (path: string, headers: Record<string, string> = {}) => new Request(`https://x402check.xyz${path}`, { method: "POST", headers: { Accept: "application/json", ...headers } });
+  for (const path of ["/v1/risk-check", "/v1/risk-check/batch"]) {
+    const res = await handleProtected(post(path), {}, stack, serve);
+    assert.equal(res.status, 402, path);
+    assert.equal(res.headers.get("PAYMENT-REQUIRED"), "challenge");
+  }
+  assert.deepEqual(priced, ["/v1/risk-check {}", "/v1/risk-check/batch {}"], "priced as one item");
+  assert.equal((await handleProtected(post("/v1/risk-check", { "PAYMENT-SIGNATURE": "sig" }), {}, stack, serve)).status, 422, "a payment for nothing is never settled");
+  assert.equal((await handleProtected(post("/v1/risk-check", { Authorization: "Bearer x402c_x" }), {}, stack, serve)).status, 422);
+  assert.deepEqual(evaluated, [], "nothing unpaid or empty is evaluated");
+});
+
+test("the OpenAPI discovery document prices every paid operation and matches the validator", () => {
+  const doc = openApi({}) as { openapi: string; info: Record<string, unknown>; paths: Record<string, { post: { "x-payment-info": { price: Record<string, string>; protocols: unknown[] }; requestBody: { content: { "application/json": { schema: unknown; example: unknown } } }; responses: Record<string, unknown> } }> };
+  assert.equal(doc.openapi, "3.1.0");
+  assert.match(String(doc.info["x-guidance"]), /POST \/v1\/risk-check/);
+  const price = (p: string) => doc.paths[p]?.post["x-payment-info"].price;
+  assert.deepEqual(price("/v1/risk-check"), { mode: "dynamic", currency: "USD", min: "0.001", max: "0.009" });
+  assert.deepEqual(price("/v1/risk-check/batch"), { mode: "dynamic", currency: "USD", min: "0.001", max: "0.225" });
+  assert.deepEqual(price("/v1/credits"), { mode: "dynamic", currency: "USD", min: "0.10", max: "100.00" });
+  for (const [p, op] of Object.entries(doc.paths)) {
+    assert.deepEqual(op.post["x-payment-info"].protocols, [{ x402: {} }], p);
+    assert.ok(op.post.responses["402"], `${p}: declares its 402`);
+  }
+  assert.equal(validateRequest(doc.paths["/v1/risk-check"]?.post.requestBody.content["application/json"].example).ok, true);
+  assert.equal(validateBatch(doc.paths["/v1/risk-check/batch"]?.post.requestBody.content["application/json"].example).ok, true);
 });

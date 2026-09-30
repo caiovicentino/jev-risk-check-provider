@@ -266,6 +266,11 @@ The token appears in the report only as a SHA-256 prefix.
 - **The first listing** came from the first CDP-settled payment that carried the extension, at 14:33 UTC.
 - **Before the Bazaar declaration:** outside our own probes, no agent had called the paid endpoints. Cloudflare analytics for the prior 24 hours showed 14 distinct outside clients hitting them, all with a browser GET (405) or an unauthenticated credits GET (401).
 
+**v0.5.4: listed on x402scan.**
+- **Registration:** `registerFromOrigin` read `https://x402check.xyz/openapi.json`, probed each endpoint and registered 3 of 3, with none failed.
+- **Validation:** `@agentcash/discovery discover` reports 3 paid x402 routes and no warnings. Those routes cost $0.001–$0.009 for a check, $0.001–$0.225 for a batch, and $0.10–$100 for credits.
+- **Before this fix,** the probe got a 422: it sends a POST with no body, and we validated before pricing. A missing favicon check also failed, because HEAD returned 404.
+
 **v0.5.1: Coinbase CDP settles Base, Polygon and Arbitrum.**
 - **Settlements:** the per-call check and the credit pack were settled by CDP signers `0xa32ccda9…` and `0x59b7ebc6…`, both published in CDP's `/supported`. They moved 0.0035 and 0.10 USDC from the probe payer to our `pay_to` (transactions in `security-v5-report.json`).
 - **Speed:**

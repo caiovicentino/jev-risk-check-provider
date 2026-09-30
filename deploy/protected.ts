@@ -1,5 +1,5 @@
 import { generateKeyPair, type KeyPair } from "../src/jws.js";
-import { Provider, type PricingInfo } from "../src/provider.js";
+import { Provider, PROVIDER_VERSION, type PricingInfo } from "../src/provider.js";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient } from "../src/jev.js";
 import type { HandlerDeps } from "../src/handler.js";
@@ -13,7 +13,7 @@ import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice
 import { allChecked, fetchAdapter, json } from "./http-util.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
 import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
-import { BATCH_DISCOVERY, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "./discovery.js";
+import { BATCH_DISCOVERY, openApiDocument, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "./discovery.js";
 import type { ThreatIntelFeeds } from "../src/threat-intel.js";
 import { HTTPFacilitatorClient, x402ResourceServer, type FacilitatorClient } from "@x402/core/server";
 import { x402HTTPResourceServer, type HTTPAdapter, type HTTPRequestContext, type HTTPProcessResult, type HTTPResponseInstructions, type PaymentOption, type RoutesConfig } from "@x402/core/http";
@@ -365,6 +365,15 @@ export function paidRoutes(env: WorkerEnv): RoutesConfig {
   };
 }
 
+/** The OpenAPI discovery document, priced from the live price table (per call: the cheapest to the dearest network). */
+export function openApi(env: WorkerEnv): Record<string, unknown> {
+  const plain = (usd: number) => formatUsd(Math.round(usd * MICRO)).slice(1);
+  const perCall = buildAccepts(env).map((a) => networkPrice(String(a.network)));
+  const min = Math.min(...perCall);
+  const max = Math.max(...perCall, env.SIMULATION !== "off" ? SIMULATION_PRICE : 0);
+  return openApiDocument(PROVIDER_VERSION, { minUsd: plain(min), maxUsd: plain(max), creditUsd: CREDIT_PRICING.check_usd, simulatedUsd: plain(SIMULATION_PRICE), basePerCallUsd: plain(networkPrice(BASE_MAINNET)) });
+}
+
 /** What a GET (a browser, a curious developer) receives from a POST-only paid endpoint: how to call it. */
 export function usageFor(path: string): Record<string, unknown> {
   const plain = (usd: number) => formatUsd(Math.round(usd * MICRO)).slice(1);
@@ -440,6 +449,18 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   const bytes = await readCapped(request, MAX_BODY_BYTES);
   if (!bytes) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
   const text = new TextDecoder().decode(bytes);
+  // A discovery probe (x402scan, AgentCash): an unpaid, unauthenticated request with no body
+  // gets the 402 challenge for one item, so the endpoint shows as payable. A body that is
+  // present but invalid still gets a 422 naming the field, and nothing unpaid is evaluated.
+  if (text.trim() === "" && !request.headers.get("PAYMENT-SIGNATURE") && !request.headers.get("authorization")) {
+    try {
+      const probe = await stack.http.processHTTPRequest({ adapter: fetchAdapter(request, {}), path, method: request.method });
+      if (probe.type === "payment-error") return instructionsToResponse(probe.response);
+    } catch {
+      return json(500, { error: "payment_processing_failed" });
+    }
+    return json(402, { error: "payment_required" });
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

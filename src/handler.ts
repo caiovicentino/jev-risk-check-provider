@@ -1,7 +1,7 @@
 import { discoveryDocument, Provider, type PricingInfo } from "./provider.js";
 import { jwksDocument } from "./jws.js";
 import { landingPage, OG_PNG_B64 } from "./landing.js";
-import { ICON_PNG_B64 } from "./icon.js";
+import { FAVICON_ICO_B64, ICON_PNG_B64 } from "./icon.js";
 import { validateBatch, validateRequest } from "./validate.js";
 
 export type HandlerDeps = {
@@ -89,6 +89,12 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
         return new Response(landingPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
       return json(200, discoveryDocument(deps.provider.host, deps.pricing));
+    }
+    if (req.method === "GET" && path === "/favicon.ico") {
+      return new Response(Uint8Array.from(atob(FAVICON_ICO_B64), (ch) => ch.charCodeAt(0)), {
+        status: 200,
+        headers: { "Content-Type": "image/x-icon", "Cache-Control": "public, max-age=86400" },
+      });
     }
     if (req.method === "GET" && path === "/icon.png") {
       return new Response(Uint8Array.from(atob(ICON_PNG_B64), (ch) => ch.charCodeAt(0)), {

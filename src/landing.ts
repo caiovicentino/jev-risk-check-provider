@@ -7,7 +7,9 @@ const PAGE = `<!doctype html>
 <meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, our own kit watch of drainer infrastructure on Ethereum and Base, transaction simulation, drainer-kit code and injected-instruction analysis — as signed, verifiable attestations. $0.001 a check with prepaid credits, or per call with x402 from $0.0035.">
 <link rel="canonical" href="https://x402check.xyz/">
 <meta name="theme-color" content="#fcfcfa">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%239945ff'/%3E%3Cstop offset='1' stop-color='%2314f195'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='monospace' font-size='34' font-weight='bold' text-anchor='middle' fill='%230a0b10'%3Ex%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="x402check">
 <meta property="og:url" content="https://x402check.xyz/">

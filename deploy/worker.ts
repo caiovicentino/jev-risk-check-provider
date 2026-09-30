@@ -1,4 +1,4 @@
-import { handleProtected, ensureStack, facilitatorStatus, json, paymentRouting, PROTECTED, usageFor } from "./protected.js";
+import { handleProtected, ensureStack, facilitatorStatus, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
 import { createHandler } from "../src/handler.js";
 import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
 import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
@@ -100,10 +100,13 @@ function healthz(): Response {
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
-    if (request.method === "OPTIONS") {
+  async fetch(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
+    if (incoming.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
+    // HEAD is GET without a body (RFC 9110): discovery tools check /favicon.ico and pages with HEAD.
+    const head = incoming.method === "HEAD";
+    const request = head ? new Request(incoming.url, { method: "GET", headers: incoming.headers }) : incoming;
     const path = new URL(request.url).pathname;
     maybeRefreshFeeds(env, ctx, EMBEDDED);
     let res: Response;
@@ -111,6 +114,8 @@ export default {
       res = healthz();
     } else if (request.method === "GET" && path === "/status") {
       res = await status(env);
+    } else if (request.method === "GET" && path === "/openapi.json") {
+      res = json(200, openApi(env), { "Cache-Control": "public, max-age=300" });
     } else {
       const stack = await ensureStack(env, feedsFor(env));
       if (path === "/v1/credits") {
@@ -126,7 +131,7 @@ export default {
       }
     }
     for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
-    return res;
+    return head ? new Response(null, { status: res.status, headers: res.headers }) : res;
   },
 
   // Kit watch cron (wrangler.toml [triggers]): scans new Ethereum and Base blocks.

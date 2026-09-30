@@ -2,6 +2,19 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.5.4 — 2026-09-30
+
+- **Listed on x402scan**, the directory the x402 maintainers point projects to. They no longer take community listings in the x402 docs, and closed 8 such PRs.
+  - The listing has the 3 paid endpoints, read from our `/openapi.json`, with none failed.
+  - Server page: https://www.x402scan.com/server/14680ac3-396d-4174-b07d-9fae9bc74e96
+- **`/openapi.json`**, the AgentCash / x402scan discovery convention.
+  - Every paid operation declares `x-payment-info`: a USD price range from the live price table, and the x402 protocol.
+  - Each operation has its request and response schemas and a 402 response. `info.x-guidance` tells an agent when to call and how to act on the tier.
+  - `@agentcash/discovery discover` finds 3 paid routes with no warnings.
+- **Discovery probes get the 402.** An unpaid, unauthenticated POST with no body now receives the challenge for one item. x402scan's probe sends no body, and it used to get a 422. A body that is present but invalid still gets a 422 naming the field, and nothing unpaid is evaluated.
+- **`/favicon.ico`** (48, 32 and 16 px). The site now uses the new icon, not the old gradient.
+- **HEAD is answered like GET, without a body** (RFC 9110). Discovery tools check favicons with HEAD, and HEAD used to get a 404.
+
 ## v0.5.3 — 2026-09-30
 
 - **Listed in the x402 Bazaar**, the service catalog Coinbase CDP builds from the payments it settles.

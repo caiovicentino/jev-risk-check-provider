@@ -123,3 +123,70 @@ export const BATCH_DISCOVERY = postJson(
   { type: "object", properties: { requests: { type: "array", minItems: 1, maxItems: 25, items: REQUEST_BODY_SCHEMA } }, required: ["requests"] },
   { results: [RESULT_EXAMPLE] },
 );
+
+/**
+ * The OpenAPI discovery document at /openapi.json (the AgentCash / x402scan convention): every
+ * paid operation declares `x-payment-info` (a USD price range and the x402 protocol), its
+ * request and response schemas, and a 402 response. `info.x-guidance` tells an agent how to
+ * use the API. Prices are ranges because they depend on the payment network and on
+ * simulation (deploy/pricing.ts).
+ */
+export function openApiDocument(version: string, prices: { minUsd: string; maxUsd: string; creditUsd: string; simulatedUsd: string; basePerCallUsd: string }): Record<string, unknown> {
+  const x402 = (min: string, max: string) => ({ price: { mode: "dynamic", currency: "USD", min, max }, protocols: [{ x402: {} }] });
+  const result = { type: "object", properties: { checked: { type: "boolean" }, score: { type: "integer", minimum: 0, maximum: 100 }, tier: { type: "string", enum: ["low", "medium", "high", "critical"] }, categories: { type: "array", items: { type: "string" } }, evidence: { type: "object" }, jws: { type: "string", description: "ES256 attestation from did:web:x402check.xyz" }, checked_at: { type: "string" }, expires_at: { type: "string" } }, required: ["checked"] };
+  const responses = (schema: Record<string, unknown>) => ({
+    "200": { description: "The verdict, with its signed attestation", content: { "application/json": { schema } } },
+    "402": { description: "Payment Required: pay with x402 (the challenge lists every network), or send Authorization: Bearer x402c_… to pay from prepaid credits" },
+    "422": { description: "Invalid request: the offending field is named; nothing is charged" },
+  });
+  const maxBatch = (Number(prices.maxUsd) * 25).toFixed(3);
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "x402check",
+      version,
+      description: "Pre-payment risk checks for x402 agents and wallets: OFAC SDN, phishing and drainer feeds, a live watch of drainer infrastructure, transaction simulation and injected-instruction analysis. Every verdict is an ES256 attestation that states which checks ran.",
+      "x-guidance": `Call POST /v1/risk-check before an agent sends funds, signs an approval, permit or order, or pays an x402 invoice. Send the real counterparty as "wallet" (recipient, spender, operator or pay_to), the chain, the site ("domain"), and the content that led you to act ("context"), verbatim. Add "transaction" (EVM from/to/value/data) to have it simulated. Then follow the tier: low → proceed; medium or high → ask the user; critical, or checked: false → stop. Pay per call with x402 (from $${prices.basePerCallUsd} on Base), or buy prepaid credits once (POST /v1/credits {"amount_usd": 1}) and send Authorization: Bearer <token>: $${prices.creditUsd} a check ($${prices.simulatedUsd} simulated). Verify the attestation against did:web:x402check.xyz before relying on it.`,
+      contact: { name: "x402check", url: "https://github.com/caiovicentino/jev-risk-check-provider/issues" },
+      license: { name: "MIT", url: "https://github.com/caiovicentino/jev-risk-check-provider/blob/main/LICENSE" },
+    },
+    servers: [{ url: "https://x402check.xyz" }],
+    externalDocs: { url: "https://x402check.xyz/#integrate" },
+    paths: {
+      "/v1/risk-check": {
+        post: {
+          operationId: "riskCheck",
+          summary: "Risk-check a counterparty before paying, with a signed attestation",
+          tags: ["Risk"],
+          "x-payment-info": x402(prices.minUsd, prices.maxUsd),
+          requestBody: { required: true, content: { "application/json": { schema: REQUEST_BODY_SCHEMA, example: REQUEST_EXAMPLE } } },
+          responses: responses(result),
+        },
+      },
+      "/v1/risk-check/batch": {
+        post: {
+          operationId: "riskCheckBatch",
+          summary: "Up to 25 risk checks in one call, billed per item",
+          tags: ["Risk"],
+          "x-payment-info": x402(prices.minUsd, maxBatch),
+          requestBody: { required: true, content: { "application/json": { schema: BATCH_DISCOVERY.bazaar.schema.properties.input.properties.body, example: BATCH_DISCOVERY.bazaar.info.input.body } } },
+          responses: responses({ type: "object", properties: { results: { type: "array", items: result } }, required: ["results"] }),
+        },
+      },
+      "/v1/credits": {
+        post: {
+          operationId: "buyCredits",
+          summary: "Buy (or, with Authorization, top up) prepaid credits: a token for checks at $0.001",
+          tags: ["Credits"],
+          "x-payment-info": x402("0.10", "100.00"),
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { amount_usd: { type: "number", minimum: 0.1, maximum: 100, multipleOf: 0.01 } }, required: ["amount_usd"] }, example: { amount_usd: 1 } } } },
+          responses: {
+            "200": { description: "The token (shown once, on purchase) and the balance", content: { "application/json": { schema: { type: "object", properties: { token: { type: "string" }, credited_usd: { type: "string" }, balance_usd: { type: "string" } }, required: ["balance_usd"] } } } },
+            "402": { description: "Payment Required: the pack price, on every network" },
+            "422": { description: "Invalid pack amount" },
+          },
+        },
+      },
+    },
+  };
+}
