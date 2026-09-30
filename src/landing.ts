@@ -307,7 +307,8 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
 }
 
 <span class="cm"># Verify: npx tsx scripts/verify-attest.ts &lt;jws&gt; --issuer did:web:x402check.xyz</span>
-<span class="cm"># TypeScript: @x402check/client &mdash; buyCredits(1), then createClient({ creditToken }); or any x402-paying fetch.</span>
+<span class="cm"># TypeScript: npm i @x402check/client &mdash; buyCredits(1), then createClient({ creditToken }); or any x402-paying fetch.</span>
+<span class="cm"># MCP (Claude Code, Cursor, any MCP client): claude mcp add x402check -e X402CHECK_CREDIT_TOKEN=x402c_&hellip; -- npx -y @x402check/mcp</span>
     </pre>
   </section>
 

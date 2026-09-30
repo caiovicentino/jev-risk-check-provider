@@ -311,17 +311,22 @@ Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deplo
   - It pays each check from prepaid credits (`X402CHECK_CREDIT_TOKEN`) or itself via x402 (USDC on Base, gasless for the payer), with a per-payment cap and a total budget. Both secrets are redacted from every output.
 
 ```bash
-# once published to npm. With prepaid credits ($0.001 a check, no payment round trip):
+# with prepaid credits ($0.001 a check, no payment round trip):
 claude mcp add x402check -e X402CHECK_CREDIT_TOKEN=x402c_… -- npx -y @x402check/mcp
 # or paying per call from a dedicated wallet with a small USDC balance on Base:
 claude mcp add x402check -e X402CHECK_PAYER_KEY=0x… -e X402CHECK_BUDGET_USD=1 -- npx -y @x402check/mcp
 ```
 
-Both packages are ready to publish, but not yet published.
+Both packages are on npm:
+- [`@x402check/client`](https://www.npmjs.com/package/@x402check/client);
+- [`@x402check/mcp`](https://www.npmjs.com/package/@x402check/mcp).
 
-**Discovery:** agents can find x402check in two catalogs.
+The MCP server is also in the official [MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.caiovicentino/x402check) as `io.github.caiovicentino/x402check`.
+
+**Discovery:** agents and their developers can find x402check in three catalogs.
 - **The x402 Bazaar**, which Coinbase CDP builds from the payments it settles. It lists [`/v1/risk-check`](https://x402check.xyz/v1/risk-check) and its batch endpoint, with the input schema, a callable example and the price on each network (`GET https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources`).
 - **[x402scan](https://www.x402scan.com/server/14680ac3-396d-4174-b07d-9fae9bc74e96)**, which reads [`/openapi.json`](https://x402check.xyz/openapi.json). That document declares each paid operation's price range, schemas and agent guidance.
+- **The official MCP Registry**, where the MCP server is listed as `io.github.caiovicentino/x402check` (npm `@x402check/mcp`).
 
 Opening an endpoint in a browser returns an example request and the prices.
 

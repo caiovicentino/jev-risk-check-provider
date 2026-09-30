@@ -2,6 +2,17 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## Packages — 2026-09-30
+
+- **[`@x402check/client`](https://www.npmjs.com/package/@x402check/client) 0.1.0** and **[`@x402check/mcp`](https://www.npmjs.com/package/@x402check/mcp) 0.1.0** are on npm (tags `client-v0.1.0`, `mcp-v0.1.0`).
+  - Both were published with the owner's passkey (npm web 2FA).
+  - npm held the MCP server in its staged-publishing review, then released it on its own.
+- **Tested from npm:**
+  - the client installs, exports its API, and gets a 402 from production on an unpaid call;
+  - `npx -y @x402check/mcp` answers `initialize` (protocol 2025-06-18) and lists its 3 tools;
+  - with no payer configured, a check fails closed (`NOT VERIFIED. STOP`).
+- **Official MCP Registry:** listed as `io.github.caiovicentino/x402check` 0.1.0 (active, latest). It was published by the `publish-mcp-registry` workflow through GitHub OIDC; the registry checks the npm package's `mcpName`.
+
 ## v0.5.4 — 2026-09-30
 
 - **Listed on x402scan**, the directory the x402 maintainers point projects to. They no longer take community listings in the x402 docs, and closed 8 such PRs.

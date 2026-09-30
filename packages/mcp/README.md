@@ -60,7 +60,7 @@ Add the server to `claude_desktop_config.json`:
 
 Run `npx -y @x402check/mcp`, or `x402check-mcp` after `npm install -g @x402check/mcp`, as a stdio server. The server needs Node ≥ 20.
 
-### From a local checkout (no npm publish needed)
+### From a local checkout
 
 ```bash
 # from the repository root; the server depends on the client via file:../client, so build the client first
