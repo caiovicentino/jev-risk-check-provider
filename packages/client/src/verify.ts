@@ -244,7 +244,8 @@ export function selectAssertionKey(doc: Record<string, unknown>, did: string, ki
 async function verifyEs256(jwk: P256Jwk, signingInput: string, signature: Uint8Array<ArrayBuffer>): Promise<VerificationFailure | null> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) return "webcrypto_unavailable";
-  let key: CryptoKey;
+  // Typed from WebCrypto itself: the DOM `CryptoKey` name is absent in Node-only type setups.
+  let key: Awaited<ReturnType<typeof subtle.importKey>>;
   try {
     key = await subtle.importKey("jwk", { ...jwk, ext: true }, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
   } catch {

@@ -1,9 +1,10 @@
+// Vendored from snap/src/personal.ts by scripts/sync-decoders.mjs. Edit the Snap source and re-sync.
 /**
  * personal_sign decoding: hex -> UTF-8 text when printable, then hosts and
  * addresses are extracted from the TEXT (never from the hex). Payloads larger
  * than 64 KiB are summarized without decoding.
  */
-import type { Candidate, Decoded } from "./util";
+import type { Candidate, Decoded } from "./util.js";
 import {
   MAX_EXCERPT,
   MAX_TEXT_BYTES,
@@ -18,7 +19,7 @@ import {
   normalizeChainId,
   scalarJson,
   withCandidates,
-} from "./util";
+} from "./util.js";
 
 function isEvenHexPayload(data: string): boolean {
   if (data.length < 2 || data[0] !== "0" || (data[1] !== "x" && data[1] !== "X") || data.length % 2 === 1) return false;

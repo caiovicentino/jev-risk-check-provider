@@ -191,6 +191,7 @@ const PAGE = `<!doctype html>
   </div>
 
   <div class="news">
+    <div class="news-row"><span class="v">v0.5.5 &middot; 2026-09-30</span><span><b>Signing guard:</b> wrap an agent&rsquo;s account and its key signs only after a verified allow. On real mainnet transactions it refused 22 of 25 drainer transactions that would move assets, and 0 of 228 legitimate ones. <a href="https://github.com/caiovicentino/jev-risk-check-provider/tree/main/packages/client#signing-guard-block-before-the-key-signs">How it works</a></span></div>
     <div class="news-row"><span class="v">v0.5.3 &middot; 2026-09-30</span><span><b>Listed in the x402 Bazaar:</b> agents searching Coinbase CDP&rsquo;s catalog of x402 services find x402check, with a callable example and its price on every network. <a href="https://github.com/caiovicentino/jev-risk-check-provider/releases">Release notes</a></span></div>
     <div class="news-row"><span class="v">v0.5.1 &middot; 2026-09-30</span><span><b>Coinbase CDP settlement:</b> Base, Polygon and Arbitrum payments now settle through Coinbase CDP. Every facilitator&rsquo;s health and published signers are in <a href="/status">/status</a>, so anyone can check on-chain who settled a payment. <a href="https://github.com/caiovicentino/jev-risk-check-provider/releases/tag/v0.5.1">Release notes</a></span></div>
     <div class="news-row"><span class="v">v0.5 &middot; 2026-09-30</span><span><b>Prepaid credits:</b> $0.001 a check, answered in about 0.7&nbsp;s with no payment round trip. Per-call prices by payment network, each settled through a facilitator every wallet can pay through. <a href="https://github.com/caiovicentino/jev-risk-check-provider/releases/tag/v0.5.0">Release notes</a></span></div>
@@ -308,6 +309,7 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
 
 <span class="cm"># Verify: npx tsx scripts/verify-attest.ts &lt;jws&gt; --issuer did:web:x402check.xyz</span>
 <span class="cm"># TypeScript: npm i @x402check/client &mdash; buyCredits(1), then createClient({ creditToken }); or any x402-paying fetch.</span>
+<span class="cm"># Enforce it: guardAccount(account, { creditToken }) from @x402check/client/guard &mdash; the key signs only after a verified allow.</span>
 <span class="cm"># MCP (Claude Code, Cursor, any MCP client): claude mcp add x402check -e X402CHECK_CREDIT_TOKEN=x402c_&hellip; -- npx -y @x402check/mcp</span>
     </pre>
   </section>

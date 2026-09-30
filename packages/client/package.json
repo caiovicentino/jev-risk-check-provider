@@ -1,6 +1,6 @@
 {
   "name": "@x402check/client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Typed client and WebCrypto attestation verifier for x402check pre-payment risk checks (AI agents, wallets, x402).",
   "license": "MIT",
   "author": "Caio Vicentino",
@@ -37,6 +37,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./guard": {
+      "types": "./dist/guard.d.ts",
+      "import": "./dist/guard.js",
+      "default": "./dist/guard.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -57,6 +62,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "viem": "^2.56.9"
   }
 }

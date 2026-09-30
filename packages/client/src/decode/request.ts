@@ -1,13 +1,14 @@
+// Vendored from snap/src/request.ts by scripts/sync-decoders.mjs. Edit the Snap source and re-sync.
 /**
  * Request/response contract with the x402check API.
  *
  * Pure except for `postRiskChecks`, which takes the `fetch` implementation as
  * a parameter (the Snap passes its network endowment).
  */
-import type { SimulationEvidence } from "./simulation";
-import { parseSimulation } from "./simulation";
-import type { Candidate, Decoded, Interaction, Payment, SimulationTransaction } from "./util";
-import { capText, hostFromUrl, isPlausibleHost, redactSecrets } from "./util";
+import type { SimulationEvidence } from "./simulation.js";
+import { parseSimulation } from "./simulation.js";
+import type { Candidate, Decoded, Interaction, Payment, SimulationTransaction } from "./util.js";
+import { capText, hostFromUrl, isPlausibleHost, redactSecrets } from "./util.js";
 
 export const API_ORIGIN = "https://x402check.xyz";
 export const ENDPOINT = `${API_ORIGIN}/v1/risk-check`;

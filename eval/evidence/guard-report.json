@@ -1,0 +1,5302 @@
+{
+  "timestamp": "2026-09-30T17:28:29.054Z",
+  "cases_from": "eval/evidence/simulation-report.json (2026-09-29T18:55:02.779Z)",
+  "provider": "in process, same code as production; ScamSniffer feed OFF (circular); neutral model; simulation on public mainnet RPCs at the latest block",
+  "duration_s": 112,
+  "fetched": 282,
+  "drainer": {
+    "transactions": 54,
+    "verdicts": {
+      "allow": 32,
+      "warn": 0,
+      "block": 22,
+      "not_verified": 0
+    },
+    "refused_for_an_autonomous_agent": "22/54",
+    "among_simulated_ok_in_the_simulation_eval": {
+      "transactions": 33,
+      "blocked": "22/33",
+      "blocked_rate": "66.7% (95% CI 49.6–80.2%)",
+      "blocked_or_warned": "22/33"
+    },
+    "signed": [
+      {
+        "tx": "0xa9af1e2c640c38712a305805f8665a4073b75ff405e63c69931ce0739c0a0a63",
+        "action": "allow",
+        "counterparty": "ss:5a5d86c4854485b3",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0x979bc58c53fd642ef5c3787cab5c0334942a38747edc6e3237a1bf8a190fea25",
+        "action": "allow",
+        "counterparty": "ss:5a5d86c4854485b3",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x76183120cd3523587175c82d74191840af78e4a1f5cbab661cbe0be66c46d57d",
+        "action": "allow",
+        "counterparty": "ss:5a5d86c4854485b3",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0xc8cc78f2d0df90d97e9f93f8e2f060c25bf45480dffe4f09d35ef8e7cf523d0a",
+        "action": "allow",
+        "counterparty": "ss:9e878e8a7bd0f8fb",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0xf277922b99a96331b4b676740718daa7c599950d3310fc51e76b8ff9b27c6656",
+        "action": "allow",
+        "counterparty": "ss:9e878e8a7bd0f8fb",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0x58920ee5c5609ca8a45e69394b9737cffdf308b4c6787f4a1c825aaee53804c9",
+        "action": "allow",
+        "counterparty": "ss:9e878e8a7bd0f8fb",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0x6788d580f54eb74d6ab76762a9421a02a49fdc7049ed3c888f9b599ffa515dbb",
+        "action": "allow",
+        "counterparty": "ss:74c839ee7fbb307e",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x69433ada0d1ecbf71eabc85be7969c03f5ee1f82b77eb154fd6a823ee08fcdf6",
+        "action": "allow",
+        "counterparty": "0x701e13e8da8ef04cd40e92f21869932fe5e35555",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x11ea4196cab112d6a3d507c24bc3b7ab383fa2fafcdcabacb2a2ef98548b6685",
+        "action": "allow",
+        "counterparty": null,
+        "categories": [],
+        "simulation": null,
+        "findings": []
+      },
+      {
+        "tx": "0x6705a09256b82ab90cf0239feb19449fe1495694c3ef26c45d764bbcc59dca13",
+        "action": "allow",
+        "counterparty": "0x701e13e8da8ef04cd40e92f21869932fe5e35555",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x5cc139e97fb94a91b913f14188e57dd5892687fc32ecbffd75a78a8e94c24f7e",
+        "action": "allow",
+        "counterparty": "0x09db75e1d0f92fb7cbb6e7f2721f0f2a606b3333",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x65584e2bf8d0522b06abb56483cd06a36563569523a4d8510ced48404e517203",
+        "action": "allow",
+        "counterparty": "0x823686fecb3d4ae471a24cc1de125a28d6ab0c20",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0xdff52016394848331974f19856ca520fe1878226b61906ea69796a61ddedb300",
+        "action": "allow",
+        "counterparty": "ss:5d85f8d1d670a968",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x9efb8ea56b4f29de4a9bd4b5db387692e42c5d9edcdd9962893af2c6b5e1e58a",
+        "action": "allow",
+        "counterparty": "ss:5d85f8d1d670a968",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x62ae8e5b0a932d23269f6f55fb0b037a34bbd4d76018098c335c3868115a8b5d",
+        "action": "allow",
+        "counterparty": "ss:5d85f8d1d670a968",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x447ec30ce51e2d907eac5734115993007acf6641c69d04f5cc65917ce602a9fa",
+        "action": "allow",
+        "counterparty": "ss:6fc5578be019d94a",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0x4df3e1bf27d2720316cd55a84d8552e140f7736ed8ea816c334aa0fe1739c9d6",
+        "action": "allow",
+        "counterparty": "ss:6fc5578be019d94a",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0x3e1e7b26d92011d0cebd3bce61dff71ec44b8fc7e64ae6dcf2bf9f7584e7988e",
+        "action": "allow",
+        "counterparty": "ss:6fc5578be019d94a",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0xcf1ef61e522e0f0ceb443129e56da6e1adff267254317def80a0b54cc37f2708",
+        "action": "allow",
+        "counterparty": "ss:11f31e792f44020f",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0xeea4840ea8c96961b7cdbbf7bbffb1fa059c737465a0ed08c7608ad6293b4e40",
+        "action": "allow",
+        "counterparty": "ss:8aeb2ab030aac553",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0x8951c389408533d7134826451dbf52a2dc1c5e143f9b83bdc01a0a042854089e",
+        "action": "allow",
+        "counterparty": "ss:8aeb2ab030aac553",
+        "categories": [
+          "intent_risk",
+          "behavioral"
+        ],
+        "simulation": "ok",
+        "findings": []
+      },
+      {
+        "tx": "0x940178d3b4ec15f506eeb24cfd562cfcc7adcc06181457a53171f4a2d78f0759",
+        "action": "allow",
+        "counterparty": "ss:8aeb2ab030aac553",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x0e8eb8b036bba78f1dedd3c701668d57542252df65fab4cc90c44a7fa8255a06",
+        "action": "allow",
+        "counterparty": "0x701e13e8da8ef04cd40e92f21869932fe5e35555",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x64459c76fc18b7eae28cfcd7fb0310a0beb585b15d466a7c7da3922d769a136e",
+        "action": "allow",
+        "counterparty": "0x09db75e1d0f92fb7cbb6e7f2721f0f2a606b3333",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0xfcab0d2e5e3b8442de3ad83c0fa1bce900f2840fbef98b5750b26458a92f9fe2",
+        "action": "allow",
+        "counterparty": "ss:5b606b6198c3a961",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x237ee1a738c32cec423dc5a1603ed04ecdda585bbd372b8d7bb21bd3d61aae5b",
+        "action": "allow",
+        "counterparty": "ss:f7f21c504d86da36",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x0ebc598bfa85f747080bc4e82f814d46a5a1ed7e585eb85b8f88494e4e7d5e0b",
+        "action": "allow",
+        "counterparty": "ss:f7f21c504d86da36",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0xba0dfb32ab048b4d2a1957b1515f5843d06c292cf1253594579663185b425cad",
+        "action": "allow",
+        "counterparty": "ss:3881d697676519f4",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0xe2eae395368264cdde8615bcc7b0d1a8a0bf0591b7de6003f7acaf9c2b5e7a71",
+        "action": "allow",
+        "counterparty": "ss:3881d697676519f4",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0xbeab8ee6544d954084689b57d2015c384ae83a8941f81c99c2359f6df0b258e9",
+        "action": "allow",
+        "counterparty": "ss:a763c965b2b9ceef",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x1d15080cd3be40d0dc4cac23ec2abc7b6a03c34093305d25609ecc08240ab121",
+        "action": "allow",
+        "counterparty": "ss:a763c965b2b9ceef",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      },
+      {
+        "tx": "0x5e645bcdc0ce6c2166d046794f4e0f049b0372131d9a489a3f487b9c58ebb392",
+        "action": "allow",
+        "counterparty": "ss:a763c965b2b9ceef",
+        "categories": [
+          "intent_risk",
+          "behavioral",
+          "simulation_reverted"
+        ],
+        "simulation": "reverted",
+        "findings": [
+          "simulation_reverted"
+        ]
+      }
+    ]
+  },
+  "legit": {
+    "transactions": 228,
+    "verdicts": {
+      "allow": 228,
+      "warn": 0,
+      "block": 0,
+      "not_verified": 0
+    },
+    "refused_for_an_autonomous_agent": "0/228",
+    "among_simulated_ok_in_the_simulation_eval": {
+      "transactions": 84,
+      "blocked": "0/84",
+      "blocked_rate": "0.0% (95% CI 0.0–4.4%)",
+      "blocked_or_warned": "0/84"
+    },
+    "refusals": []
+  },
+  "rows": [
+    {
+      "label": "drainer",
+      "tx": "0xa9af1e2c640c38712a305805f8665a4073b75ff405e63c69931ce0739c0a0a63",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:5a5d86c4854485b3",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x979bc58c53fd642ef5c3787cab5c0334942a38747edc6e3237a1bf8a190fea25",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:5a5d86c4854485b3",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x76183120cd3523587175c82d74191840af78e4a1f5cbab661cbe0be66c46d57d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:5a5d86c4854485b3",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0xc8cc78f2d0df90d97e9f93f8e2f060c25bf45480dffe4f09d35ef8e7cf523d0a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:9e878e8a7bd0f8fb",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0xf277922b99a96331b4b676740718daa7c599950d3310fc51e76b8ff9b27c6656",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:9e878e8a7bd0f8fb",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x58920ee5c5609ca8a45e69394b9737cffdf308b4c6787f4a1c825aaee53804c9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:9e878e8a7bd0f8fb",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x6788d580f54eb74d6ab76762a9421a02a49fdc7049ed3c888f9b599ffa515dbb",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:74c839ee7fbb307e",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x69433ada0d1ecbf71eabc85be7969c03f5ee1f82b77eb154fd6a823ee08fcdf6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x701e13e8da8ef04cd40e92f21869932fe5e35555",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xfb9b011d81c5c05f6a372ea61e56ce7a8cf56d7f6bb41bf2b54c3436a5a9ec29",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:74c839ee7fbb307e",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x11ea4196cab112d6a3d507c24bc3b7ab383fa2fafcdcabacb2a2ef98548b6685",
+      "action": "allow",
+      "code": null,
+      "counterparty": null,
+      "tier": null,
+      "score": null,
+      "categories": [],
+      "simulation": null,
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x6705a09256b82ab90cf0239feb19449fe1495694c3ef26c45d764bbcc59dca13",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x701e13e8da8ef04cd40e92f21869932fe5e35555",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x5cc139e97fb94a91b913f14188e57dd5892687fc32ecbffd75a78a8e94c24f7e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x09db75e1d0f92fb7cbb6e7f2721f0f2a606b3333",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x65584e2bf8d0522b06abb56483cd06a36563569523a4d8510ced48404e517203",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x823686fecb3d4ae471a24cc1de125a28d6ab0c20",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x78388a2fa37c0b11c6ffead90375b115e2d9b4d99b79155fcb187bf719c9533b",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:6cf711a9a3d21017",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x691c7fd56b4a1bac7ee31a7f261e520d8e4b161766dfc4b77f419027a3d1b620",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:6cf711a9a3d21017",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xbf32e1aea6a849f732cc9994511b2a9fb36e15ec52fdfdf3638e57682a905cb4",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:135358a560ee1684",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xce36ec99b92ffa405f8421cef1cd4452436494141dda66ef397cf8724ed37f6d",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:135358a560ee1684",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xab98791cef1b1d2f5dcbe23d1c98e712a5522b3d314727c2ad99e2e01975d8b6",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:135358a560ee1684",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xdff52016394848331974f19856ca520fe1878226b61906ea69796a61ddedb300",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:5d85f8d1d670a968",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x9efb8ea56b4f29de4a9bd4b5db387692e42c5d9edcdd9962893af2c6b5e1e58a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:5d85f8d1d670a968",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x62ae8e5b0a932d23269f6f55fb0b037a34bbd4d76018098c335c3868115a8b5d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:5d85f8d1d670a968",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x447ec30ce51e2d907eac5734115993007acf6641c69d04f5cc65917ce602a9fa",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:6fc5578be019d94a",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x4df3e1bf27d2720316cd55a84d8552e140f7736ed8ea816c334aa0fe1739c9d6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:6fc5578be019d94a",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x3e1e7b26d92011d0cebd3bce61dff71ec44b8fc7e64ae6dcf2bf9f7584e7988e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:6fc5578be019d94a",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x094d2fca60dc5579d693d9670f5064a1527cf0e05a8f806be593d22e29d64311",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:4a4d8cc21a5b819a",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xe9640af7fc902ef3db449c5c7b29b1639d6053b59bdf7a5d567c85b8a032270f",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:4a4d8cc21a5b819a",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xa21d42918a5f8a47af8a29d647f661104bd259cd9c0e722857a8e4ed8f0b64a7",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:4a4d8cc21a5b819a",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x37e749795bb83db48126077a62dbfb30ac03e98c40d85d54b9de2714cc552756",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:764b9dc084412209",
+      "tier": "high",
+      "score": 30,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "known_drainer_code"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "known_drainer_code"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x4b8a572c6fadc9a7e882d99b815f25be98872d2af89f55985e3b62efdfb88554",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:764b9dc084412209",
+      "tier": "high",
+      "score": 30,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "known_drainer_code"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "known_drainer_code"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x350b6b642c1a9680d90fd0f23950b129a7ca2bbb6ad5b1366a54e2b5f9609275",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:764b9dc084412209",
+      "tier": "high",
+      "score": 30,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "known_drainer_code"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "known_drainer_code"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xcf1ef61e522e0f0ceb443129e56da6e1adff267254317def80a0b54cc37f2708",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:11f31e792f44020f",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0xb8572c1be0ee20bbb24cf02a0a2e672cf02c63f3dbb9ff1eb429719402b214d5",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:11f31e792f44020f",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x76f68c68655fd657d4227036551d6e8958cfaa465ce24d9a9587e3e79ce712e1",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:11f31e792f44020f",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xeea4840ea8c96961b7cdbbf7bbffb1fa059c737465a0ed08c7608ad6293b4e40",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:8aeb2ab030aac553",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x8951c389408533d7134826451dbf52a2dc1c5e143f9b83bdc01a0a042854089e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:8aeb2ab030aac553",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "drainer",
+      "tx": "0x940178d3b4ec15f506eeb24cfd562cfcc7adcc06181457a53171f4a2d78f0759",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:8aeb2ab030aac553",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x0e8eb8b036bba78f1dedd3c701668d57542252df65fab4cc90c44a7fa8255a06",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x701e13e8da8ef04cd40e92f21869932fe5e35555",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x64459c76fc18b7eae28cfcd7fb0310a0beb585b15d466a7c7da3922d769a136e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x09db75e1d0f92fb7cbb6e7f2721f0f2a606b3333",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xfcab0d2e5e3b8442de3ad83c0fa1bce900f2840fbef98b5750b26458a92f9fe2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:5b606b6198c3a961",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x237ee1a738c32cec423dc5a1603ed04ecdda585bbd372b8d7bb21bd3d61aae5b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:f7f21c504d86da36",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x0ebc598bfa85f747080bc4e82f814d46a5a1ed7e585eb85b8f88494e4e7d5e0b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:f7f21c504d86da36",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x4fc8764358694b01382629f7941486767b89e95f5a411ef0aab9c05f3160af0e",
+      "fetched": false
+    },
+    {
+      "label": "drainer",
+      "tx": "0xb4acc20db21b911df33872363c5eb70c3d4b375d8c0af61dedb02885a72c1c31",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:74c92883120b15e6",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x595e452607d796e73a84fcc1fd9ca3d37a05e81f1586f3e07e996a27b82dc866",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:74c92883120b15e6",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x85255ad83244268f437f91feb2755487833e60e6f5ca92d22cfac4361bf32dbe",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:74c92883120b15e6",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xd91e210f6e906c5004f6afe91eeacf4551fa4068dc3f3a6f92322a9722ebfe38",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:8f5f7a9a2f0520c1",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xa3bbd1081a80e4a47f1909d605f0985aadbc9441e3fb188ba996a63e764d62f8",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:8f5f7a9a2f0520c1",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x56679e39671ecde4a20cb9b8e2b8b39eeaeab0346ecf0915f5b2b14ef81d40f7",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:8f5f7a9a2f0520c1",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xba0dfb32ab048b4d2a1957b1515f5843d06c292cf1253594579663185b425cad",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:3881d697676519f4",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xe2eae395368264cdde8615bcc7b0d1a8a0bf0591b7de6003f7acaf9c2b5e7a71",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:3881d697676519f4",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x39299e46bfac1c17376ffaba9c9e728a905f78bc22ffdb54df7f775fe5b7661d",
+      "fetched": false
+    },
+    {
+      "label": "drainer",
+      "tx": "0x93d68cc7e9720932d60339ee3b4d89e6debd8f3898547eb1cb15af154373e379",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:b1b17bf6beff17c7",
+      "tier": "high",
+      "score": 30,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "known_drainer_code"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "known_drainer_code"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0xbeab8ee6544d954084689b57d2015c384ae83a8941f81c99c2359f6df0b258e9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:a763c965b2b9ceef",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x1d15080cd3be40d0dc4cac23ec2abc7b6a03c34093305d25609ecc08240ab121",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:a763c965b2b9ceef",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x5e645bcdc0ce6c2166d046794f4e0f049b0372131d9a489a3f487b9c58ebb392",
+      "action": "allow",
+      "code": null,
+      "counterparty": "ss:a763c965b2b9ceef",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "drainer",
+      "tx": "0x347ac8d2c6cf251f689df80098fcc06520a32ecb781e43cab6c2187bc8886f89",
+      "action": "block",
+      "code": "blocked",
+      "counterparty": "ss:541aa1ba73e677ff",
+      "tier": "high",
+      "score": 40,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "outflow_to_undisclosed_eoa"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "outflow_to_undisclosed_eoa"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa57283d42043f578dee83c7aa8c1009e4e0174c471f07fae1b7c1ba54325b6bc",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbd928fddd09c4c3cc482a4450177f57d9a57c0a414c2ae80450781aec9977234",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xed660dc9123288fb67e2ee7d4876dfd588db9aea721481de50c4ce6ef71439e8",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x71994e9f8f0cba47dae29320c89f90f8142e97d9c3dc75deecfaace4ad81dfc5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x451a934d174f6e80d70f2eccab23cd8c255344e27d46b76a473ea413e15dce0b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x7b619df7a9b25b30bf6ffd854c6860d63ade9e30ddd23a69d05d410acfbd071e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x97176a244bc1a871960fd7a1e7c3cfa2ba182b5a196e5310abc7121543306177",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x4e526544d0331d04cf2a73a6ade958843cef87a62b3b1345ac371de12a182b83",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2b23bf2878310aad5b91f9e475aaa25e8f65c8eeebdb451ef01db6b7c6ca6a16",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x8959886715e290596d7cb092ce9d9234ca134f25c24a642cbb24b34932b7e855",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xdbd2366393210abdcc3a9e1e9291b60e2ca69346fcb6a4629c7b11474696bc3b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xdf277336760459468ebed8f5fad0c79c6384d2eda20b596886c058755e7f2a33",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa1157a6b8d3aa6300a677b4927d9f2e059b5bc9b85a430bb0c7b9868bdc222e6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbb62bc7fddeb99d10b0bcce741549da2d3910bf1239718d3cf78c4600cf66078",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xf4bd95fce4da6682d9e80403bdbe7036423468a16f3a74db026c071dc7b4d026",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x68609e6c51947884be8b83beb50c222270956bcd38cb9e43923af14aecfaba4a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x283d1200521a1b77279431783d2afcef28b818df6079d9de72c05776dbea1cd2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x40ffbb4dad799799cf7927ef4a01a8abab5de756281185d433d5d3338bca475a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xe7554f033a3e5bb8c5cce4dd516fb092f850cb108a8ce4da938d75596bb45243",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xec3ac26d5fd6c2ca6960ba89f12bfbe58ca00fcfe5a7fc88a05a2dabc602a0f5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x26a0382b2289358c1608563cb5ffa05530aac002",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x1908a390c8008a1b33b109ddbf54acd052a80096ea62c506e0f1a4f5a20d12ed",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa2e2d4abdb31b5eaa699c34c56ce1a4f32e0f98271617173c6a7b020362ca39b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xd00a0de40f6035a8368b380bd53613f20f7df57bb27ced2b9dbf53481a4ad115",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xad2453bdcb6bb9d398a0d4f45b4da9c1b9dbac44987471fc9ecd19e4e0762980",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x4f95ac70725ac09e91aac0b733d44776a22fe6b6297bd4379a0f63ff5ee89a61",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x10857b353058c8355609209be7fa1700011e1304aee261a2c35c00f4614303f3",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xf0ab7d14c5b70b6b1427642dd848028fdcdb20863b239b244457aa6a1fbe0694",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x6e166a6e48aea002d384a6335e7f51f8bb34eb2a745737c8c8b373aa8ce712d2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x745b667d3bd2167389e5028d46eaee07b22eab9e6688b1060f6b0a56085680dc",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x450238f4a85331a4234ee8ac9cdbbc2af176e735a3f2ede198b214e3c83c9775",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x57412ffae21fe97d268e1ec5005503889ef1ffc92ca255747a9f2e899979f1af",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xe0d8fdd9eff984b167d095228df8e3c499c9192706a424e13cb1ddc46d281f09",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xba43414dee5c7b9ddbcfa13f78dc55a6914b7fb9d02979d21b3f5b1a17894b4c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x004583994acbe4af0c7e7e109f4c0b07de695413119ea5ced209f00e8d9e6834",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x657ca72a3cbb3f9a551bf21e3fc93c704c26aae126933369683aee0592913638",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x0b9a63a9d91e8f98e781967092dcb1fbea4c37f1399ba98c517ca040b5aca883",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x26fbdde672fc968f515e32fa8280efd6cc6ce1d440325c2d87aef8fca2d9bdd5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x3025584e46825984a84f6cab25c2851de40c53c511e4d7cedb9e89a9c8322370",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xa4dcfdbc10cf689e03edbcfd47ea5430bf2af2005d314eedb1d7478ff0ee8cd4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xdd27e4b647713ae5803698d6eb52ab2ff98ead24c037e75d5ce178c8a6d92ef4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x461c58befb669170c33d0d2965441d9a8aba3add631f7bd486ba0c3d7cf92679",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xa2946f649f09ad5b064aa88134893b54bd74995dca2bcdb9a075eeabf498dad6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xa63dc58534b4a54058851c348dc5f1e27196b381259057445e607a5d737905f0",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xbcd29960073e38d7aa82b5b2b36a8826abda09c0532beb2d0b8c8f1494607935",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x7a9e5dfe06ebd1d68fc580e4268e730f6a9aa5d0cb7c17f9b2ef68d00aa8bbce",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc856508a69128d28f52a35f7832c556991cdae11c74f19f2d9d51fc00cabe080",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa55539535741c1200884dbd909392fa4395c6ffc738ad5e03c95f87134fd52ad",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x89137aad99248416ce093cb5786b459513b228892ad1aff3649300bf9b1b030a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xcfab100821a04d0fd3114352f82616eb388133b41ae6097fc14cb3b01b0e7911",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x97744c389479a05e336692dc77366a44f1af500753c6670ff7ca897f5957e69a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x46fd9f31be72dd40aba637983ef7ca6760a5d606a0754105ca3fb3e0577b6477",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x3e78af062f17340bda4eb3be63183f46a9e6b7fc70e2b4246cef8c5be7e3dc04",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xbda4bffef5d3e4dc3ca96ff83b7d5c7068161d25419e7165dbd7bd38ec9ca477",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x254177a8b45ea65b0ed3b33317b7b2e7fd85f08551264b74857b0d89dd4e43e8",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xb2ce6ded90c2c46be31e066f3d47247452a13d0a9aad14869e883935c364d10b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xf9d59d59b359fed2ccb758b2f87e40450010051d7ece16e47c3ad949304c62d1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xfa62f96fb8f2a6b53bbfb3bbc16ca24363ef3141cab15f513e01a53943ff1656",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x0c6ea1b6ab3cd93140f34a768fa126508d83d171c339d265057a6ce51f27c1f3",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x36daf616fcad36a42d509a90bf0e50d50620556fb7a5cb95b7f6e5ae441dfc20",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xf74b374ceda3b72668d14197d61ad347383587d440df4ce52b7637e06e28d0ae",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2c99f9fddd0d65a7de86c350d613d17de98ae4a45cded9bb96cb6055b288b34b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xd11d4cbce3b36881ace157908396fc695f38d93dcc9cab53b87075911367ff49",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "unlimited_approval"
+      ],
+      "simulation": "ok",
+      "findings": [
+        "unlimited_approval"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x8e7e202fd5b8dcaac0d6351e93875afc22650264fee2fb0cbf754dfeb86345a3",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xb0d2f4fd4c060e6ff104c944051858842e22ffed",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xcaf808fe8708b91f85eea23b8b1b6450ee6d8e41b353669419cd6e2439b506e7",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xc88c5ae226b23fbb5db34c0c903ee8ae4a0c387b2aceac3e1f88bda233a48f77",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x7b5da0c83356a5a5d3800efe78561131a8e1fb10",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x70868013a8a4fb7bf8db26a505fa561d57ba0ed7eabdfd918539f426f2235987",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xe5c783ee536cf5e63e792988335c4255169be4e1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x885505641a83768dbf34f4710df88c5f0e724421b80e50f8de52494a0aaa5b0b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xe3478b0bb1a5084567c319096437924948be1964",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xae03684f1c5fbf7e0f01e7103f841be33bed0d3a5cecbd2cc7f600e9fe1b5b7a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x4f8cf49e1b3f065b0184e3fa75627bd1a85919e50487747035a79fd7fad2f1c0",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x1e0049783f008a0085193e00003d00cd54003c71",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x9d0c566084239202e780d85c040413956d54b0a9d8b32dd548b864224f285dd2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x43ad4423d5e9569497e9f1f899e623409270d1e6",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x4c5081e0a59e79db97c3b4c34ca1b140f26283f767bfaf872ae61c46ac1205b1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x97cb5a92875306a76f3ba6325041686aae2e379cc9b4501b5741fb6df20fb3ca",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xc9562ea7b99312ff9c5ceebf2d315ad43aad118d780b557c14a0966eabb7c6bd",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xd3b09d35e897e7ad8fb8f586618c540827549821eec92f152488b4919aa45a31",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xcf3947ee08401f7df19bb4270c827db101a2f4cfe47041270367aee1cc1b0442",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x95153f3acbb9d21c43b0620117f61006471433ae295f6ffa3c1af2eac7aa4a53",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x024c3892302c845b147bcdfb693dc34bf72d168af8c48c660a215c55e5499c13",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xb7c1bd7443b23e216c939b0ea9b04274c9aa4e1c5a4fab746a459d514f6cc95b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x111111125421ca6dc452d289314280a0f8842a65",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x890d55269ad0456136617d8e3c8b0676838a383b1120f7a6e783c6478e16a8fe",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x85c09d3f9459c0f3c60bd2d8d54d5adb462ead0062aa77a6455811b0ecfcd3d9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x98c8159174ee9fff7678580288626f457dde9fd2847e8027e7425d8d195ec32d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc92e8bdf79f0507f65a392b0ab4667716bfe0110",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x9e27c7ce92608e154d21ad7bdb80012f0889df3ba348142aee92c22d2b22d7e1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x057477f76919c0a05166e9b85d91e999b83bda9a",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbba697f75e6adbe1e72ddf454994375604765b1798674665c11ffd6a556fa650",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xf7e98e419c387815a00c7ae1ccb348925023e2ab",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x8daa5e5e4204613b0a5d42f5c948189ddfc018b481af479d48c2c75f55290a48",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x59c541d60d8ad64e2a5d35f8d207e60665bc84197a18ddaf21878a687fb78a9d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x8c5ff8c6478cf16d54944278eadbcc6383b4ffcccb848b1752ef5dcfa79cbf7c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc811319498bee3a924ea3f02dc6041a02fd6d1f33ee8cfd1167a806f5c6adeb9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x59a205b0c07a5a335aaae8bf5b5c324c2c0ac5049d0dc71c787d5d79085d0a63",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa13f35d9e7e00e0ec7b2b45994ca25fba9fb144a689d1884124b9eb12ddc8cfe",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbb984a3ac06bf376a13db011b71ec8cd5c5e681eacc6df2b73680691c08d6d3e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x5f9e225876dfb6fb05638ae0f444f1e68f8b287f5e508fb7222683fd9c9f65c6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x6d484b5c82d3f83941fb12228e389920885fedc3fc5f44c218af8c62644646ed",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x91bfa29621f3880749e034bf7a5632d98502f4a3df15f33b2ed489659b3f4b10",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa20844012cae5022a83147a37ecb90a1463ec549d64828c4c18e536b60142f66",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x660b4015102858e49cbbdbff717e309a97f8b8447f6c5b228a9cf8cf87c24ff2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x557339ad46f3a796a06e164ed9d376f713a5f97c01fe8099f6ba9101e56cad00",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xfae285b35df71c93d3addd455de42d7af2dfcfa1e43f04231a762f638c565e9a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xb3617c9167776e0b08ec996606d14ab0c0f40692e909cbe3469a90e0cc30c7d3",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2855c100e302b72f6ac4dc91737af7916565c7b7bc88575674a10ca3defda7d9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xcbb70b9e4b52acada6a712d8a88e4d8eba0926e237741f3b0ad3afdd332b6d60",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x981bb7121d70afb52e1f840d349273fce0848cc5fa7eed8a11267a001bb9ef5d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x1aafd977024c019322491da1bbd8ab0995c571513d3a91d420af64ee072d3aaf",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x782ec633f8e1f6c533fe89fbcb462ab1fda6e2c6f1007342750004cb78417dd2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x43970ba313588e1d99e7b83ccefac7682900d7a1edd9fab4ea471f60e1e800f5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x67672d1a939d03931b786c3887899a44ccc450f68c340b89faf08c829e53599d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x1929aee1fc2dfd7c580cf9763a08bc58dcaacf23fe7d8891fe8e7df358605af7",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xf90caa3f82ed80211318f01c0c842d98b9b6e7c73b44892820cd7399d6393b74",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x382e679de45ad44916157be24dcfeae33a2ee0af370192bdb5d2744a15beb8d1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2ce6a55faf9780db5bc9194130429641f3725a42d31cbbc7c62ad8ecb4c0efc3",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x6a9868c6efc62bd67242f69d117aea7266ce3962b82d2e173ca1a82486e4ee85",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x4e57e0be7fe3f5250ccd6050b5492ade17861ad127a39a69233c7cfa40e9f0fc",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x4f762793122c5be68e51534c301fa3f94ab9a9ae25b0885d4ab4a15bbfd86ee4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x6b568b74cae5939a782ad22c9ceeccefdf7662f539087fe97ec03ecb70562a25",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x9db91f0c7bb80dc0e84554d22a567637c8a87a73618a0a3ad18864d681a40a69",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x09c9c36574a4610233b4a3c7e8fd03f19c6887b9de88a28340042951d16da438",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x4ba7946600ecaaa869581052819c2b2364e910a16ec512a1634e16fc842cce52",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x85cd8f11fa1755eb9730bfc3b3c3732899acf7f635ca2c2efdad9996f3400e5e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x272e3d8c7052d024952215e49f4bed8257b4b1dab5a7456c3cfac03ce22853d3",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xeeb9b8c51a276d0694f2441a2a32a7c50979485520c126cc203209ef7ae572a1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x7ded58438bc3eaa90bddcc0ce3070d778b4659ff4072acb20ed26223905b3f3b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xcc60924bf8d767f26e3295e0731e8f9daa191ba64ef23bfae3553077aa52efd4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x90629e4f81c7210f203d3af60a505f304c0dc95733278e04259b3feb1a4b318b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa5e0950d1c969f3c45e03b4a0b5d29417c2e23f255fe74804cf5633012120b76",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2aef49d3878318371a68b7f419c9eef4b64ad786adfa3e3b20c6bb235a51e75c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xca8b8d0b21c4b47893d92f8f101022f9719c7fa073bbcee7eed908ea7a8adc9c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbb8dd990f0f96ff37f02f7d8807a9d2fc1fec8244efb9a62699ea955cd9b0e4e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x273f4bd093f62a0a4737f0ae2f7c6cfb6431279f5eaab1ffac389a095ca32494",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x24b7e28e9007d8fe2f74a967b422bdcadad0fbc5cddd8aac217a4ed6a7cdd9c1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xe28897c7dc09bbb4563f7240032a2d19872adf151c838866d359549519d2ca3e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": null,
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x32ad2ec97be11cb84f51cb309a1e403d6d4d19f0ab9b79369642bd5aafb6c13b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x27d597ed7d657b9640576c68897c5c3d06f2ab7ccd8f48aac7150522ee1a3287",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xdc1c61b568edbdea81e4aee44cd2bed435c717c999ef3c3656e95ecd762341d1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x0000000000000068f116a894984e2db1123eb395",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xfeb9a7ec7765eee241e0ae230dfa91502fd3187abd20ff79ffb718d194bc9da6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa60e7a1143676d9afcbc4213e6ba00c07f90778cb6a954d1830875288e26b50b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x9f9a7df39cc0de865d620486db207605bb3f71af705485cb26e06bf5ad6c00d5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xfc466f5cc54a37d26eb9c77db2c197e40e2e3aca360f5b3796972a1e0bd2732e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbf43a501f87e280649f25c9f8d82805e29bc3f1d85e47a60715603fae3d3f27c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xfd81530cd8f5d1e142c49e3ed89fa00d0d4a817ffd2793f248b8decbed282703",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc6c0c897833e5c884aed88ded6274100272452ac31c99c2407eb2d1da5ffd247",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x7e0fb99c1ac2805803f9694483b3416f6c71f1ebdae55c2517ba2510476e42aa",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xdea0bd62056c4528b54a2cfadaa585cc4185fba35973fe0f9dfa57cf76b5cfdb",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x64188b4fcfd1e1ff1c78b2ea0022781efddb25d751e9ed96918451773aba519d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xf5d70e84cd253fb8a20e3be4c98a55e540ab4fe4a2c984907a44ca077b21d0ba",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x71a7cdfe515b90a5a71ce49510507b30d81582f316ac17b4afbba2df067c43c2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x00000000000000adc04c56bf30ac9d3c0aaf14dc",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x113b13750c924f01454b2930eda968f5c7149f4f62990c40dc0025a31939fd5f",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x2a9b182663b8d42bfe0fbc986015caaaea72e606663e40132ca32b10aa7a8da6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xe8987f19604cce4f82bf5c50d1f48455c054a6deb7943edd1b13d4503ba8cceb",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x5207d3e5d8fe5b34cc411ed29f4b71bdaa5967ff603963eefac1fb8b1e51b3c7",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x8f215b669ddeb49d5d18697097b835c9f16d0bfe0511b44121f5593180b2861e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x400c18ea005b0e04e8a39bf135077a079887149acca1facac56d376c413decf9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x37a3515caa68f8991d22b81fbffa40ecfba063a8a2bdd5f34107fdc2ca7bde0f",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xd7d2e7f700d2b962c3b42be0bdf653d0a1411c92404b5017e81123184fc4255c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x94f51002cf6b784059595f9bfa962fe679fc114218fa6a7dba08b6259604acbc",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x2a7c0ef0f4c630ba6dcbe6016154bede31777c90070359c6002fa1a2d891cdd4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xee3fdd61ac700d1d4a00b05669f90f48141add38253159ad805a6162e4d7c09c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xe92767dc26673bd583d7175ecad5bfbc20b299487cd255cdfd378e005ad850e1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x000000000000ad05ccc4f10045630fb830b95127",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x6ed046ab27934fa1f2949a506fa6b58d26ca2a4fa8b0fdab9e4effca288d59a0",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xfdfebb24a7d690c664de318c69e4ccab51cccfb6e3687ea2d7027ffa4af39555",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x10336e9f6115d7086be4c55a543f4004837efe070a0abf9c5a7018f0adda1dd2",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x84543093f8efd8d126ea54f14a2b495ed26b9bee40a4b160a2c79f32aaae7364",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xb311abdb9b427cb9d2f08ddd410c8fe11bcafcc8dc09d210eeb53724d42f0087",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x383a4d495dd064a92da5a83d64497ff4a44b92e0efb122f8b27a46b0cce4b7fa",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa22aad81a8b0875827b3ae64b8273d78c1aba0ed2ab23aed7c9b999a4e045a6e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x079606ad1744fd782c1009dbfc947d4db53b1b5aefe1c42185d2e39dfd92c1ee",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x47df6def5eb30d4fd71c3929dfaa3e5b7b65cc103bc5a7238ca4ccd7b9c3a61d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x31366337d5f497c2a61c0ef9de86af26556d55e7bc45154cd569cc2dd8d84c43",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x27b8f5aeb83bec345994652c44e2674f40bc8677b587a46dce8f301d61a70b0f",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xd05a4f2c8c57957788828cc247958cb29c3b4e0f7d31ab373245f268ecf4bd4b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xe563d6554521afacb3fa8257810f71ebfa5bc598728f5b46ad769962cb4b2e41",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa16156d13ea0a38d766ee4df27b2c175f4457ed711334673eeacb868f582c382",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc6487d6c6e8e9514d413d9e51edbf134ad54c8518dd605ad89df7a91f50180e6",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xea2e9f32f95aeb15a5381d4c58c311ececcd94975c89c0f9573e0528c4e08799",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x77c1eae7240eb369a57a24895ba89bf47bf23c3546dac3077fbeb30a8eb7bd90",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x579ad5744ef209a88996007032cdceffbd1e6a3c8eae619b25ed80aa8e510504",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xb98c2bff40647dd578f33a2f14fb820589f635470c73a0f36a10aeb7e712e227",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x69f4b31552a473d94818d4c22a3e0a791abe85fedced31a0b8bb94c5e954e402",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x505a3fefd2ef50641a3e1e79d391eb0a972c8176976db6384a48a2942b16a5cb",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2ece416203cfa1163304709e54e8e53324559f4b3030f6f30a5c56ca1f59a6f0",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xb3096becb8bacee621030862585ea035a5ca380629e31ca487a9eaafbef8a312",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xeee88c7e11c5523f2ba05ccd4635318157138283ea8591094ff4809f775cea43",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xa24e6f77394d90e5e5b4b17da8778ba81d2e8c42b27f49def6cd40997d18c4d5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xb1928bcf54ff479435d309dc7ffa0dbcb94229e3782c5863228eae6fe8aae85a",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x984533d5fb2075ff81907e4b798472bf2770b8cd95b2b85b3fe50eda6feb28b3",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x29ba752950da78e16c8aac75138437f7403f08e99050bcd9527c6a5743f04690",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xabeb7ffd5878944e3c1ca08168d09236ebf5d4f51630c0d722cb4e56f70f1d94",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x3cb3b473978dfdf6eb6f68ebe52c656172994d9108100ba4e904fc5b3d5cf79e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x221e36ec5c0759b32f5700e8fbbcbcf5d2899af36c48789e9987cdb64aa35a13",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x242c84365c2bbfee7514d58f9ef83c4a694f9066b4f699e2dc27aa13eecf39e4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x011333d3759a38a7e961ea48df3fb86bbae11f9402de9ba2772f8226ffaf46c7",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2ecd48b38649163d12363cd00dae5280dc52062a95e02cde41e3eaa4193fcd64",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x1733700796859e1bb7458fcd45617911631b3a8f48b587fbf2405aff163feea5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2f1e4bb4364925eabb1b6e379a0c0d29f2ad6d851f00fd2aadc222d05acba763",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x673017ca1fe686ccb54c0df47fd85f436539cec4bef85eef044c3410bcb592d4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xaa52ad5f3ce6d68d00ad0b6d483454ac39307a75daf8b9f8eccff25b8c6f98c7",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xc76264cd0b149d229ee2dfa840a7b81d35e437c628e3133f03332b82ccf62366",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbb31b609594fa69ddd536cdb5c2914ca750759e9e42c865e1a9841ac96f9c1be",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x68f425dec6e8a61c59ba9126b13544b5502f5ca0a31e4a97bb5a997901d6d886",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x3ef7f0ed7dd48a21f2438b5f59412166a8e704cecd785f3a73054017e4ae097b",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x835e31c0495e2e7cfdb173a7acf323371b96bb0309da25bf9b3e80d224caf1aa",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x0dbebac0a7f8860b09a430f3746da101195052014ac6c5e1d41349ad92eefdab",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xc2282b764930ec7ea2117ab41216946cce8aa9b2c95e438bb06b6d838238cea5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x83abb8f34a7171a071ba6678b6b56bf38e2e836e2ff133a0b01616593edb63be",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x42a1aad7beecefc481f6250184642f22f4aebdca83ea6e64a1ceae778df5d5e8",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x5038c33964832a9e72443ab79ea3f98d0948fb0c66c7c2e1b4f21792ddf959dd",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x59e16fccd424cc24e280be16e11bcd56fb0ce547",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xd5df0152cc3c0bc56497d246c267a21cbb546fa1e5bef48bacfbca73f45a5fd8",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc5c595e6607b4d693a4890e66c2cb393230e891132d7c22f9959ba799b518724",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x6f6bab128def2f5925a36c8d48ca2912beb5f3ef51a54dc78861ace1d93049b7",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xd0e82418159fb394f05aaf8e84e5f365ade1e0eb0370427a631f6f347310308e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0xbc27a1462c96b8975e95be1f22424804260de22c1d37d902353529715e71c59c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x4d0f066e1ae467924ce67989b1c69968ce94cf10431b248e5647aa3540e8154e",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x65cdf339d633ff4e600c5b66655acf4832bba3773beb2fb5fb151d576a7a2403",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc3e79b6e3dfca99909b19b9df54957ef6192fc6f64add6780e16265beb9eb3ce",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xda06288923a868dbbdc287d7808dfb0e5a08e77db6b74df3c83b9f4cfe6164da",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x27a8fa04b7f5d017e16e52035548682bf16cb6cc1cddfe5a98d853b7e186392f",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x2194e098f17270e2edf2d54be3f311d718605da15c0a7bf39e0a65ac230031c4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xf7f6dc9b55c8e12d24211734102c8798f8f96e08227d72a6f1e530c5db081edf",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x888888888889758f76e7103c6cbf23abbf58f946",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral"
+      ],
+      "simulation": "ok",
+      "findings": []
+    },
+    {
+      "label": "legit",
+      "tx": "0x0c67c89126702ecaf778a70eac580a555a958da15e1005fa32b743b22df7b8e9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xeafffd53a5aead647c691967946b46aa9c948194ea34927ff1522a3e54286b8c",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x8990e6cc5b746fc3ed323a08ad4f1afe00d17ce5618da671321838415fb655b1",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x80406cdd2fcca20182df0f65fead70d84d550c72abfce957c3ad4f418bdcc275",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x1f4c0ff196c8c18a12de03d59e8d868a2c38130ad1d9e2e30e4b9b4211d212b9",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xbc886fa5ed454a792765d238bcd3fd2d07f528a00bc69543b607244e51541c71",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x71188458a7116594d8938677761bde59fe09beda73041dab71d9635c7be662d4",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x109a770acf8ac887c92fa0e2a7942c2260ad9046d1f3140247cd0f0604baacc5",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x30b59650aafc543d0ec57a2449ceff19e25e44ad771e04f4e8dd27a434d3b5f8",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0x17392f9803c34cc90827789804e041ec948aaea9c1376a484b577e1c111f76d7",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc1c5d3afba58b06b9dbb11303bfc950f72cc23f65388ae1bec302395771fdaef",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    },
+    {
+      "label": "legit",
+      "tx": "0xc318d12bc2c480452c363db632920870af9b2b4ac403db96bb8d2c058faa840d",
+      "action": "allow",
+      "code": null,
+      "counterparty": "0x881d40237659c251811cec9c364ef91dc08d300c",
+      "tier": "low",
+      "score": 100,
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
+    }
+  ]
+}

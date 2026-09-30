@@ -18,6 +18,36 @@ The v0.3 layers (§1–§5) were measured on the v0.3.0 code:
 
 Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not, and neither is the kit-watch watchlist (it is the provider's private data). Every rate carries a Wilson 95% interval. The rulebook these numbers measure is [`METHODOLOGY.md`](METHODOLOGY.md).
 
+## Signing guard (`@x402check/client` 0.2.0, new)
+
+`guardAccount()` wraps the account an agent signs with. A signature request is decoded (the real counterparty inside the calldata or typed data), checked, and its attestation verified and bound to that exact request. Only then does the key sign; otherwise the guard throws.
+
+**Real mainnet transactions** (`eval/guard.ts`, `guard-report.json`). The cases are the exact transactions of the last `eval/simulation.ts` run:
+- transactions that victims sent to ScamSniffer-listed drainer contracts;
+- recent transactions to 21 well-known contracts.
+
+Each was re-fetched and handed to the guard as the signature request an agent's account would make. The **real provider** ran in process: simulation on public mainnet RPCs at the latest block, OFAC, the MetaMask list, Forta code fingerprints, on-chain facts and contract verification. **The ScamSniffer feed was off** (the drainer contracts come from it) and the model was neutral, so every refusal below comes from what the transaction does, not from a list.
+
+| Transactions | Refused (the key never signs) | Signed |
+|---|---|---|
+| Drainer transactions that still move the victim's assets at the latest block | **22/25 (88%, 95% CI 70.0–95.8%)** | 3 |
+| Drainer transactions that move nothing at the latest block (already drained) | 0/8 | 8 (nothing left to lose) |
+| Legitimate transactions (routers, lending, WETH, Lido, Seaport, token transfers) | **0/228 (95% CI 0.0–1.7%)** | 228 |
+| Attestations that failed to verify or bind | 0/282 | |
+
+- **Why it refused:**
+  - 18 transactions were refused by the simulation: the assets end with a wallet the signer never named;
+  - 4 by drainer code (Forta fingerprints, an independent source). Simulation alone had missed these 4 (18/25 in `simulation-report.json`).
+- **The 3 misses** simulate cleanly: nothing in what they do at the latest block looks like a drain.
+
+**In production** (`eval/guard-production.ts`, `guard-production-report.json`):
+- the guard against `https://x402check.xyz`, paid from prepaid credits ($0.005 per simulated check), agreed on **4/4** transactions: 2 drainers blocked, 2 legitimate allowed, in 0.6–2.3 s;
+- there, the drainers also hit the ScamSniffer list (`known_scam_address`) and the kit watch (`compromised_wallet`).
+
+**Unit and end-to-end tests:**
+- `packages/client/test/guard.test.ts`, 13 tests, including refusal on no credits, an unreachable provider, an attestation bound to another request, and a forged signature;
+- `test/guard-e2e.test.ts`, the guard against the real provider's attestations.
+
 ## 0. Kit watch and a facilitator shadow (v0.4, new)
 
 ### What the watch saw

@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-09-30T17:29:34.947Z",
+  "base": "https://x402check.xyz",
+  "credit_token": "sha256:fefd35455433",
+  "pack_bought_now": true,
+  "balance_before": "$0.10",
+  "balance_after": "$0.08",
+  "rows": [
+    {
+      "label": "drainer",
+      "tx": "0xfb9b011d81c5c05f6a372ea61e56ce7a8cf56d7f6bb41bf2b54c3436a5a9ec29",
+      "in_process": "block",
+      "production": "block",
+      "same": true,
+      "ms": 2346,
+      "tier": "critical",
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "known_threat",
+        "fraud_signal",
+        "known_scam_address",
+        "known_drainer_code",
+        "outflow_to_undisclosed_eoa",
+        "compromised_wallet"
+      ],
+      "reason": "Drainer pattern: assets leave the sender, nothing comes back, and a plain wallet (EOA) the sender did not name ends up with them: native 101"
+    },
+    {
+      "label": "drainer",
+      "tx": "0x78388a2fa37c0b11c6ffead90375b115e2d9b4d99b79155fcb187bf719c9533b",
+      "in_process": "block",
+      "production": "block",
+      "same": true,
+      "ms": 627,
+      "tier": "critical",
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "known_threat",
+        "fraud_signal",
+        "known_scam_address",
+        "known_drainer_code",
+        "outflow_to_undisclosed_eoa",
+        "compromised_wallet"
+      ],
+      "reason": "Drainer pattern: assets leave the sender, nothing comes back, and a plain wallet (EOA) the sender did not name ends up with them: native 900"
+    },
+    {
+      "label": "legit",
+      "tx": "0xa57283d42043f578dee83c7aa8c1009e4e0174c471f07fae1b7c1ba54325b6bc",
+      "in_process": "allow",
+      "production": "allow",
+      "same": true,
+      "ms": 654,
+      "tier": "low",
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "reason": "The simulated transaction reverts"
+    },
+    {
+      "label": "legit",
+      "tx": "0xbd928fddd09c4c3cc482a4450177f57d9a57c0a414c2ae80450781aec9977234",
+      "in_process": "allow",
+      "production": "allow",
+      "same": true,
+      "ms": 694,
+      "tier": "low",
+      "categories": [
+        "intent_risk",
+        "behavioral",
+        "simulation_reverted"
+      ],
+      "reason": "The simulated transaction reverts"
+    }
+  ],
+  "agreement": "4/4"
+}

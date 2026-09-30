@@ -16,6 +16,7 @@ Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. Every e
 - **`check` and `checkBatch`** return typed results and throw typed errors (`X402CheckError`).
 - **`verifyAttestation`** checks the signature with the key in the issuer's `did:web` document, never with a URL taken from a response.
 - **`interpret`** applies the **fail-closed** policy that wallets and agents should follow.
+- **`guardAccount`** (`@x402check/client/guard`) puts x402check **between an agent and its key**. A transaction, permit, order, x402 payment or EIP-7702 delegation is signed only after a verified allow; otherwise it throws. See [Signing guard](#signing-guard-block-before-the-key-signs).
 
 ```bash
 npm install @x402check/client
@@ -91,6 +92,60 @@ const { action, reasons } = interpret(result, { verification });
 - `approval_to_eoa`: a plain wallet is granted control over the user's assets.
 
 The simulated flows are rendered in the same reason.
+
+## Signing guard: block before the key signs
+
+Calling `check` and obeying the answer is advisory: an agent that is tricked, for example by injected instructions, can skip it. The guard enforces the check in code. It wraps the account the agent signs with, and **the key signs only after a verified allow for that exact signature request.**
+
+```ts
+import { guardAccount, x402PaymentGuard } from "@x402check/client/guard";
+import { privateKeyToAccount } from "viem/accounts";
+
+const account = guardAccount(privateKeyToAccount(process.env.AGENT_KEY as `0x${string}`), {
+  creditToken: process.env.X402CHECK_CREDIT_TOKEN, // $0.001 a check ($0.005 simulated); see Paying
+  onWarn: async (verdict) => askTheUser(verdict),   // optional: without it, a warn is refused
+  onVerdict: (verdict) => auditLog(verdict),         // optional: every decision, signed or refused
+});
+
+// Use it wherever the agent signs: a wallet client, an x402 client, an agent framework.
+const wallet = createWalletClient({ account, chain: base, transport: http() });
+await wallet.sendTransaction(tx); // throws X402CheckBlockedError before signing if refused
+```
+
+**Every signature, decoded first.** The guard intercepts `signTransaction`, `signTypedData`, `signMessage` and `signAuthorization`, and finds the real counterparty with the same decoders as the x402check MetaMask Snap:
+
+- **A transaction:** the recipient of a transfer, the spender of an approval, or the operator of an NFT approval, including inside multicall, Safe and Universal Router wrappers. The transaction itself is sent for **simulation** at the latest block.
+- **Typed data:** the spender of an EIP-2612 permit or a Permit2 signature, and the recipients of a Seaport order.
+- **An x402 payment on EVM** (an EIP-3009 `TransferWithAuthorization`): the payee, bound as `payment` together with the amount and the asset.
+- **An EIP-7702 delegation:** the delegate contract, which would gain full control of the account.
+- **A message:** the addresses and hosts it names, or else the signer itself.
+
+**The decision:**
+
+| Result | What happens |
+|---|---|
+| `allow`, verified and bound | The key signs. |
+| `warn` | The key signs only if `onWarn` returns true. Without `onWarn`, the signature is refused. |
+| `block` | Refused: `X402CheckBlockedError`, with `verdict.reasons`. |
+| Anything else: no credits (402), network error, timeout, `checked: false`, a signature that does not verify, or an attestation bound to another request (`request_hash`) | Refused (`not_verified`). **A missing check never means yes.** |
+| Danger the decoder proves locally (e.g. a `delegatecall`) | Refused before any call. |
+| `sign({ hash })`, an opaque 32-byte value | Refused unless `allowRawHashSigning: true`. Some smart-account flows need it, and with it those signatures go unchecked. |
+
+- **Payments to x402check's own `pay_to` are not checked** (`trustedPayees`), so paying for a check never recurses.
+- **Pay for the checks from prepaid credits.** Do not use a per-call payer that signs with the guarded account.
+
+**x402 buyers that do not wrap the account** can use the client hook instead. It checks the payee before the payment is created, and aborts it otherwise:
+
+```ts
+const client = new x402Client();
+client.register("eip155:*", new ExactEvmScheme(signer));
+client.onBeforePaymentCreation(x402PaymentGuard({ creditToken: process.env.X402CHECK_CREDIT_TOKEN }));
+```
+
+**Limits:**
+- The guard enforces what the checks detect. A plain transfer to a brand-new, unlisted drainer wallet still passes, unless our kit watch has already recorded that wallet.
+- It protects against a misled agent, not against code that reaches the key another way. For that, custody-level enforcement (a co-signer) is planned.
+- EVM only for now. Solana signers are next.
 
 ## The fail-closed policy (`interpret`)
 

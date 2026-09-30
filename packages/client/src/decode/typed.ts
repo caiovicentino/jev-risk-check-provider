@@ -1,10 +1,11 @@
+// Vendored from snap/src/typed.ts by scripts/sync-decoders.mjs. Edit the Snap source and re-sync.
 /**
  * EIP-712 typed-data decoders. They only ever read the canonical view built by
  * eip712.ts (declared fields, values normalized exactly as MetaMask signs
  * them), so an undeclared decoy key or an exotic encoding cannot change what
  * the Snap reports.
  */
-import type { AddressVisit, CanonStruct, CanonValue, Canonical, TypedTypes } from "./eip712";
+import type { AddressVisit, CanonStruct, CanonValue, Canonical, TypedTypes } from "./eip712.js";
 import {
   baseType,
   canonAddressValue,
@@ -14,9 +15,9 @@ import {
   fieldType,
   isCanonStruct,
   isStrictHexString,
-} from "./eip712";
-import { decodeCallAction, dedupe } from "./tx";
-import type { Candidate, Decoded, Interaction, Role } from "./util";
+} from "./eip712.js";
+import { decodeCallAction, dedupe } from "./tx.js";
+import type { Candidate, Decoded, Interaction, Role } from "./util.js";
 import {
   PERMIT2_ADDRESS,
   RANK,
@@ -40,7 +41,7 @@ import {
   tokenLabel,
   unixDate,
   withCandidates,
-} from "./util";
+} from "./util.js";
 
 /** Typed data given as a JSON string larger than this is not parsed. */
 const MAX_JSON = 1024 * 1024;

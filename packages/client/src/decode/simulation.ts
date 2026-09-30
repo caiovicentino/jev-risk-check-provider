@@ -1,3 +1,4 @@
+// Vendored from snap/src/simulation.ts by scripts/sync-decoders.mjs. Edit the Snap source and re-sync.
 /**
  * Transaction simulation (provider v0.3).
  *
@@ -9,8 +10,8 @@
  *
  * Pure: no Snap globals, no network.
  */
-import type { SimulationTransaction } from "./util";
-import { formatUnits, isRecord, knownToken, nativeSymbol } from "./util";
+import type { SimulationTransaction } from "./util.js";
+import { formatUnits, isRecord, knownToken, nativeSymbol } from "./util.js";
 
 /** Largest `data` string (including "0x") the provider accepts: 48 KiB of hex characters. */
 export const MAX_SIMULATION_DATA_CHARS = 48 * 1024;

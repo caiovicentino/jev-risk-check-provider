@@ -14,7 +14,7 @@ import { GRANTING_INTERACTIONS, type Answer, type Evidence, type KitWatchEvidenc
 
 export const PROVIDER_DID_PREFIX = "did:web:";
 export const ATTESTATION_TTL_MS = 60 * 60 * 1000;
-export const PROVIDER_VERSION = "0.5.4";
+export const PROVIDER_VERSION = "0.5.5";
 
 export type ProviderConfig = {
   host: string;

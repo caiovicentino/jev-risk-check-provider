@@ -283,6 +283,7 @@ Source layout:
 | Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
+| **Signing guard:** real drainer transactions that still move the victim's assets, refused before the key signs (ScamSniffer feed off) | **22/25** (88%): 18 by simulation, 4 by drainer code · legitimate: **0/228** refused · production: 4/4 decisions agree |
 | **Payments in production (v0.5):** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7–3.7 s end to end, one sample each through PayAI and Coinbase CDP · **$0.001, 0.5–0.8 s**, with no settlement per check |
 | **Production, every evaluation paid** (settled in USDC on Base, or from credits bought that way) | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 (re-run on v0.5) · `security:v3` 8/8 · `security:v4` 7/7 · `security:v5` 9/9, and 11/11 settling through Coinbase CDP (v0.5.1) |
 
@@ -306,6 +307,7 @@ Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deplo
 - **[`@x402check/client`](packages/client)** is a typed TypeScript client with zero runtime dependencies. It runs on Node ≥ 20, browsers, Cloudflare Workers, Deno and Bun.
   - `verifyAttestation` checks the signature against the issuer's `did:web` key and binds it to the request you made, including `request_hash`.
   - `interpret` applies the fail-closed policy. Its verdicts come from the **signed** claims only, never from the unsigned body.
+  - **`guardAccount`** (`@x402check/client/guard`) makes the check **enforced, not advisory**. It wraps the account an agent signs with, and every transaction, permit, order, x402 payment or EIP-7702 delegation is signed only after a verified `allow` bound to that exact request. Otherwise it throws, and the key never signs. See the [signing guard](packages/client#signing-guard-block-before-the-key-signs).
 - **[`@x402check/mcp`](packages/mcp)** is an MCP server for any agent (Claude Code, Claude Desktop, other MCP clients), with the tools `x402check_check`, `x402check_verify_attestation` and `x402check_methodology`.
   - Every verdict is verified before the agent sees an action.
   - It pays each check from prepaid credits (`X402CHECK_CREDIT_TOKEN`) or itself via x402 (USDC on Base, gasless for the payer), with a per-payment cap and a total budget. Both secrets are redacted from every output.

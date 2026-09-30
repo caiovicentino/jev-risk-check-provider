@@ -1,3 +1,4 @@
+// Vendored from snap/src/util.ts by scripts/sync-decoders.mjs. Edit the Snap source and re-sync.
 /**
  * Shared types and helpers for the x402check decoders.
  *

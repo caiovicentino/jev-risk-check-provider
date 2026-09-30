@@ -2,6 +2,21 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.5.5 and `@x402check/client` 0.2.0 — 2026-09-30
+
+- **Signing guard: the check becomes enforced, not advisory.** It lives in `@x402check/client/guard`.
+  - **What it wraps:** `guardAccount(account)` sits between an agent and its key. `signTransaction`, `signTypedData` (including x402 EIP-3009 payments, permits and orders), `signMessage` and `signAuthorization` (EIP-7702) are decoded, checked and verified before the key signs.
+  - **When it refuses:** `block`; `not_verified` (no credits, network error, timeout, a bad or unbound attestation); a `warn` without `onWarn` approval; locally proven danger; raw hash signing. In every case it throws `X402CheckBlockedError` and nothing is signed.
+  - **x402 hook:** `x402PaymentGuard()` is the same check as `onBeforePaymentCreation`, aborting the payment before anything is signed.
+- **Decoders shared with the Snap.** They are vendored into the client (`packages/client/src/decode`, from `snap/src` via `scripts/sync-decoders.mjs`), and a test fails on drift. The Snap's types gained `| undefined` on optional fields, a types-only change: the bundle and its shasum are unchanged.
+- **Measured on real mainnet transactions,** with the ScamSniffer feed off because the cases come from it:
+  - **22/25** drainer transactions that still move assets are refused, 4 more than simulation alone;
+  - **0/228** legitimate transactions are refused;
+  - in production, from credits, **4/4** decisions agree.
+
+  Details are in `docs/EVIDENCE.md`.
+- **Site:** a news row, and the guard in the integration example.
+
 ## Packages — 2026-09-30
 
 - **[`@x402check/client`](https://www.npmjs.com/package/@x402check/client) 0.1.0** and **[`@x402check/mcp`](https://www.npmjs.com/package/@x402check/mcp) 0.1.0** are on npm (tags `client-v0.1.0`, `mcp-v0.1.0`).

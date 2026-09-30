@@ -1,10 +1,11 @@
+// Vendored from snap/src/tx.ts by scripts/sync-decoders.mjs. Edit the Snap source and re-sync.
 /**
  * Transaction (EVM calldata) decoding, including bounded recursive decoding of
  * wrapper calls: multicall, Safe execTransaction / multiSend, Universal Router
  * execute, ERC-7579 / ERC-4337 smart-account execute and EIP-7702 self-calls.
  */
-import { planSimulation } from "./simulation";
-import type { Candidate, Decoded } from "./util";
+import { planSimulation } from "./simulation.js";
+import type { Candidate, Decoded } from "./util.js";
 import {
   PERMIT2_ADDRESS,
   RANK,
@@ -24,7 +25,7 @@ import {
   tokenLabel,
   unixDate,
   withCandidates,
-} from "./util";
+} from "./util.js";
 
 export type TransactionLike = {
   from?: unknown | undefined;
