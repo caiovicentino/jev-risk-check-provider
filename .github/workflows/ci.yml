@@ -38,9 +38,6 @@ jobs:
     permissions:
       contents: read
     env:
-      # Used only while wrangler is not a devDependency of the root package.json: the version
-      # production is deployed with. Once package.json pins wrangler, that copy is used.
-      WRANGLER_VERSION: 4.143.0
       WRANGLER_SEND_METRICS: "false"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -53,14 +50,10 @@ jobs:
       - run: npm ci
       - name: Bundle the Worker (wrangler deploy --dry-run, nothing is uploaded)
         working-directory: deploy
+        # wrangler is pinned exactly in the root devDependencies (the version production deploys with).
         run: |
-          if [ -x ../node_modules/.bin/wrangler ]; then
-            wrangler=(../node_modules/.bin/wrangler)
-          else
-            wrangler=(npx --yes "wrangler@${WRANGLER_VERSION}")
-          fi
-          "${wrangler[@]}" --version
-          "${wrangler[@]}" deploy --dry-run --outdir "${RUNNER_TEMP}/worker-bundle"
+          ../node_modules/.bin/wrangler --version
+          ../node_modules/.bin/wrangler deploy --dry-run --outdir "${RUNNER_TEMP}/worker-bundle"
           ls -l "${RUNNER_TEMP}/worker-bundle"
   snap:
     runs-on: ubuntu-latest
