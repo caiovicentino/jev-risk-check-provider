@@ -487,7 +487,8 @@ describe("x402check_pay", () => {
       await session.close();
     }
     assert.ok(typeof resourceUrl("https://api.weather.example/v1") !== "string");
-    assert.ok(typeof resourceUrl("https://[2001:db8::1]/v1") !== "string", "a public IPv6 literal is allowed");
+    assert.ok(typeof resourceUrl("https://[2606:4700:4700::1111]/v1") !== "string", "a public IPv6 literal is allowed");
+    assert.equal(typeof resourceUrl("https://[2001:db8::1]/v1"), "string", "the IPv6 documentation prefix is not public");
   });
 
   test("the tool is listed with its annotations: it spends money", async () => {

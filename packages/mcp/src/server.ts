@@ -9,6 +9,7 @@ import {
   RISK_TIERS,
   verifyAttestation,
   X402CheckError,
+  type FetchInitLike,
   type FetchLike,
   type Interpretation,
   type ResponseInfo,
@@ -26,8 +27,10 @@ import { VERSION } from "./version.js";
 
 export { METHODOLOGY, EVIDENCE_URL, METHODOLOGY_URL } from "./methodology.js";
 export { VERSION } from "./version.js";
-export { createPayer, PaymentRefused, DEFAULT_BUDGET_USD, DEFAULT_MAX_PAYMENT_USD } from "./payer.js";
-export type { Payer, PayerOptions, PaymentAuthorizer, PaymentRefusalKind, ResourcePayment, ResourcePaymentOptions } from "./payer.js";
+export { createPayer, PaymentRefused, DEFAULT_BUDGET_USD, DEFAULT_MAX_PAYMENT_USD, MAX_AUTHORIZATION_SECONDS, MAX_CHALLENGE_BYTES } from "./payer.js";
+export type { Payer, PayerOptions, PaymentAuthorizer, PaymentRefusalKind, ResourcePayment, ResourcePaymentOptions, SignedPayment } from "./payer.js";
+export { isPublicAddress } from "./net.js";
+export type { Resolver } from "./net.js";
 export { resourceUrl, warnQuestion } from "./pay.js";
 export type { PayArgs, PayStructured } from "./pay.js";
 
@@ -60,10 +63,20 @@ export interface ServerConfig {
    * pays resources with the payer). A bearer secret: it is redacted from every output.
    */
   creditToken?: string | undefined;
-  /** Underlying fetch for API calls and DID resolution (tests, proxies). The payer wraps it. */
+  /**
+   * Underlying fetch for API calls, DID resolution and x402check_pay's resource requests (tests,
+   * proxies). The payer wraps it. For resources it receives `redirect: "manual"` and MUST honor
+   * it: a response that shows a followed redirect (`redirected`, or a `url` other than the one
+   * requested) is refused. With a custom fetch, resource host names are not resolved by this
+   * server: refusing hosts that resolve to private addresses is then the fetch's job. Without
+   * one, resources are fetched only from public addresses (host names resolved, connections
+   * pinned to the addresses checked).
+   */
   fetch?: FetchLike | undefined;
   /** Per API call. Default 30000. */
   timeoutMs?: number | undefined;
+  /** Diagnostics for the operator (e.g. a payment sent for a call the client then cancelled). Never secrets. Default: stderr. */
+  log?: ((line: string) => void) | undefined;
 }
 
 /**
@@ -254,7 +267,16 @@ function text(value: string): { type: "text"; text: string } {
   return { type: "text", text: value };
 }
 
-/** The standard fetch signature the x402 wrapper needs, over a `FetchLike` (tests, proxies). */
+/**
+ * A `FetchLike` init that carries the redirect mode. @x402check/client's `FetchInitLike` gains an
+ * optional `redirect` in its next release; this keeps the server compiling with either.
+ */
+type RedirectingInit = FetchInitLike & { redirect?: NonNullable<RequestInit["redirect"]> };
+
+/**
+ * The standard fetch signature the x402 wrapper needs, over a `FetchLike` (tests, proxies).
+ * The redirect mode is passed on: x402check_pay asks for "manual", and the fetch must honor it.
+ */
 function standardFetch(fetchLike: FetchLike): typeof globalThis.fetch {
   return async (input, init) => {
     const request = input instanceof Request ? input : new Request(input, init);
@@ -263,7 +285,14 @@ function standardFetch(fetchLike: FetchLike): typeof globalThis.fetch {
       headers[name] = value;
     });
     const body = request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
-    const res = await fetchLike(request.url, { method: request.method, headers, ...(body ? { body } : {}), signal: request.signal });
+    const forwarded: RedirectingInit = {
+      method: request.method,
+      headers,
+      ...(body ? { body } : {}),
+      signal: request.signal,
+      ...(request.redirect !== "follow" ? { redirect: request.redirect } : {}),
+    };
+    const res = await fetchLike(request.url, forwarded);
     return res as unknown as Response;
   };
 }
@@ -297,8 +326,15 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
       : undefined);
   const checkPayer = creditToken !== undefined ? undefined : payer;
   const client = createClient({ baseUrl: config.baseUrl, fetch: checkPayer ? checkPayer.fetch : config.fetch, timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS, creditToken });
+  // Only on x402check's own API origin is its pay_to paid without a check (x402check_pay).
+  const apiOrigin = new URL(client.baseUrl).origin;
   // Secrets never reach an output: the payer's key (payer.redact) and the credit token.
   const hide = (v: string): string => (creditToken ? v.split(creditToken).join("x402c_[redacted]") : v);
+  const log = (line: string): void => {
+    const safe = hide(payer ? payer.redact(line) : line);
+    if (config.log) config.log(safe);
+    else process.stderr.write(`x402check-mcp: ${safe}\n`); // stdout carries MCP messages only
+  };
   // DID documents are fetched unpaid, with the plain fetch.
   const verify = (jws: string | undefined, opts: Omit<VerifyOptions, "issuer" | "fetch">): Promise<VerificationResult> =>
     verifyAttestation(jws, { ...opts, issuer, fetch: config.fetch });
@@ -321,7 +357,7 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
     return { content: [text(shown), text(JSON.stringify(safe))], structuredContent: safe, ...(isError ? { isError: true as const } : {}) };
   }
 
-  async function runCheck(request: RiskCheckRequest): Promise<ToolResult> {
+  async function runCheck(request: RiskCheckRequest, signal?: AbortSignal): Promise<ToolResult> {
     // Refuse before calling the API once the budget cannot buy another check.
     if (checkPayer && !checkPayer.canAfford()) {
       const refusal = new PaymentRefused("budget_exhausted", "the payment budget of this server is exhausted");
@@ -335,7 +371,8 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
     let info: ResponseInfo | undefined;
     let error: unknown;
     try {
-      ({ result, info } = await client.checkWithInfo(request));
+      // A call the client cancelled is aborted: a check it no longer waits for is not bought.
+      ({ result, info } = await client.checkWithInfo(request, signal ? { signal } : undefined));
     } catch (err) {
       error = err;
     }
@@ -416,9 +453,9 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
       outputSchema: checkOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async (args) => {
+    async (args, extra) => {
       try {
-        return await runCheck(compact(args) as RiskCheckRequest);
+        return await runCheck(compact(args) as RiskCheckRequest, extra.signal);
       } catch (err) {
         return failClosed(args.wallet, err);
       }
@@ -454,6 +491,7 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
     },
     async (args, extra) => {
       // A warn is the user's decision, asked in the client (MCP elicitation): never the agent's.
+      // The question is withdrawn when the call is cancelled (the client gave up or timed out).
       const confirm = async (question: string): Promise<"approved" | "declined" | "unavailable"> => {
         if (!server.server.getClientCapabilities()?.elicitation?.form) return "unavailable";
         const answer = await server.server.elicitInput(
@@ -466,12 +504,24 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
               required: ["pay"],
             },
           },
-          { relatedRequestId: extra.requestId, timeout: 5 * 60_000 },
+          { relatedRequestId: extra.requestId, timeout: 5 * 60_000, signal: extra.signal },
         );
         return answer.action === "accept" && answer.content?.["pay"] === true ? "approved" : "declined";
       };
       try {
-        return finishPay(await runPay(compact(args) as PayArgs, { payer, client, issuer, fetch: config.fetch, confirm, timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS }));
+        return finishPay(
+          await runPay(compact(args) as PayArgs, {
+            payer,
+            client,
+            issuer,
+            fetch: config.fetch,
+            confirm,
+            timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            apiOrigin,
+            signal: extra.signal,
+            log,
+          }),
+        );
       } catch (err) {
         // Last line of defence: report what is known, never an all-clear.
         const failed: PayStructured = { outcome: "failed", payment_sent: false, reasons: [], error: { code: "internal_error", message: err instanceof Error ? err.message : String(err) } };
