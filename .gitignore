@@ -1,13 +1,35 @@
 node_modules/
 dist/
-.env
-.env.*
 eval/evidence/*
 *.log
 .DS_Store
 !eval/evidence/*-report.json
-deploy/.wrangler/
 .cache/
 feeds-out/
+
+# Keys and secrets. Never commit them: the payer keys live in ~/.config/paysol, outside the
+# repository, and Worker secrets go through `wrangler secret put`. These patterns catch a
+# copy written inside the checkout by mistake (GitHub push protection does not recognise
+# raw EVM hex or Solana base58 keys).
+*.key
+*.pem
+*.b58
+# Solana CLI keypair file name
+id.json
+keys/
+.env
+.env.*
 .dev.vars
-deploy/.dev.vars
+.dev.vars.*
+.npmrc
+
+# Local wrangler state (dev cache, including the machine's request.cf location data)
+deploy/.wrangler/
+
+# Publish artifacts: `npm pack` tarballs (AGENTS.md §3.6) and publish-npm.sh's backup
+*.tgz
+package.json.publish-backup
+
+# Agent worktrees and personal Claude Code settings
+.claude/worktrees/
+.claude/settings.local.json
