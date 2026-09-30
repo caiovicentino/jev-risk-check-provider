@@ -23,7 +23,7 @@ test("landing page carries no stale or unsupported claims", () => {
     assert.ok(!page.includes(stale), `stale claim present: ${stale}`);
   }
   // Evidence figures must match docs/EVIDENCE.md (canonical run, seed 200).
-  for (const required of ["OFAC SDN", "Not detected:", "asserted", "did:web:x402check.xyz", "$0.001 per evaluation", "$0.0035 on Base", "27/30", "0&ndash;4/60", "24/24", "0/62", "18/25", "0/84", "40/82", "6,831", "4,672", "0.011%", "/v1/credits", "Authorization: Bearer x402c_", "Kit watch &middot; live", "og.png?v="]) {
+  for (const required of ["OFAC SDN", "Not detected:", "asserted", "did:web:x402check.xyz", "$0.001 per evaluation", "$0.0035 on Base", "27/30", "0&ndash;4/60", "24/24", "0/62", "18/25", "0/84", "40/82", "6,831", "4,672", "0.011%", "/v1/credits", "Authorization: Bearer x402c_", "Kit watch &middot; live", "og.png?v=", "x402check_pay"]) {
     assert.ok(page.includes(required), `missing: ${required}`);
   }
 });

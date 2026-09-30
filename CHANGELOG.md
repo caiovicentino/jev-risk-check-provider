@@ -2,6 +2,26 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/mcp` 0.2.0 — 2026-09-30
+
+- **`x402check_pay`: the MCP server pays x402 resources, and only after x402check clears the payee.** The agent never holds the key.
+  - **Where the check runs:** inside the x402 client's `onBeforePaymentCreation` hook. It checks exactly the option about to be signed (payee, network, asset, amount, the resource's site), with the agent's `context` and the 402's own description. The attestation is verified and bound to that request, so there is no window between the check and the signature.
+  - **Decisions:** `allow` signs. `warn` asks the user in the client (MCP elicitation) and signs only on their approval; neither the agent nor a client without elicitation can approve. `block` and `not_verified` sign nothing.
+  - **Limits:** one payment per call. `max_usd`, the per-payment cap and the budget apply before any check is bought.
+  - **Hardening:**
+    - https on public hosts only, redirects not followed, and payment headers cannot be passed in;
+    - time limits per request and for the body;
+    - the body is capped, stripped of control and format characters, and labelled third-party data;
+    - the query string is never sent to x402check.
+- **Credits and a wallet together:** checks are paid from credits, and resources from the payer, which has one budget for both.
+- **Measured:**
+  - **one real payment through the tool** settled on Base in production, to x402check's own `pay_to`, with no secret in the output;
+  - **24/25 payees of real x402 merchants,** sampled from the Coinbase x402 Bazaar, were allowed: 96.0%, 95% CI 80.5–99.3%. The one warning was a model finding on a prediction-market URL. New merchant wallets are not stopped.
+
+  Details are in `docs/EVIDENCE.md`.
+- **Tests:** 61 (16 new), covering every outcome, the user's decision through elicitation, checks paid by the same wallet, limits, time limits, and URL and header refusals.
+- **Site:** a news row, and the payer line in the integration example.
+
 ## v0.5.5 and `@x402check/client` 0.2.0 — 2026-09-30
 
 - **Signing guard: the check becomes enforced, not advisory.** It lives in `@x402check/client/guard`.

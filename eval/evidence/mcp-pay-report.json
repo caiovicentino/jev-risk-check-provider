@@ -1,0 +1,40 @@
+{
+  "timestamp": "2026-09-30T18:20:10.738Z",
+  "base": "https://x402check.xyz",
+  "duration_ms": 4960,
+  "outcome": "paid",
+  "payment_sent": true,
+  "action": "allow",
+  "reasons": [
+    "payment to x402check itself (trusted payee): not checked"
+  ],
+  "payment": {
+    "network": "eip155:8453",
+    "pay_to": "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "amount": "3500",
+    "amount_usd": 0.0035,
+    "settled": true,
+    "transaction": "0x597dd2b3abc9dd6c2e186831d3dddf83a13afb2c07118cafd9ddf4aab3a5ce01",
+    "payer": "0xB48057E647B2572f5eAe241b515fBc58B7cE249E",
+    "spent_usd": 0.0035,
+    "budget_usd": 0.01
+  },
+  "response": {
+    "status": 200,
+    "result_checked": true,
+    "result_tier": "low",
+    "result_has_jws": true
+  },
+  "secrets_in_output": false,
+  "text": [
+    "x402check_pay: PAID. x402check cleared the payee right before the payment was signed.",
+    "Resource: POST https://x402check.xyz/v1/risk-check → HTTP 200",
+    "Paid: $0.004 (3500 atomic units of 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) on eip155:8453 to 0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178",
+    "x402check: ALLOW",
+    "Why:",
+    "- payment to x402check itself (trusted payee): not checked",
+    "Settlement: settled on eip155:8453 · tx 0x597dd2b3abc9dd6c2e186831d3dddf83a13afb2c07118cafd9ddf4aab3a5ce01",
+    "Payer budget: $0.004 of $0.010 spent by this server (checks and payments)"
+  ]
+}

@@ -21,9 +21,9 @@ describe("tool listing", () => {
   });
   after(() => session.close());
 
-  test("three tools, with agent-facing instructions", async () => {
+  test("four tools, with agent-facing instructions", async () => {
     const { tools } = await session.client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["x402check_check", "x402check_methodology", "x402check_verify_attestation"]);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["x402check_check", "x402check_methodology", "x402check_pay", "x402check_verify_attestation"]);
     const check = tools.find((t) => t.name === "x402check_check")!;
     assert.match(check.description ?? "", /BEFORE you send funds, sign a token approval, permit or order, or pay an x402 invoice/);
     assert.match(check.description ?? "", /not_verified: .*STOP, never as an all-clear/);
@@ -31,6 +31,7 @@ describe("tool listing", () => {
     assert.equal(check.annotations?.readOnlyHint, true);
     assert.equal(check.annotations?.openWorldHint, true);
     assert.match(session.client.getInstructions() ?? "", /not_verified → STOP/);
+    assert.match(session.client.getInstructions() ?? "", /To pay for an x402 resource \(an API that answers HTTP 402\), use x402check_pay/);
     assert.equal(session.client.getServerVersion()?.name, "x402check");
     assert.equal(session.client.getServerVersion()?.version, VERSION);
   });

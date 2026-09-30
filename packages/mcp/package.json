@@ -1,8 +1,8 @@
 {
   "name": "@x402check/mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "mcpName": "io.github.caiovicentino/x402check",
-  "description": "MCP server for x402check: pre-payment risk checks and verifiable attestations for AI agents, before they send funds, sign approvals/permits/orders, or pay an x402 invoice.",
+  "description": "MCP server for x402check: pre-payment risk checks with verifiable attestations for AI agents, and x402 payments made only after the payee is cleared (right before signing).",
   "license": "MIT",
   "author": "Caio Vicentino",
   "homepage": "https://x402check.xyz",

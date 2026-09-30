@@ -14,7 +14,7 @@ export const MIN_CHECK_USD = 0.001;
 /** Preferred first when the 402 offers it: Base. */
 export const PREFERRED_NETWORK = "eip155:8453";
 
-export type PaymentRefusalKind = "budget_exhausted" | "over_max_payment" | "no_payable_option" | "payment_error";
+export type PaymentRefusalKind = "budget_exhausted" | "over_max_payment" | "no_payable_option" | "payment_error" | "not_authorized";
 
 /** A payment this server refused or could not make. The message never contains secrets. */
 export class PaymentRefused extends Error {
@@ -47,13 +47,45 @@ export interface Payer {
   spentUsd(): number;
   /** Whether the remaining budget still covers the cheapest check. */
   canAfford(): boolean;
-  /** An x402-paying fetch for `createClient`. Payment failures reject with `PaymentRefused`. */
+  /** An x402-paying fetch for `createClient` (pays x402check's own checks). Payment failures reject with `PaymentRefused`. */
   readonly fetch: FetchLike;
+  /**
+   * Fetches a third-party x402 resource. When it asks for payment, `authorize` decides right
+   * before the payment is signed, on exactly what would be signed: nothing is signed unless it
+   * returns undefined. At most one payment per call, within the cap and the budget.
+   */
+  payResource(url: string, init: RequestInit, options: ResourcePaymentOptions): Promise<Response>;
   /** Removes the private key from text (defense in depth for every output). */
   redact(text: string): string;
 }
 
+/** A resource payment about to be signed. */
+export interface ResourcePayment {
+  scheme: string;
+  network: string;
+  payTo: string;
+  asset: string;
+  /** Atomic units of `asset`. */
+  amount: string;
+  /** The same amount in USD, rounded up (the asset is a USD stablecoin this payer recognizes). */
+  usd: number;
+  /** The resource's own description, from its 402 (untrusted text). */
+  description?: string | undefined;
+}
+
+/** Called once, right before signing: undefined → sign; a string → refuse, nothing signed. */
+export type PaymentAuthorizer = (payment: ResourcePayment) => Promise<string | undefined>;
+
+export interface ResourcePaymentOptions {
+  authorize: PaymentAuthorizer;
+  /** Runs once the authorization is signed: it is then sent with the request, and may be settled whatever follows. */
+  onSigned?: (() => void) | undefined;
+  /** Per HTTP request to the resource, until its headers arrive (the check and the user's decision do not count). */
+  timeoutMs?: number | undefined;
+}
+
 const PRIVATE_KEY = /^0x[0-9a-fA-F]{64}$/;
+const AUTHORIZE_ABORT = "x402check-mcp payment not authorized";
 const MICRO = 1_000_000n; // budget accounting in integer micro-USD (USDC has 6 decimals)
 const BUDGET_ABORT = "x402check-mcp budget exhausted";
 const ASSET_ABORT = "x402check-mcp unrecognized payment asset";
@@ -72,6 +104,7 @@ function toMicroUsd(amount: string, decimals: number): bigint {
 
 function classify(err: unknown): unknown {
   const message = err instanceof Error ? err.message : "";
+  if (message.includes(AUTHORIZE_ABORT)) return new PaymentRefused("not_authorized", "the payment was not authorized, so nothing was signed");
   if (message.includes(BUDGET_ABORT)) return new PaymentRefused("budget_exhausted", "the payment budget of this server is exhausted");
   if (message.includes("spendControls.maxAmountPerPayment")) return new PaymentRefused("over_max_payment", "the price exceeds the per-payment cap (X402CHECK_MAX_PAYMENT_USD)");
   if (/^Failed to (create payment payload|parse payment requirements)|^Payment already attempted/.test(message)) {
@@ -99,32 +132,55 @@ export function createPayer(options: PayerOptions): Payer {
   const reserved = new WeakMap<object, bigint>();
   const secret = key.slice(2).toLowerCase();
 
-  const client = new x402Client((_version, requirements) => {
-    const evm = requirements.filter((r) => r.network.startsWith("eip155:"));
-    return (requirements.find((r) => r.network === PREFERRED_NETWORK) ?? evm[0] ?? requirements[0]) as (typeof requirements)[number];
-  })
-    .register("eip155:*", new ExactEvmScheme(account))
-    .setSpendControls({ maxAmountPerPayment: `$${maxPaymentUsd.toFixed(6)}` })
-    .onBeforePaymentCreation(async ({ selectedRequirements: r }) => {
-      const asset = findDefaultAsset(r.asset, r.network);
-      if (!asset || !/^\d{1,78}$/.test(r.amount)) return { abort: true, reason: ASSET_ABORT };
-      const cost = toMicroUsd(r.amount, asset.decimals);
-      if (spentMicro + cost > budgetMicro) return { abort: true, reason: BUDGET_ABORT };
-      // Committed before signing: a signed authorization can be settled even if the response is lost.
-      spentMicro += cost;
-      reserved.set(r, cost);
+  // One x402 client for x402check's own checks, and one per resource payment (with its gate),
+  // sharing the budget.
+  const makeClient = (gate?: PaymentAuthorizer, onSigned?: () => void) =>
+    new x402Client((_version, requirements) => {
+      const evm = requirements.filter((r) => r.network.startsWith("eip155:"));
+      return (requirements.find((r) => r.network === PREFERRED_NETWORK) ?? evm[0] ?? requirements[0]) as (typeof requirements)[number];
     })
-    .onPaymentCreationFailure(async ({ selectedRequirements: r }) => {
-      // Nothing was signed: give the reservation back.
-      const cost = reserved.get(r);
-      if (cost !== undefined) {
-        spentMicro -= cost;
-        reserved.delete(r);
-      }
-    });
+      .register("eip155:*", new ExactEvmScheme(account))
+      .setSpendControls({ maxAmountPerPayment: `$${maxPaymentUsd.toFixed(6)}` })
+      .onBeforePaymentCreation(async ({ selectedRequirements: r, paymentRequired }) => {
+        const asset = findDefaultAsset(r.asset, r.network);
+        if (!asset || !/^\d{1,78}$/.test(r.amount)) return { abort: true, reason: ASSET_ABORT };
+        const cost = toMicroUsd(r.amount, asset.decimals);
+        if (spentMicro + cost > budgetMicro) return { abort: true, reason: BUDGET_ABORT };
+        if (gate) {
+          // Decided on exactly what would be signed, right before signing. A failure refuses.
+          const description = paymentRequired.resource?.description;
+          const payment: ResourcePayment = {
+            scheme: r.scheme,
+            network: r.network,
+            payTo: r.payTo,
+            asset: r.asset,
+            amount: r.amount,
+            usd: Number(cost) / 1e6,
+            ...(typeof description === "string" && description.trim() ? { description: description.trim().slice(0, 600) } : {}),
+          };
+          const refusal = await gate(payment).catch(() => "the authorization failed");
+          if (refusal !== undefined) return { abort: true, reason: AUTHORIZE_ABORT };
+          // A paid check inside the authorization may itself have spent from the budget.
+          if (spentMicro + cost > budgetMicro) return { abort: true, reason: BUDGET_ABORT };
+        }
+        // Committed before signing: a signed authorization can be settled even if the response is lost.
+        spentMicro += cost;
+        reserved.set(r, cost);
+      })
+      .onAfterPaymentCreation(async () => {
+        onSigned?.();
+      })
+      .onPaymentCreationFailure(async ({ selectedRequirements: r }) => {
+        // Nothing was signed: give the reservation back.
+        const cost = reserved.get(r);
+        if (cost !== undefined) {
+          spentMicro -= cost;
+          reserved.delete(r);
+        }
+      });
 
   const inner: typeof globalThis.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
-  const paying = wrapFetchWithPayment(inner, client);
+  const paying = wrapFetchWithPayment(inner, makeClient());
 
   return {
     address: account.address,
@@ -135,6 +191,33 @@ export function createPayer(options: PayerOptions): Payer {
     fetch: async (url, init) => {
       try {
         return await paying(url, init as RequestInit);
+      } catch (err) {
+        throw classify(err);
+      }
+    },
+    payResource: async (url, init, { authorize, onSigned, timeoutMs }) => {
+      // One signature per call: the x402 wrapper signs a second payment when a response hook
+      // reports a "recoverable" failure, and a server could then settle both.
+      let asked = false;
+      const gate: PaymentAuthorizer = async (payment) => {
+        if (asked) return "only one payment per call";
+        asked = true;
+        return authorize(payment);
+      };
+      const fetchResource: typeof globalThis.fetch =
+        timeoutMs === undefined
+          ? inner
+          : async (input, requestInit) => {
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(new Error(`the resource did not answer within ${timeoutMs} ms`)), timeoutMs);
+              try {
+                return await inner(new Request(new Request(input, requestInit), { signal: controller.signal }));
+              } finally {
+                clearTimeout(timer);
+              }
+            };
+      try {
+        return await wrapFetchWithPayment(fetchResource, makeClient(gate, onSigned))(url, init);
       } catch (err) {
         throw classify(err);
       }

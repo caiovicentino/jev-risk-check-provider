@@ -46,7 +46,7 @@ test("stdio: tools are served over stdin/stdout, configured from the environment
   try {
     await client.connect(transport);
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["x402check_check", "x402check_methodology", "x402check_verify_attestation"]);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["x402check_check", "x402check_methodology", "x402check_pay", "x402check_verify_attestation"]);
     const result = (await client.callTool({ name: "x402check_check", arguments: { wallet: "definitely-not-an-address" } })) as {
       content: Array<{ type: string; text: string }>;
       isError?: boolean;

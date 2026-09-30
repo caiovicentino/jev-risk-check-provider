@@ -18,7 +18,38 @@ The v0.3 layers (§1–§5) were measured on the v0.3.0 code:
 
 Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not, and neither is the kit-watch watchlist (it is the provider's private data). Every rate carries a Wilson 95% interval. The rulebook these numbers measure is [`METHODOLOGY.md`](METHODOLOGY.md).
 
-## Signing guard (`@x402check/client` 0.2.0, new)
+## Guarded x402 payments (`@x402check/mcp` 0.2.0, new)
+
+`x402check_pay` is a tool of the MCP server. It fetches an x402 resource and pays for it only after x402check clears the exact option about to be signed: the payee, network, asset, amount and the resource's site. The check runs inside the x402 client's `onBeforePaymentCreation` hook, and its attestation is verified and bound to that request. A `warn` is paid only if the user approves it in the client (MCP elicitation). Nothing else can approve it.
+
+**A real payment through the tool, in production** (`eval/mcp-pay.ts`, `mcp-pay-report.json`):
+- the tool bought a paid x402check call ($0.0035), with our own `pay_to` as the payee, so no third party was paid;
+- **settled on Base** by the facilitator (tx `0x597dd2b3…ce01`), with the receipt, the result and the verdict returned in 5.0 s;
+- no secret appeared in the output (the key and the credit token were checked for);
+- x402check's own `pay_to` is a trusted payee, so this run proves the payment path; the check path is measured next.
+
+**Real x402 merchants** (`eval/pay-guard.ts`, `pay-guard-report.json`). Method:
+- 25 distinct payees were drawn at random (seed 402) from the Coinbase x402 Bazaar, the public catalog of 19,725 resources, from 83 Base USDC payees in two random windows of the catalog;
+- each was checked against production exactly as the tool checks a payment before signing it;
+- nothing was paid to them: only the checks were bought, from prepaid credits ($0.025).
+
+| Verdict | Payees |
+|---|---|
+| `allow` (the tool would pay) | **24/25 (96.0%, 95% CI 80.5–99.3%)** |
+| `warn` (paid only if the user approves in the client) | 1: a model finding ("fraud signals") on a prediction-market URL, for a new payee |
+| `block`, `not_verified` | 0 |
+
+- 6 payees had no on-chain history at all. 5 were still allowed, with a "new address" note: a fresh merchant wallet alone does not stop an agent.
+- Listed merchants are not known to be benign, so this is not a false-positive rate. It is how often an autonomous agent would be stopped on the catalog's merchants, and why.
+
+**Tests:** `packages/mcp/test/pay.test.ts`, 16 tests. They cover:
+- every outcome, and the user's decision through elicitation (approve, decline, cancel);
+- that a `block` is never put to the user;
+- per-call checks paid by the same wallet as the resource;
+- `max_usd`, the cap and the budget refusing before any check is bought;
+- time limits, and URL and header refusals.
+
+## Signing guard (`@x402check/client` 0.2.0)
 
 `guardAccount()` wraps the account an agent signs with. A signature request is decoded (the real counterparty inside the calldata or typed data), checked, and its attestation verified and bound to that exact request. Only then does the key sign; otherwise the guard throws.
 
@@ -404,6 +435,8 @@ npx tsx scripts/hunt-kits.ts --chain eip155:1 --hours 24 && npx tsx scripts/hunt
 npm run eval:kit-watch -- --sample 40 && npm run eval:kit-watch -- --second-holdout
 npx tsx scripts/payai-shadow.ts --days 7
 PAY_NETWORK=eip155:8453 npm run security:v5    # spends $0.1035: one per-call check and a $0.10 credit pack; reports who settled each
+npx tsx eval/mcp-pay.ts                      # one real payment through x402check_pay, to x402check itself ($0.0035)
+npx tsx eval/pay-guard.ts --n 25 --seed 402  # 25 Bazaar payees checked from prepaid credits ($0.025); nothing paid to them
 PAY_NETWORK=eip155:8453 npm run security:v4
 PAY_NETWORK=eip155:8453 npm run security:v3 && PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
 # ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.35 in total at v0.5 prices)

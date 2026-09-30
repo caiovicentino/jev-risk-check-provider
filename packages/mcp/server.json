@@ -2,21 +2,23 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.caiovicentino/x402check",
   "title": "x402check",
-  "description": "Risk-check a counterparty before an AI agent pays: sanctions, drainers, simulation, signed verdicts",
+  "description": "Risk-check counterparties before an AI agent pays; pay x402 resources only after a verified allow",
   "websiteUrl": "https://x402check.xyz",
   "repository": {
     "url": "https://github.com/caiovicentino/jev-risk-check-provider",
     "source": "github",
     "subfolder": "packages/mcp"
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@x402check/mcp",
-      "version": "0.1.0",
-      "transport": { "type": "stdio" },
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
         {
           "name": "X402CHECK_CREDIT_TOKEN",
@@ -27,21 +29,21 @@
         },
         {
           "name": "X402CHECK_PAYER_KEY",
-          "description": "Or: private key of a dedicated low-balance wallet that pays per call in USDC on Base via x402",
+          "description": "Private key of a dedicated low-balance wallet: pays the x402 resources x402check_pay clears, and per-call checks without credits",
           "isRequired": false,
           "isSecret": true,
           "format": "string"
         },
         {
           "name": "X402CHECK_BUDGET_USD",
-          "description": "Total spend for this server process when paying per call",
+          "description": "Total spend of the payer for this server process (checks and resources)",
           "isRequired": false,
           "format": "string",
           "default": "1.00"
         },
         {
           "name": "X402CHECK_MAX_PAYMENT_USD",
-          "description": "The most a single per-call payment may cost",
+          "description": "The most a single payment may cost (a check or a resource)",
           "isRequired": false,
           "format": "string",
           "default": "0.05"
