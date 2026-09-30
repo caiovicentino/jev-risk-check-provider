@@ -288,9 +288,15 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
 - **Production:**
   - v0.5.4: credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;
   - Bazaar and x402scan listings, `/openapi.json`.
-- **Packages:** `@x402check/client` 0.1.0 and `@x402check/mcp` 0.1.0 on npm, and in the MCP Registry.
+- **Packages:** `@x402check/client` 0.2.0 and `@x402check/mcp` 0.1.0 on npm, and the MCP server in the MCP Registry.
+- **Signing guard** (`@x402check/client/guard`, v0.5.5): `guardAccount` and `x402PaymentGuard`. The agent's key signs only after a verified `allow` bound to the exact request.
+  - Proof on real mainnet transactions (`eval/guard.ts`): 22/25 drainer transactions that still move assets refused, and 0/228 legitimate.
+  - In production from credits, 4/4 decisions agreed.
+  - Probe credits: `~/.config/paysol/x402check-credit-token` (mode 600; never print it).
 - **Revenue from outside:** $0. Every payment so far has come from our own probe wallets.
 - **Next** (`docs/STRATEGY.md`):
+  - guard phase 2: Solana signers, and a guarded payment tool in the MCP server;
+  - guard phase 3: custody-level enforcement (a co-signer, a smart-account module that checks the attestation on-chain, the Kora fee-payer gate);
   - measure the kit watch's lead time against public lists;
   - follow up with PayAI and CDP;
   - agent-framework integrations (AgentKit, Vercel AI SDK, ElizaOS);
