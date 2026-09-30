@@ -29,6 +29,7 @@ export type EvaluateFn = (args: {
 }) => Promise<{
   answers: Record<string, GatewayAnswer>;
   usage?: { inputTokens?: number | undefined; outputTokens?: number | undefined };
+  response?: { modelId?: string | undefined } | undefined;
 }>;
 
 function toGatewayQuestions(questions: JevQuestions): Record<string, GatewayQuestion> {
@@ -98,7 +99,7 @@ export class GatewayJevClient implements JevLike {
     this.evaluateImpl = config.evaluateImpl ?? (evaluate as unknown as EvaluateFn);
   }
 
-  async systemOne(state: object, questions: JevQuestions): Promise<{ answers: Record<string, Answer>; usage: Usage }> {
+  async systemOne(state: object, questions: JevQuestions): Promise<{ answers: Record<string, Answer>; usage: Usage; modelId?: string | undefined }> {
     const result = await this.evaluateImpl({
       model: this.model,
       state,
@@ -109,6 +110,8 @@ export class GatewayJevClient implements JevLike {
     return {
       answers: toAnswers(result.answers as Record<string, GatewayAnswer>),
       usage: { inputTokens: result.usage?.inputTokens ?? 0, outputTokens: result.usage?.outputTokens ?? 0 },
+      // The alias ('typesafe-ai/jev') resolves to a revision the vendor may change: record which one answered.
+      ...(result.response?.modelId ? { modelId: result.response.modelId } : {}),
     };
   }
 }

@@ -69,6 +69,8 @@ export type Evidence = {
   simulation?: import("./simulation.js").SimulationEvidence;
   kit_watch?: KitWatchEvidence;
   model: string;
+  /** The model revision that answered, as the backend reported it. */
+  model_id?: string;
 };
 
 export type RiskCheckResult = {

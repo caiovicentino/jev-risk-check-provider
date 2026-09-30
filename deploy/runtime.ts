@@ -4,7 +4,7 @@ export interface KVNamespace {
   get(key: string): Promise<string | null>;
   get(key: string, opts: { type: "text"; cacheTtl?: number }): Promise<string | null>;
   get(key: string, opts: { type: "arrayBuffer"; cacheTtl?: number }): Promise<ArrayBuffer | null>;
-  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
+  put(key: string, value: string | ArrayBuffer | ArrayBufferView, opts?: { expirationTtl?: number }): Promise<void>;
   delete?(key: string): Promise<void>;
   list?(opts: { prefix: string; limit?: number; cursor?: string }): Promise<{ keys: Array<{ name: string }>; list_complete: boolean; cursor?: string }>;
 }

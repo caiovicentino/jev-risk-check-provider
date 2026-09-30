@@ -262,6 +262,8 @@ export interface Evidence {
   simulation?: SimulationEvidence;
   kit_watch?: KitWatchEvidence;
   model: string;
+  /** The model revision that answered, as the backend reported it (since provider 0.6.0). */
+  model_id?: string;
 }
 
 /** Why a check could not be completed (`checked: false`). New codes may appear. */
@@ -305,6 +307,8 @@ export interface AttestationChecks {
   simulation?: { status: string; network?: string; findings?: string[] };
   /** Question set, or "skipped" (e.g. deterministic sanctions verdict). */
   model: string;
+  /** The model revision that answered, signed (since provider 0.6.0). */
+  model_id?: string;
 }
 
 export interface AttestationClaims {

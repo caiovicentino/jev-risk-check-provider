@@ -54,6 +54,18 @@ export function feedHost(host: string): string {
   return host.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
 }
 
+/** Normalizes a feed entry to a host (punycode, lowercase, no www.); null for paths/invalid. */
+export function normalizeFeedDomain(entry: string): string | null {
+  const e = entry.trim();
+  if (!e || e.includes("/") || /\s/.test(e)) return null;
+  try {
+    const host = new URL(`https://${e}`).hostname;
+    return host && host.includes(".") ? feedHost(host) : null;
+  } catch {
+    return null;
+  }
+}
+
 export type LoadedFeed = { set: HashSet; as_of: string };
 
 export type ThreatIntelFeeds = {

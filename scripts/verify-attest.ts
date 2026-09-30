@@ -1,104 +1,133 @@
-// Reference verifier for x402check attestations.
+// Reference verifier for x402check attestations: the SDK's verifyAttestation behind a CLI.
 //
-//   npx tsx scripts/verify-attest.ts <jws> [--issuer did:web:x402check.xyz] [--aud <url>] [--sub <wallet>]
+//   npx tsx scripts/verify-attest.ts <jws> [options]
 //
-// Trust is pinned to the ISSUER you expect: the key is resolved from that issuer's
-// did:web document, never from a URL carried in the response or the token.
-import { createPublicKey, createVerify, type JsonWebKey } from "node:crypto";
-import { sameSubject } from "../src/address.js";
+//   --request <json | @file>   the exact request body the verdict must answer: binds request_hash
+//                              (and sub, aud, interaction, payment, domain, chain) to it
+//   --max-age <seconds>        refuse a verdict older than this (a reused verdict is still valid
+//                              for its full hour otherwise)
+//   --aud <url>                required audience        --sub <wallet>   expected subject
+//   --interaction <type>       expected interaction     --issuer <did>   default did:web:x402check.xyz
+//   --pay-to <addr> --amount <atomic> --network <caip2> --asset <addr>   expected payment binding
+//   --pin <thumbprint,...>     accepted attestation keys (RFC 7638); default: x402check's published
+//                              key for the default issuer. --no-pin accepts any key the DID assigns.
+//
+// Trust is pinned to the ISSUER you expect: the key is resolved from that issuer's did:web
+// document, never from a URL carried in the response or the token. Exit code 0 = valid,
+// 2 = invalid, 1 = usage, 3 = error.
+import { readFileSync } from "node:fs";
+import { verifyAttestation, type VerifyOptions } from "../packages/client/src/verify.js";
+import { X402CHECK_KEY_THUMBPRINTS } from "../packages/client/src/keys.js";
+import type { RiskCheckRequest } from "../packages/client/src/types.js";
 
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i !== -1 ? process.argv[i + 1] : undefined;
-}
+const USAGE = "usage: tsx scripts/verify-attest.ts <jws> [--request <json|@file>] [--max-age s] [--aud url] [--sub wallet] [--interaction type] [--pay-to addr] [--amount n] [--network caip2] [--asset addr] [--issuer did] [--pin t1,t2 | --no-pin]";
+const FLAGS = new Set(["request", "max-age", "aud", "sub", "interaction", "pay-to", "amount", "network", "asset", "issuer", "pin"]);
 
-function decode(part: string | undefined): Record<string, unknown> | null {
-  if (!part) return null;
-  try {
-    return JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown>;
-  } catch {
-    return null;
+function parseArgs(argv: string[]): { jws: string; flags: Map<string, string>; noPin: boolean } {
+  const [jws, ...rest] = argv;
+  if (!jws || jws.startsWith("--")) throw new Error(USAGE);
+  const flags = new Map<string, string>();
+  let noPin = false;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i] as string;
+    if (a === "--no-pin") {
+      noPin = true;
+      continue;
+    }
+    const name = a.startsWith("--") ? a.slice(2) : "";
+    const value = rest[i + 1];
+    if (!FLAGS.has(name) || value === undefined || value.startsWith("--")) throw new Error(`bad argument ${a}\n${USAGE}`);
+    flags.set(name, value);
+    i++;
   }
+  return { jws, flags, noPin };
 }
 
-async function resolveKeys(issuer: string): Promise<Array<JsonWebKey & { kid?: string }>> {
-  const m = issuer.match(/^did:web:([a-z0-9.-]+(?:%3A\d+)?)$/i);
-  if (!m) throw new Error(`unsupported issuer ${issuer} (expected did:web:<host>)`);
-  const host = decodeURIComponent(m[1] as string);
-  const res = await fetch(`https://${host}/.well-known/did.json`);
-  if (!res.ok) throw new Error(`did document fetch failed: HTTP ${res.status}`);
-  const doc = (await res.json()) as { id?: string; verificationMethod?: Array<{ id?: string; publicKeyJwk?: JsonWebKey & { kid?: string } }>; assertionMethod?: string[] };
-  if (doc.id !== issuer) throw new Error(`did document id ${doc.id} != ${issuer}`);
-  const assertion = new Set(doc.assertionMethod ?? []);
-  return (doc.verificationMethod ?? []).filter((vm) => vm.id && assertion.has(vm.id) && vm.publicKeyJwk).map((vm) => vm.publicKeyJwk as JsonWebKey & { kid?: string });
+function readRequest(raw: string): RiskCheckRequest {
+  const text = raw.startsWith("@") ? readFileSync(raw.slice(1), "utf8") : raw;
+  const value = JSON.parse(text) as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("--request must be a JSON object (the body sent to /v1/risk-check)");
+  return value as RiskCheckRequest;
 }
 
 async function main(): Promise<void> {
-  const jws = process.argv[2];
-  if (!jws || jws.startsWith("--")) {
-    console.error("usage: tsx scripts/verify-attest.ts <jws> [--issuer did:web:host] [--aud url] [--sub wallet]");
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error((err as Error).message);
     process.exit(1);
   }
-  const issuer = arg("issuer") ?? "did:web:x402check.xyz";
-  const [h, p, s] = jws.split(".");
-  const header = decode(h);
-  const payload = decode(p);
-  if (!header || !payload || !s || jws.split(".").length !== 3) {
-    console.log(JSON.stringify({ valid: false, reason: "malformed_jws" }));
-    process.exit(2);
+  const { jws, flags, noPin } = parsed;
+  const issuer = flags.get("issuer") ?? "did:web:x402check.xyz";
+  const maxAge = flags.get("max-age");
+  if (maxAge !== undefined && !/^\d+$/.test(maxAge)) {
+    console.error("--max-age takes whole seconds");
+    process.exit(1);
   }
-  const keys = await resolveKeys(issuer);
-  const jwk = keys.find((k) => k.kid === header.kid);
-  const now = Math.floor(Date.now() / 1000);
-  const failures: string[] = [];
-  if (header.alg !== "ES256") failures.push("alg_not_es256");
-  if (header.typ !== "risk-check+jwt") failures.push("unexpected_typ");
-  if (!jwk) failures.push("kid_not_in_issuer_did_document");
-  let signatureValid = false;
-  if (jwk && header.alg === "ES256") {
-    signatureValid = createVerify("SHA256")
-      .update(`${h}.${p}`)
-      .verify({ key: createPublicKey({ key: jwk, format: "jwk" }), dsaEncoding: "ieee-p1363" }, Buffer.from(s, "base64url"));
-    if (!signatureValid) failures.push("signature_invalid");
-  }
-  if (payload.iss !== issuer) failures.push("issuer_mismatch");
-  if (typeof payload.exp !== "number" || payload.exp <= now) failures.push("expired_or_missing_exp");
-  if (typeof payload.iat !== "number" || payload.iat > now + 300) failures.push("iat_in_future");
-  const aud = arg("aud");
-  if (aud !== undefined && payload.aud !== aud) failures.push("audience_mismatch");
-  const sub = arg("sub");
-  if (sub !== undefined) {
-    // Canonical comparison: EVM/bech32/cashaddr are case-insensitive, base58 (Solana,
-    // Tron, BTC legacy) is case-SENSITIVE — a case-flipped base58 string is another address.
-    if (!sameSubject(sub, String(payload.sub))) failures.push("subject_mismatch");
-  }
-  const valid = failures.length === 0;
+  const payment = Object.fromEntries(
+    (
+      [
+        ["pay_to", flags.get("pay-to")],
+        ["amount", flags.get("amount")],
+        ["network", flags.get("network")],
+        ["asset", flags.get("asset")],
+      ] as const
+    ).filter(([, v]) => v !== undefined),
+  );
+  const pin = flags.get("pin");
+  const pinnedKeys = noPin ? undefined : pin ? pin.split(",").map((t) => t.trim()).filter(Boolean) : issuer === "did:web:x402check.xyz" ? X402CHECK_KEY_THUMBPRINTS : undefined;
+  const options: VerifyOptions = {
+    issuer,
+    ...(flags.has("request") ? { request: readRequest(flags.get("request") as string) } : {}),
+    ...(maxAge !== undefined ? { maxAgeSeconds: Number(maxAge) } : {}),
+    ...(flags.has("aud") ? { aud: flags.get("aud") as string } : {}),
+    ...(flags.has("sub") ? { sub: flags.get("sub") as string } : {}),
+    ...(flags.has("interaction") ? { interaction: flags.get("interaction") as string } : {}),
+    ...(Object.keys(payment).length ? { payment } : {}),
+    ...(pinnedKeys ? { pinnedKeys } : {}),
+  };
+  const v = await verifyAttestation(jws, options);
+  const c = v.claims;
+  const bound = [
+    ...(options.request ? ["request"] : []),
+    ...(options.maxAgeSeconds !== undefined ? [`max-age ${options.maxAgeSeconds}s`] : []),
+    ...(options.payment ? ["payment"] : []),
+    ...(pinnedKeys ? ["pinned key"] : []),
+  ];
   console.log(
     JSON.stringify(
       {
-        valid,
-        failures,
-        signature_valid: signatureValid,
+        valid: v.valid,
+        failures: v.failures,
         issuer,
-        kid: header.kid,
-        sub: payload.sub,
-        score: payload.score,
-        tier: payload.tier,
-        categories: payload.categories,
-        checks: payload.checks,
-        asserted: payload.asserted,
-        aud: payload.aud,
-        payment: payload.payment,
-        jti: payload.jti,
-        input_hash: payload.input_hash,
-        expires: typeof payload.exp === "number" ? new Date(payload.exp * 1000).toISOString() : undefined,
-        note: payload.asserted ? "asserted fields were self-reported by the caller and NOT verified by the provider" : undefined,
+        bound_to: bound,
+        kid: v.header?.kid,
+        sub: c?.sub,
+        score: c?.score,
+        tier: c?.tier,
+        categories: c?.categories,
+        checks: c?.checks,
+        asserted: c?.asserted,
+        aud: c?.aud,
+        payment: c?.payment,
+        interaction: c?.interaction,
+        jti: c?.jti,
+        input_hash: c?.input_hash,
+        request_hash: c?.request_hash,
+        issued: typeof c?.iat === "number" ? new Date(c.iat * 1000).toISOString() : undefined,
+        expires: typeof c?.exp === "number" ? new Date(c.exp * 1000).toISOString() : undefined,
+        note: [
+          ...(c?.asserted ? ["asserted fields were self-reported by the caller and NOT verified by the provider"] : []),
+          ...(!options.request ? ["not bound to a request: pass --request with the exact body to reject a verdict issued for anything else"] : []),
+          ...(options.maxAgeSeconds === undefined ? ["no --max-age: a verdict stays valid for its full hour"] : []),
+        ],
       },
       null,
       2,
     ),
   );
-  if (!valid) process.exit(2);
+  if (!v.valid) process.exit(2);
 }
 
 main().catch((err) => {

@@ -2,7 +2,7 @@ import { createHash, createPublicKey } from "node:crypto";
 import { generateKeyPair, signJws, verifyJws, type KeyPair } from "../src/jws.js";
 import { Provider, PROVIDER_VERSION, type PricingInfo } from "../src/provider.js";
 import { GatewayJevClient } from "../src/backends/gateway.js";
-import { JevClient } from "../src/jev.js";
+import { JevClient, type JevLike } from "../src/jev.js";
 import type { HandlerDeps } from "../src/handler.js";
 import { validateBatch, validateRequest } from "../src/validate.js";
 import { createOnchainLookup } from "../src/onchain.js";
@@ -392,13 +392,14 @@ export function ensureDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   return depsCache;
 }
 
+/** The model backend the environment configures (TypeSafe direct, the AI Gateway, or none). */
+export function jevFor(env: WorkerEnv): JevLike | null {
+  return env.TYPESAFE_API_KEY ? new JevClient({ apiKey: env.TYPESAFE_API_KEY }) : env.AI_GATEWAY_API_KEY ? new GatewayJevClient() : null;
+}
+
 function buildDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): { deps: HandlerDeps; keyStatus: AttestationKeyStatus } {
   const host = env.PROVIDER_HOST ?? "x402check.xyz";
-  const jev = env.TYPESAFE_API_KEY
-    ? new JevClient({ apiKey: env.TYPESAFE_API_KEY })
-    : env.AI_GATEWAY_API_KEY
-      ? new GatewayJevClient()
-      : null;
+  const jev = jevFor(env);
   let rpc: Record<string, string> = {};
   try {
     rpc = env.RPC_URLS ? (JSON.parse(env.RPC_URLS) as Record<string, string>) : {};

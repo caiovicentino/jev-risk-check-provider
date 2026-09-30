@@ -274,7 +274,7 @@ async function kitWatchEvidence(
   return { as_of: asOf, status: strong.length ? "hit" : failed ? "unavailable" : "clear", ...(hits.length ? { hits: hits.slice(0, 10) } : {}) };
 }
 
-type Verdict = { score: number; tier: RiskTier; categories: string[]; model: string };
+type Verdict = { score: number; tier: RiskTier; categories: string[]; model: string; model_id?: string | undefined };
 
 export class Provider {
   constructor(private readonly config: ProviderConfig) {}
@@ -365,6 +365,7 @@ export class Provider {
     const questions = buildQuestions();
     let answers: JevAnswers;
     let usage: Usage;
+    let modelId: string | undefined;
     let onchain: OnchainEvidence;
     let simulation: SimulationEvidence | undefined;
     let subjectVerified: boolean | undefined;
@@ -373,11 +374,13 @@ export class Provider {
       const [call, facts, sim, intel] = await Promise.all([jev.systemOne(buildState(req, checks, feedResults), questions), onchainP, simulationP, subjectIntelP]);
       answers = call.answers;
       usage = call.usage;
+      modelId = call.modelId;
       onchain = facts;
       simulation = sim;
       subjectVerified = intel.verified;
       subjectVerificationFailed = intel.unavailable === true;
     } catch (err) {
+      console.error(`model call failed: ${String(err).slice(0, 160)}`);
       return fail(String(err));
     }
     // Approvals granted inside the simulated transaction to contracts: check their
@@ -482,6 +485,7 @@ export class Provider {
         kitWatch: [...new Set((kitWatch?.hits ?? []).filter((h) => !KIT_WATCH_INFORMATIONAL.has(h.kind)).map((h) => KIT_WATCH_CATEGORIES[h.kind]))],
       }),
       model: QUESTION_SET_VERSION,
+      ...(modelId ? { model_id: modelId.slice(0, 120) } : {}),
     };
     return this.attest(req, checks, onchain, feedResults, verdict, Object.keys(questions), answers, usage, started, simulation, kitWatch);
   }
@@ -537,7 +541,7 @@ export class Provider {
           signals: checks.domain.signals,
         }
       : undefined;
-    const evidence: Evidence = { sanctions, ...(domain ? { domain } : {}), onchain, ...(feeds.length ? { feeds } : {}), ...(simulation ? { simulation } : {}), ...(kitWatch ? { kit_watch: kitWatch } : {}), model: verdict.model };
+    const evidence: Evidence = { sanctions, ...(domain ? { domain } : {}), onchain, ...(feeds.length ? { feeds } : {}), ...(simulation ? { simulation } : {}), ...(kitWatch ? { kit_watch: kitWatch } : {}), model: verdict.model, ...(verdict.model_id ? { model_id: verdict.model_id } : {}) };
     const signedChecks: AttestationChecks = {
       sanctions: { list: sanctions.list, as_of: sanctions.as_of, status: sanctions.status },
       ...(domain ? { domain: { host: domain.host, impersonation: domain.impersonation } } : {}),
@@ -547,6 +551,7 @@ export class Provider {
         ? { simulation: { status: simulation.status, ...(simulation.network ? { network: simulation.network } : {}), ...(simulation.findings?.length ? { findings: simulation.findings } : {}) } }
         : {}),
       model: verdict.model,
+      ...(verdict.model_id ? { model_id: verdict.model_id } : {}),
     };
     // Caller-supplied screening/authorization are self-reported: surface them so a
     // relying party can tell them apart from what the provider verified (`checks`).

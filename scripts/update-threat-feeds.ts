@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { buildHashBlob, feedHost } from "../src/threat-intel.js";
+import { buildHashBlob, normalizeFeedDomain } from "../src/threat-intel.js";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { fetchCodes } from "./code-fetch.js";
 import { creationOf, pool } from "./kit-catalog.js";
@@ -156,17 +156,7 @@ async function headCommit(repo: string): Promise<{ sha: string; date: string }> 
   return { sha: c.sha, date: c.commit.committer.date.slice(0, 10) };
 }
 
-/** Normalizes a feed entry to a host (punycode, lowercase, no www.); null for paths/invalid. */
-export function normalizeFeedDomain(entry: string): string | null {
-  const e = entry.trim();
-  if (!e || e.includes("/") || /\s/.test(e)) return null;
-  try {
-    const host = new URL(`https://${e}`).hostname;
-    return host && host.includes(".") ? feedHost(host) : null;
-  } catch {
-    return null;
-  }
-}
+export { normalizeFeedDomain };
 
 async function metamask(): Promise<void> {
   const [{ body, sha256 }, commit] = await Promise.all([
@@ -261,6 +251,8 @@ async function scamsniffer(upload: boolean): Promise<void> {
     license: "GPL-3.0 (runtime use only; not distributed)",
     commit: commit.sha,
     as_of: commit.date,
+    code_as_of: commit.date,
+    refreshed_at: new Date().toISOString(),
     domains: dBlob.byteLength / 8,
     addresses: aBlob.byteLength / 8,
     code_fingerprints: cBlob.byteLength / 8,

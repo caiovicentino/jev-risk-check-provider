@@ -58,6 +58,8 @@ export type AttestationChecks = {
   feeds?: string[] | undefined;
   simulation?: { status: string; network?: string | undefined; findings?: string[] | undefined } | undefined;
   model: string;
+  /** The model revision that answered (the vendor's alias can change underneath). */
+  model_id?: string | undefined;
 };
 
 export type JwsClaims = {

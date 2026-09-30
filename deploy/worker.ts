@@ -1,4 +1,6 @@
-import { handleProtected, ensureDeps, ensureStack, facilitatorStatus, isProductionHost, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
+import { handleProtected, ensureDeps, ensureStack, facilitatorStatus, isProductionHost, jevFor, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
+import { maybeRunModelCanary, MODEL_CANARY_KEY } from "./model-canary.js";
+import { maybeRefreshScamSniffer } from "./scamsniffer-refresh.js";
 import { createHandler } from "../src/handler.js";
 import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
 import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
@@ -43,8 +45,22 @@ async function status(env: WorkerEnv): Promise<Response> {
   try {
     const raw = env.RATE ? await env.RATE.get("feed:scamsniffer:meta:v1") : null;
     if (raw) {
-      const m = JSON.parse(raw) as { as_of: string; domains?: number; addresses?: number; code_fingerprints?: number; commit?: string };
-      scamsniffer = { as_of: m.as_of, age_days: ageDays(m.as_of), domains: m.domains, addresses: m.addresses, code_fingerprints: m.code_fingerprints, commit: m.commit, origin: "kv", note: "public data is published with a 7-day delay" };
+      const m = JSON.parse(raw) as { as_of: string; code_as_of?: string; refreshed_at?: string; domains?: number; addresses?: number; code_fingerprints?: number; commit?: string };
+      // Stale when our last refresh (not the list's own date) is more than 3 days old.
+      const refreshedDays = ageDays(m.refreshed_at ?? m.as_of);
+      scamsniffer = {
+        as_of: m.as_of,
+        age_days: ageDays(m.as_of),
+        refreshed_at: m.refreshed_at ?? null,
+        stale: typeof refreshedDays === "number" ? refreshedDays > 3 : true,
+        domains: m.domains,
+        addresses: m.addresses,
+        code_fingerprints: m.code_fingerprints,
+        ...(m.code_as_of ? { code_as_of: m.code_as_of } : {}),
+        commit: m.commit,
+        origin: "kv",
+        note: "public data is published with a 7-day delay",
+      };
     }
   } catch {
     scamsniffer = { status: "unavailable" };
@@ -105,8 +121,23 @@ async function status(env: WorkerEnv): Promise<Response> {
     facilitators: facilitators ?? { status: "unavailable" },
     credits: env.CREDITS ? { status: "on", ...CREDIT_PRICING } : { status: "off" },
     attestation: attestationStatus(env),
+    model: await modelStatus(env),
     ...(env.ENABLE_TESTNETS === "true" ? { testnets: isProductionHost(env) ? "requested but ignored on a production host" : "on" } : {}),
   }, { "Cache-Control": "public, max-age=60" });
+}
+
+/** The last model canary: whether fixed cases still land where they must, and which revision answered. */
+async function modelStatus(env: WorkerEnv): Promise<Record<string, unknown>> {
+  if (!env.AI_GATEWAY_API_KEY && !env.TYPESAFE_API_KEY) return { status: "not_configured" };
+  try {
+    const raw = env.RATE ? await env.RATE.get(MODEL_CANARY_KEY) : null;
+    if (!raw) return { alias: env.TYPESAFE_API_KEY ? "jev-latest" : "typesafe-ai/jev", canary: null };
+    const report = JSON.parse(raw) as { at: string; ok: boolean; model_id: string | null; cases: unknown[] };
+    const ageH = Math.round((Date.now() - Date.parse(report.at)) / 36e5);
+    return { alias: env.TYPESAFE_API_KEY ? "jev-latest" : "typesafe-ai/jev", model_id: report.model_id, canary: { at: report.at, age_hours: ageH, ok: report.ok, stale: ageH > 36, cases: report.cases } };
+  } catch {
+    return { status: "unavailable" };
+  }
 }
 
 /** The attestation key's health, public data only: its kid, its RFC 7638 thumbprint, and the self-check. */
@@ -215,7 +246,19 @@ export default {
   },
 
   // Kit watch cron (wrangler.toml [triggers]): scans new Ethereum and Base blocks.
-  async scheduled(_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+  async scheduled(controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+    // Twice a day: the ScamSniffer domain and address sets, rebuilt into KV (GPL: runtime only).
+    ctx.waitUntil(
+      maybeRefreshScamSniffer(env, controller.scheduledTime).catch((err: unknown) => {
+        console.error(`scamsniffer refresh failed: ${String(err).slice(0, 200)}`);
+      }),
+    );
+    // Twice a day: fixed cases through the live model (drift in the revision behind the alias).
+    ctx.waitUntil(
+      maybeRunModelCanary(env, jevFor(env), controller.scheduledTime).catch((err: unknown) => {
+        console.error(`model canary run failed: ${String(err).slice(0, 200)}`);
+      }),
+    );
     ctx.waitUntil(
       runKitWatch(env).catch((err: unknown) => {
         console.error(`kit watch run failed: ${String(err).slice(0, 300)}`);

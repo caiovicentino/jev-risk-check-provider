@@ -175,7 +175,7 @@ export class JevClient {
     this.model = config.model ?? DEFAULT_MODEL;
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
-  async systemOne(state: object, questions: JevQuestions): Promise<{ answers: JevAnswers; usage: Usage }> {
+  async systemOne(state: object, questions: JevQuestions): Promise<{ answers: JevAnswers; usage: Usage; modelId?: string | undefined }> {
     let lastError: JevUnavailableError | null = null;
     // One budget for every attempt (retries included): a late verdict is worth nothing to the caller.
     const deadline = AbortSignal.timeout(8000);
@@ -202,6 +202,7 @@ export class JevClient {
         return {
           answers: body.answers,
           usage: { inputTokens: body.usage?.input_tokens ?? 0, outputTokens: body.usage?.output_tokens ?? 0 },
+          ...(typeof body.model === "string" && body.model ? { modelId: body.model } : {}),
         };
       }
       if (res.status === 429 || res.status === 529) {
@@ -218,7 +219,8 @@ export class JevClient {
 export type Usage = { inputTokens: number; outputTokens: number };
 
 export type JevLike = {
-  systemOne(state: object, questions: JevQuestions): Promise<{ answers: JevAnswers; usage: Usage }>;
+  /** `modelId`: the model revision that answered, as the backend reports it (signed as checks.model_id). */
+  systemOne(state: object, questions: JevQuestions): Promise<{ answers: JevAnswers; usage: Usage; modelId?: string | undefined }>;
 };
 
 function sleep(ms: number): Promise<void> {
