@@ -17,10 +17,12 @@ Environment:
                              holding a little USDC on Base. It pays the x402 resources that
                              x402check_pay clears, and per check when there are no credits.
   X402CHECK_MAX_PAYMENT_USD  per-payment cap, a check or a resource (default 0.05)
-  X402CHECK_BUDGET_USD       total payer spend for this server process (default 1.00)
+  X402CHECK_BUDGET_USD       spend cap for this server process (default 1.00): what the payer
+                             spends (checks and resources), and separately what checks spend
+                             from prepaid credits
   X402CHECK_BASE_URL         API origin (default https://x402check.xyz)
   X402CHECK_ISSUER           trusted attestation issuer (default did:web:x402check.xyz)
-  X402CHECK_TIMEOUT_MS       per API call (default 30000)
+  X402CHECK_TIMEOUT_MS       per API call, and per request to a resource (default 30000)
 
 Tools: x402check_check, x402check_pay, x402check_verify_attestation, x402check_methodology`;
 
@@ -38,9 +40,12 @@ async function main(): Promise<void> {
   const server = createX402CheckServer(config);
   // stderr only (stdout carries MCP messages); the public address, never the key.
   const payer = config.payerKey ? createPayer({ privateKey: config.payerKey, maxPaymentUsd: config.maxPaymentUsd, budgetUsd: config.budgetUsd }).address : undefined;
-  const limits = `max $${(config.maxPaymentUsd ?? DEFAULT_MAX_PAYMENT_USD).toFixed(3)} per payment, budget $${(config.budgetUsd ?? DEFAULT_BUDGET_USD).toFixed(2)}`;
+  const budget = `$${(config.budgetUsd ?? DEFAULT_BUDGET_USD).toFixed(2)}`;
+  const limits = `max $${(config.maxPaymentUsd ?? DEFAULT_MAX_PAYMENT_USD).toFixed(3)} per payment, budget ${budget}`;
   if (config.creditToken) {
-    process.stderr.write(`x402check-mcp: checks paid from prepaid credits (X402CHECK_CREDIT_TOKEN)${payer ? `; x402check_pay pays from ${payer} (${limits})` : "; x402check_pay needs X402CHECK_PAYER_KEY"}\n`);
+    process.stderr.write(
+      `x402check-mcp: checks paid from prepaid credits (X402CHECK_CREDIT_TOKEN), at most ${budget} of them by this process${payer ? `; x402check_pay pays from ${payer} (${limits})` : "; x402check_pay needs X402CHECK_PAYER_KEY"}\n`,
+    );
   } else if (payer) {
     process.stderr.write(`x402check-mcp: paying from ${payer}: checks, and the resources x402check_pay clears (${limits})\n`);
   } else {

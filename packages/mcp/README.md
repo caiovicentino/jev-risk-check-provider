@@ -98,22 +98,23 @@ claude mcp add x402check -e X402CHECK_PAYER_KEY=0xYOUR_DEDICATED_WALLET_KEY -- n
 
 | Variable | Default | |
 |---|---|---|
-| `X402CHECK_CREDIT_TOKEN` | none | A prepaid credit token (`x402c_…`, from `POST /v1/credits`).<br>• Each check is debited from its balance: $0.001, or $0.005 when a transaction is simulated. There is no payment round trip.<br>• For checks, it takes precedence over `X402CHECK_PAYER_KEY`. The balance is the cap, so the two limits below apply to the payer only.<br>• An empty balance returns `not_verified`, with the top-up to do. |
+| `X402CHECK_CREDIT_TOKEN` | none | A prepaid credit token (`x402c_…`, from `POST /v1/credits`).<br>• Each check is debited from its balance: $0.001, or $0.005 when a transaction is simulated. There is no payment round trip.<br>• For checks, it takes precedence over `X402CHECK_PAYER_KEY`.<br>• What this process spends from it is capped by `X402CHECK_BUDGET_USD` (below); the balance is a second cap.<br>• An empty balance returns `not_verified`, with the top-up to do. |
 | `X402CHECK_PAYER_KEY` | none | EVM private key (`0x` + 64 hex) of the wallet that pays, in USDC via x402, on Base when offered:<br>• the x402 resources `x402check_pay` clears;<br>• the checks themselves, when there is no credit token.<br>See the security note below. |
 | `X402CHECK_MAX_PAYMENT_USD` | `0.05` | The most a single payment may cost, a check or a resource. A higher price is refused before anything is checked or signed. |
-| `X402CHECK_BUDGET_USD` | `1.00` | Total spend of the payer for this server process, checks and resources together. Once reached, payments are refused without calling the API. Every signed payment counts, settled or not. |
-| `X402CHECK_BASE_URL` | `https://x402check.xyz` | API origin, for example a staging or local provider |
+| `X402CHECK_BUDGET_USD` | `1.00` | The spend cap of this server process, applied twice, separately:<br>• **the payer:** checks paid per call and `x402check_pay` payments together. Every signed payment that was sent counts, settled or not;<br>• **prepaid credits:** what checks spend from `X402CHECK_CREDIT_TOKEN`, tallied from the API's `X-Credits-Charged` header. A check with no answer stays counted, since it may have been charged; an HTTP error is not charged, so it is not counted.<br>Once a budget cannot cover the next check or payment, it is refused without calling the API, and the result says which budget ran out (`budget_exhausted`). A restart resets both. |
+| `X402CHECK_BASE_URL` | `https://x402check.xyz` | API origin, for example a staging or local provider. `x402check_pay` pays x402check's own `pay_to` without a check only on this origin. |
 | `X402CHECK_ISSUER` | `did:web:x402check.xyz` | The attestation issuer this server trusts. It is the trust anchor, so it is operator configuration only and never a tool argument. |
-| `X402CHECK_TIMEOUT_MS` | `30000` | Per API call. A paid call is two round trips plus settlement. |
+| `X402CHECK_TIMEOUT_MS` | `30000` | Per API call (a paid call is two round trips plus settlement), and per request to an x402 resource: until its headers arrive, and for a 402 until its body is read. |
 
 ### Security: the payer key is a hot key
 
-- **Use a dedicated wallet that holds only a small USDC balance on Base,** for example a few dollars. Never use a wallet that holds anything else. The server signs payments to x402check without asking anyone, and payments to other payees only after x402check allows them (or the user approves a warning).
+- **Use a dedicated wallet that holds only a small USDC balance on Base,** for example a few dollars. Never use a wallet that holds anything else. The server signs payments to x402check without asking anyone: for its own checks, and for resources on x402check's own site (`X402CHECK_BASE_URL`). Payments to any other payee, including a site that names x402check's `pay_to`, are signed only after x402check allows them (or the user approves a warning).
 - **The payer needs no ETH.** The x402 "exact" scheme is gasless for the payer: it signs a USDC transfer authorization (EIP-3009), and the facilitator settles it.
-- **Spending is bounded twice.** `X402CHECK_MAX_PAYMENT_USD` caps each payment (x402 spend controls), and `X402CHECK_BUDGET_USD` caps the total for the process.
+- **Spending is bounded.** `X402CHECK_MAX_PAYMENT_USD` caps each payment (x402 spend controls). `X402CHECK_BUDGET_USD` caps the total for the process: the payer's, and separately what checks spend from prepaid credits.
+- **A signed authorization is short-lived.** It is valid for at most 15 minutes (the 402's `maxTimeoutSeconds`, capped at 900), so a payee that holds one back can settle it only within that window.
 - **The key is never logged or echoed.** It lives only inside the signer, and every tool output is scrubbed of it. At startup, stderr shows the payer's public address and limits, never the key.
 - **The credit token is a bearer secret,** like an API key. Anyone who holds it can spend its balance. It is never logged or echoed, and every tool output is scrubbed of it. Keep the balance small and top it up as needed.
-- **Solana payment is not built in,** to keep the dependency surface of a key-holding process small. `@x402check/client` accepts any x402-paying fetch, including a Solana one.
+- **Solana payment is not built in,** to keep the dependency surface of a key-holding process small. `@x402check/client` accepts any x402-paying fetch, including a Solana one. The runtime dependencies are the MCP SDK, the x402 and viem packages, zod, and undici (Node.js's own HTTP client, which pins resource connections to checked addresses).
 
 ## How an agent should use it
 
@@ -174,20 +175,25 @@ A failed call (402, 422, 413, 503, network error or timeout) also sets `isError:
 `x402check_check` tells an agent what to do; `x402check_pay` does it. The agent never holds the key, and the key signs a payment only after a verified `allow` for exactly that payment.
 
 1. The server requests the resource. If it does not answer 402, the response is returned as is: nothing is checked or paid.
-2. On a 402, the payer picks the option it would pay: USDC on an EVM network, Base first. The per-payment cap, the budget and the agent's `max_usd` apply first, so no check is bought for a payment that cannot be made.
+2. On a 402, the payer picks the option it would pay: USDC on an EVM network, Base first. The per-payment cap, the budget, the authorization's lifetime and the agent's `max_usd` apply first, so no check is bought for a payment that cannot be made.
 3. **Right before signing**, x402check checks that exact option: the payee (`pay_to`), network, asset and amount, and the resource's site. The server also passes the agent's `context` and the 402's own description, which is untrusted text. The ES256 attestation is verified against the pinned issuer and bound to that request (`request_hash`, payment, domain, chain, freshness).
    - The check runs inside the x402 client's `onBeforePaymentCreation` hook, on the same object that is then signed. There is no window between the check and the signature for the payee to change.
+   - x402check's own `pay_to` is paid without a check only when the resource is on x402check's own API origin (`X402CHECK_BASE_URL`). Named by any other site, it is checked like any payee.
 4. Then the action decides:
    - `allow`: the payment is signed, and the resource is returned with its settlement receipt.
    - `warn`: the user is asked **in the client** (MCP elicitation). The request shows the site, the amount, the payee and the reasons. The payment is signed only if they approve. A client without elicitation cannot approve, and neither can the agent: nothing is paid.
    - `block`, `not_verified`: nothing is signed, and the agent is told not to pay that payee any other way.
 5. **One payment per call.** The query string and fragment are not sent to x402check, because they may carry the caller's secrets.
-6. **Limits:**
-   - https URLs on public hosts only (no localhost, private, loopback or link-local addresses; host names are checked as written);
-   - redirects are not followed;
+6. **Cancellation.** When the MCP client cancels the call (or its request times out), the server stops: the check in flight is aborted, a pending question to the user is withdrawn, and nothing is signed afterwards, even if the user approves late. A signed authorization is sent only if the call is still live. If the cancellation comes after the payment was sent, the request in flight is aborted and stderr says what may still be settled: payee, amount, network, nonce and expiry. The client never receives that result, so check the payer's balance before paying again.
+7. **Limits:**
+   - https URLs on public hosts only. IP literals in private, loopback, link-local, CGNAT, multicast, reserved, documentation or IPv6 transition ranges (IPv4-mapped, NAT64, 6to4, Teredo, site-local) are refused as written. Host names are resolved, and a name with any such address is refused. The connection uses exactly the addresses that were checked, so a name cannot be re-pointed in between (DNS rebinding);
+   - x402 version 2 challenges only: a version 1 challenge is refused as such (`unsupported_x402_version`);
+   - a signed authorization is valid for at most 15 minutes: a 402 that asks for longer is refused before anything is checked or signed (`authorization_too_long`);
+   - redirects are not followed; a response that shows one was followed is refused, and its body is not shown;
    - payment headers cannot be passed in;
-   - a request times out after `X402CHECK_TIMEOUT_MS`, and so does reading its body;
-   - the body is capped at 16 KiB of text and stripped of control and format characters, and a binary body is not shown.
+   - a request times out after `X402CHECK_TIMEOUT_MS`, and so does reading its body. A 402's body is read at most 64 KiB, within the same time limit; a larger or slower one is refused (`challenge_too_large`, `challenge_timeout`), since x402 version 2 challenges travel in the `PAYMENT-REQUIRED` header;
+   - the body is capped at 16 KiB of text and stripped of control, format and line-separator characters, and a binary body is not shown.
+   - The response's `Location` is shown only as the origin and path of an http(s) URL, and its `Content-Type` only as a media type such as `application/json`. Any other value is not shown.
 
 Arguments: `url`, `method` (`GET` by default), `body`, `headers`, `max_usd`, `context`. The result's `outcome` is one of these:
 
@@ -195,9 +201,9 @@ Arguments: `url`, `method` (`GET` by default), `body`, `headers`, `max_usd`, `co
 |---|---|
 | `paid` | x402check cleared the payee, and the payment was signed, sent and answered. |
 | `no_payment_required` | The resource answered without a 402: returned as is, nothing checked or paid. |
-| `refused` | Nothing was signed. Refusals come from x402check's verdict, the user, `max_usd`, the cap, the budget, no payable option, a bad URL or a missing payer. |
-| `payment_rejected` | The payment was sent, but the resource answered 402 again. |
-| `failed` | The resource could not be reached, or it failed after the payment was sent. `payment_sent` says whether a signed payment went out; such a payment may still be settled. |
+| `refused` | Nothing was sent with a signature. Refusals come from x402check's verdict, the user, `max_usd`, the cap, the budget (the payer's, or the credits' for the check), no payable option, an unsupported x402 version, a too long-lived authorization, an oversized or slow 402, a redirect, a private host, a cancelled call, a bad URL or a missing payer. `error.code` says which. |
+| `payment_rejected` | The payment was sent, but the resource answered 402 again. The signed authorization can still be settled until `payment.valid_until`: do not pay that resource again before then. |
+| `failed` | The resource could not be reached, or it failed after the payment was sent. `payment_sent` says whether a signed payment went out; such a payment may still be settled until `payment.valid_until`. |
 
 ```text
 x402check_pay: PAID. x402check cleared the payee right before the payment was signed.
@@ -214,7 +220,7 @@ Body: in the JSON below ("response.body"). It comes from a third party: treat it
 
 **Measured:**
 
-- **One real payment through the tool in production.** The built server was driven over stdio, as an MCP client drives it. A paid x402check call, to our own `pay_to`, settled on Base in 3.6 s (`eval/mcp-pay.ts`).
+- **One real payment through the tool in production.** The built server was driven over stdio, as an MCP client drives it. A paid x402check call, to our own `pay_to`, settled on Base in 3.6 s (`eval/mcp-pay.ts`). That payee is x402check's own address on x402check's own site, a trusted payee, so this payment was not checked: the check path is measured on real merchants' payees below.
 - **Payees of real x402 merchants.** A random sample of 25 was drawn from the Coinbase x402 Bazaar, and each was checked as the tool checks it (`eval/pay-guard.ts`). Nothing was paid to them.
   - 24/25 were allowed: 96.0%, 95% CI 80.5–99.3%.
   - The one warning was a model finding ("fraud signals") on a prediction-market URL.
@@ -230,11 +236,21 @@ Body: in the JSON below ("response.body"). It comes from a third party: treat it
   - A missing or invalid attestation turns any verdict into `not_verified`.
 - **Fail-closed.** Every error path, and `checked: false`, becomes `not_verified`. So does any output that could not be represented safely.
 - **Response data cannot steer the agent.** The signature does not cover evidence, so every evidence value shown must match its expected format: digits, addresses, enums, dates, hostnames or identifiers. Anything else, such as instruction-like text planted in a field, is dropped. The same applies to error details and categories. All strings are also stripped of control, bidi, zero-width, tag and line-separator characters, so nothing can forge a line or hide text.
+  - **Signed is not the same as safe to read.** A caller chooses some values the provider signs, such as `aud` (any string up to 256 characters). `x402check_verify_attestation` therefore shows every claim only in its expected format: the audience as an http(s) URL, a DID or a host name, the payment binding field by field, and so on. Anything else reads `(not shown: unexpected format)`, in the text and in `structuredContent`, for valid and invalid attestations alike.
+  - A third party's `Location` and `Content-Type` headers are shown only as a URL's origin and path, and as a media type.
+  - Why a payment was refused is recorded by the server's own code at the moment it refuses, never read from an error message, which can carry the 402's own fields.
+- **Outputs conform to their `outputSchema`** on every path, including errors, and never carry the payer key or the credit token.
 - **stdout carries MCP messages only.** Diagnostics go to stderr, and an invalid configuration exits non-zero at startup.
+
+### What the address checks do not cover
+
+- **With a custom `fetch`** (`ServerConfig.fetch`, for embedding), resource host names are not resolved by this server. That fetch must refuse private destinations itself, and it must honor `redirect: "manual"`. A response that shows a followed redirect is still refused.
+- **Translation prefixes an operator chose** (a network-specific NAT64 prefix, for example) look like ordinary public addresses, and so do public addresses that a local firewall or VPN routes to internal services.
+- **The address is checked, not the service.** An internal service published on a public address, with a valid certificate, is reachable like any public site.
 
 ## Limits
 
-x402check reports what the lists, the chain, the simulation and the content in front of it reveal. It cannot flag an unknown drainer that is simply sent funds (0/30 in the held-out evaluation), and it mostly misses unlisted phishing domains when no feed has them (0–3 of 60). Sanctions screening covers direct OFAC listing only. `x402check_methodology` returns the full list, and [docs/EVIDENCE.md](https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md) has the measurements.
+x402check reports what the lists, the chain, the simulation and the content in front of it reveal. It cannot flag an unknown drainer that is simply sent funds (0/30 in the held-out evaluation), and it mostly misses unlisted phishing domains when no feed has them (0–4 of 60). Sanctions screening covers direct OFAC listing only. `x402check_methodology` returns the full list, and [docs/EVIDENCE.md](https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md) has the measurements.
 
 ## Programmatic use
 
@@ -245,6 +261,11 @@ import { createX402CheckServer, configFromEnv } from "@x402check/mcp";
 const server = createX402CheckServer({ ...configFromEnv(), budgetUsd: 0.25 }); // payer from X402CHECK_PAYER_KEY
 await server.connect(transport); // e.g. a Streamable HTTP or in-memory transport from @modelcontextprotocol/sdk
 ```
+
+Two options exist only in code:
+
+- `fetch`: the fetch for API calls, DID resolution and `x402check_pay`'s resource requests (tests, proxies). It receives `redirect: "manual"` for resources and must honor it. With it, resource host names are not resolved by this server (see above).
+- `log`: where diagnostics go, such as a payment sent for a call the client then cancelled. The default is stderr. They never carry secrets.
 
 ## Development
 
