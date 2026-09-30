@@ -2,6 +2,12 @@
 # under io.github.caiovicentino/x402check, authenticated with GitHub OIDC (no stored token).
 # The npm package @x402check/mcp must already be published at server.json's version: the
 # registry checks its package.json `mcpName`. Run it by hand, or push a tag mcp-vX.Y.Z.
+#
+# The publisher binary runs in a job that can mint OIDC tokens for this repository, so it
+# is pinned to one release and its archive must match a SHA-256 committed here before it
+# runs. To upgrade: take mcp-publisher_linux_amd64.tar.gz's line from the new release's
+# registry_<version>_checksums.txt (its .sigstore.json is signed by the
+# modelcontextprotocol/registry release workflow) and update both values below together.
 name: Publish MCP server to the MCP Registry
 
 on:
@@ -21,6 +27,9 @@ jobs:
     defaults:
       run:
         working-directory: packages/mcp
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+      MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -29,9 +38,15 @@ jobs:
         run: |
           VERSION=$(node -p 'require("./server.json").packages[0].version')
           test "$(npm view "@x402check/mcp@$VERSION" mcpName)" = "io.github.caiovicentino/x402check"
-      - name: Install mcp-publisher
-        run: curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+      - name: Install mcp-publisher (pinned release, SHA-256 checked before it runs)
+        run: |
+          archive="$RUNNER_TEMP/mcp-publisher_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$archive" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" mcp-publisher
+          "$RUNNER_TEMP/mcp-publisher" --version
       - name: Authenticate (GitHub OIDC)
-        run: ./mcp-publisher login github-oidc
+        run: '"$RUNNER_TEMP/mcp-publisher" login github-oidc'
       - name: Publish
-        run: ./mcp-publisher publish
+        run: '"$RUNNER_TEMP/mcp-publisher" publish'
