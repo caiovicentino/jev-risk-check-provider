@@ -28,6 +28,40 @@ jobs:
       - run: npm test
       - name: production dependency audit
         run: npm audit --omit=dev --audit-level=high
+  worker-bundle:
+    # Builds the production Worker bundle the way a deploy does, without uploading it:
+    # `wrangler deploy --dry-run` needs no Cloudflare credentials. A bundling error (a
+    # missing module, a node: import without nodejs_compat, a bad wrangler.toml) fails here
+    # instead of at deploy time.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # Used only while wrangler is not a devDependency of the root package.json: the version
+      # production is deployed with. Once package.json pins wrangler, that copy is used.
+      WRANGLER_VERSION: 4.143.0
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Bundle the Worker (wrangler deploy --dry-run, nothing is uploaded)
+        working-directory: deploy
+        run: |
+          if [ -x ../node_modules/.bin/wrangler ]; then
+            wrangler=(../node_modules/.bin/wrangler)
+          else
+            wrangler=(npx --yes "wrangler@${WRANGLER_VERSION}")
+          fi
+          "${wrangler[@]}" --version
+          "${wrangler[@]}" deploy --dry-run --outdir "${RUNNER_TEMP}/worker-bundle"
+          ls -l "${RUNNER_TEMP}/worker-bundle"
   snap:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -47,7 +81,17 @@ jobs:
           cache-dependency-path: snap/package-lock.json
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: Build the bundle and test it
+        run: npm test
+      - name: The committed snap.manifest.json matches the rebuilt bundle
+        # `npm test` rebuilds dist/bundle.js and rewrites the manifest's shasum. mm-snap only
+        # warns about a stale shasum and fixes it, so compare with the committed manifest.
+        # The build is deterministic: Linux CI reproduces the shasum committed from macOS.
+        run: |
+          if ! git diff --exit-code -- .; then
+            echo "::error file=snap/snap.manifest.json::The rebuilt Snap does not match the committed snap/snap.manifest.json (shasum). Run 'npm --prefix snap run build' and commit snap/snap.manifest.json."
+            exit 1
+          fi
   packages:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -74,3 +118,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: production dependency audit (what npm users install)
+        run: npm audit --omit=dev --audit-level=high
