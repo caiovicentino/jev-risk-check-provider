@@ -19,6 +19,8 @@
 - `protected.ts` — the paid flow: validate → price (per item and network) → verify payment → evaluate → settle → release; facilitator routing by compatibility and cost, and `/status` payment routes
 - `pricing.ts` — prices by payment network, the simulation price, micro-dollar arithmetic
 - `credits.ts` — prepaid credits: the `CreditLedger` Durable Object (one per token), purchase, balance and spending
+- `cdp.ts` — the Coinbase CDP facilitator: a JWT per call, signed with WebCrypto from the Worker secrets
+- `discovery.ts` — x402 Bazaar discovery metadata for the paid routes: service name, tags, icon, input schema, a callable example and an example result
 - `feeds.ts` — ScamSniffer blobs (domains, addresses, drainer-code fingerprints) read from KV at runtime (GPL-3.0 data: never bundled or committed)
 - `runtime.ts` — minimal Workers types, so `deploy/` type-checks with the rest of the repo (`npm run typecheck`)
 

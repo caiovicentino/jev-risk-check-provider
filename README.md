@@ -319,6 +319,8 @@ claude mcp add x402check -e X402CHECK_PAYER_KEY=0x… -e X402CHECK_BUDGET_USD=1 
 
 Both packages are ready to publish, but not yet published.
 
+**Discovery:** agents can find x402check in the **x402 Bazaar**, the catalog Coinbase CDP builds from the payments it settles. The Bazaar lists [`/v1/risk-check`](https://x402check.xyz/v1/risk-check) and its batch endpoint, with the input schema, a callable example and the price on each network (`GET https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources`). Opening an endpoint in a browser returns the same example and the prices.
+
 ## MetaMask Snap (preview)
 
 `snap/` has `onTransaction` / `onSignature` insights that decode the request locally and show the real counterparty, the amounts (including UNLIMITED approvals) and local danger findings.

@@ -2,6 +2,20 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.5.3 — 2026-09-30
+
+- **Listed in the x402 Bazaar**, the service catalog Coinbase CDP builds from the payments it settles.
+  - **What the routes declare:** the paid routes carry the Bazaar discovery declaration (`deploy/discovery.ts`, the `bazaar` extension of x402 v2): the service name, 5 tags, an icon, the JSON Schema of the body, a callable example and an example result. It goes out in the 402 challenge, every x402 client echoes it with its payment, and CDP catalogs the endpoint when it settles one.
+  - **What CDP lists:** `https://x402check.xyz/v1/risk-check` since 14:33 UTC, after one payment settled through CDP, with its price on each of the 7 networks.
+  - **Validation:** the declarations pass the official `@x402/extensions` 2.28 validators, and their `info` is identical to what `declareDiscoveryExtension` builds. The package is not bundled: the Worker gains no dependency.
+  - **`eval/bazaar.ts`** pays a check and a one-item batch through CDP, proves each payment carried the extension, and scans the ~19k-resource catalog for both endpoints.
+- **`/icon.png`:** the service icon catalogs show.
+- **A GET on a paid endpoint explains how to call it.** It still returns 405 (`Allow: POST`), now with a valid example request, the prices and links, instead of a bare error. Browsers reached these URLs from the README and the site.
+- **Ready to publish to npm and to the official MCP Registry:**
+  - `@x402check/mcp` gains `mcpName` (`io.github.caiovicentino/x402check`) and a `server.json` validated by `mcp-publisher`;
+  - a GitHub Actions workflow publishes it to the registry through GitHub OIDC;
+  - `scripts/publish-npm.sh` publishes both packages. It asks for the owner's 2FA code and swaps the MCP server's `file:` dependency for the published client only while publishing.
+
 ## v0.5.2 — 2026-09-30
 
 - **Coinbase CDP is active in production.**

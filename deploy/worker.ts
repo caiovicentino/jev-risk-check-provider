@@ -1,4 +1,4 @@
-import { handleProtected, ensureStack, facilitatorStatus, json, paymentRouting, PROTECTED } from "./protected.js";
+import { handleProtected, ensureStack, facilitatorStatus, json, paymentRouting, PROTECTED, usageFor } from "./protected.js";
 import { createHandler } from "../src/handler.js";
 import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
 import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
@@ -119,7 +119,7 @@ export default {
         // A cold isolate briefly waits for the first verified feed refresh (newer OFAC/MetaMask).
         if (request.method === "POST") await awaitColdStart();
         res = request.method !== "POST"
-          ? json(405, { error: "method_not_allowed" })
+          ? json(405, usageFor(path), { Allow: "POST" })
           : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
       } else {
         res = await createHandler(stack.deps)(request);

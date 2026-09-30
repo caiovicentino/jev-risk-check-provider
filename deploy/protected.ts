@@ -13,9 +13,10 @@ import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice
 import { allChecked, fetchAdapter, json } from "./http-util.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
 import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
+import { BATCH_DISCOVERY, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "./discovery.js";
 import type { ThreatIntelFeeds } from "../src/threat-intel.js";
 import { HTTPFacilitatorClient, x402ResourceServer, type FacilitatorClient } from "@x402/core/server";
-import { x402HTTPResourceServer, type HTTPAdapter, type HTTPRequestContext, type HTTPProcessResult, type HTTPResponseInstructions, type PaymentOption } from "@x402/core/http";
+import { x402HTTPResourceServer, type HTTPAdapter, type HTTPRequestContext, type HTTPProcessResult, type HTTPResponseInstructions, type PaymentOption, type RoutesConfig } from "@x402/core/http";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
 import type { WorkerEnv } from "./runtime.js";
@@ -333,14 +334,48 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   if (env.ENABLE_TESTNETS === "true") {
     resourceServer.register(SOLANA_DEVNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL ?? "https://api.devnet.solana.com" }));
   }
-  // A credit pack costs its face value on every network: one settlement buys many checks.
+  return { deps, http: new x402HTTPResourceServer(resourceServer, paidRoutes(env)) };
+}
+
+/**
+ * The paid routes. Each carries the service metadata and, for the checks, the Bazaar
+ * discovery declaration (deploy/discovery.ts): catalogs that settle a payment list the
+ * endpoint with a callable example. A credit pack costs its face value on every network.
+ */
+export function paidRoutes(env: WorkerEnv): RoutesConfig {
+  const accepts = buildAccepts(env);
   const packAccepts = buildAccepts(env, () => (ctx) => formatUsd(packMicro(ctx.adapter.getBody?.()) ?? 0));
-  const paidRoutes = {
-    "POST /v1/risk-check": { accepts, description: "x402check risk check with signed attestation", mimeType: "application/json" },
-    "POST /v1/risk-check/batch": { accepts, description: "Batch risk check (up to 25 requests, billed per item)", mimeType: "application/json" },
-    ...(env.CREDITS ? { "POST /v1/credits": { accepts: packAccepts, description: "x402check prepaid credits: a USD balance for checks at $0.001 ($0.005 simulated)", mimeType: "application/json" } } : {}),
+  const service = { serviceName: SERVICE_METADATA.serviceName, tags: [...SERVICE_METADATA.tags], iconUrl: SERVICE_METADATA.iconUrl, mimeType: "application/json" };
+  return {
+    "POST /v1/risk-check": {
+      accepts,
+      ...service,
+      description: "Check a counterparty before paying: OFAC SDN, phishing and drainer feeds, a live watch of drainer infrastructure, transaction simulation and injected-instruction analysis. Returns a score and a signed ES256 attestation.",
+      extensions: RISK_CHECK_DISCOVERY,
+    },
+    "POST /v1/risk-check/batch": {
+      accepts,
+      ...service,
+      description: "Up to 25 counterparty risk checks in one call, billed per item, each with a signed ES256 attestation.",
+      extensions: BATCH_DISCOVERY,
+    },
+    ...(env.CREDITS
+      ? { "POST /v1/credits": { accepts: packAccepts, ...service, description: "Prepaid credits for x402check: one payment buys a balance ($0.10-$100); each check then costs $0.001 ($0.005 simulated) with no payment round trip." } }
+      : {}),
   };
-  return { deps, http: new x402HTTPResourceServer(resourceServer, paidRoutes) };
+}
+
+/** What a GET (a browser, a curious developer) receives from a POST-only paid endpoint: how to call it. */
+export function usageFor(path: string): Record<string, unknown> {
+  const plain = (usd: number) => formatUsd(Math.round(usd * MICRO)).slice(1);
+  return {
+    error: "method_not_allowed",
+    detail: `POST a JSON body to ${path}. Every check is paid with x402: from prepaid credits (Authorization: Bearer x402c_…) or per call (an unpaid POST returns 402 with the options).`,
+    example: path.endsWith("/batch") ? { requests: [REQUEST_EXAMPLE] } : REQUEST_EXAMPLE,
+    pricing: { credits_usd: CREDIT_PRICING.check_usd, per_call_from_usd: plain(networkPrice(BASE_MAINNET)), simulated_usd: plain(SIMULATION_PRICE), buy_credits: 'POST /v1/credits {"amount_usd": 1}' },
+    docs: "https://x402check.xyz/#integrate",
+    discovery: "https://x402check.xyz/.well-known/risk-check.json",
+  };
 }
 
 export async function ensureStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): Promise<Stack> {

@@ -11,8 +11,9 @@ export type PayFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 let cached: PayFetch | null = null;
 
-export async function buildPayFetch(): Promise<PayFetch> {
-  if (cached) return cached;
+/** An x402-paying fetch for the eval payer. `baseFetch` lets a probe observe what is sent (not cached). */
+export async function buildPayFetch(baseFetch?: typeof fetch): Promise<PayFetch> {
+  if (cached && !baseFetch) return cached;
   const client = new x402Client();
   client.setSpendControls({ maxAmountPerPayment: "$1" });
   const scheme = (process.env.PAY_NETWORK ?? "solana:*").split(":")[0];
@@ -24,8 +25,9 @@ export async function buildPayFetch(): Promise<PayFetch> {
     const signer = await createKeyPairSignerFromBytes(base58.decode(secret));
     client.register("solana:*", new ExactSvmScheme(signer));
   }
-  cached = wrapFetchWithPayment(fetch.bind(globalThis), client) as PayFetch;
-  return cached;
+  const paying = wrapFetchWithPayment(baseFetch ?? fetch.bind(globalThis), client) as PayFetch;
+  if (!baseFetch) cached = paying;
+  return paying;
 }
 
 export type SettlementReceipt = { success?: boolean | undefined; transaction?: string | undefined; network?: string | undefined; payer?: string | undefined };

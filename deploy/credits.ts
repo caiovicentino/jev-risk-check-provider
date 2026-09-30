@@ -135,7 +135,7 @@ export async function handleCredits(request: Request, env: WorkerEnv, stack: Sta
   if (!env.CREDITS) return json(503, { error: "credits_unavailable" });
   const token = creditToken(request);
   if (request.method === "GET") {
-    if (!token) return json(401, { error: "credit_token_required", detail: "Authorization: Bearer x402c_…" });
+    if (!token) return json(401, { error: "credit_token_required", detail: "Authorization: Bearer x402c_…", buy: 'POST /v1/credits {"amount_usd": 1} with any x402 client: the response carries a token, shown once', docs: "https://x402check.xyz/#pricing" });
     const { micro } = await ledgerCall(env, token, "balance");
     return json(200, { balance_usd: formatUsd(micro), pricing: CREDIT_PRICING }, { "Cache-Control": "no-store" });
   }
