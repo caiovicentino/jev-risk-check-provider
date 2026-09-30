@@ -127,11 +127,18 @@ await wallet.sendTransaction(tx); // throws X402CheckBlockedError before signing
 | `allow`, verified and bound | The key signs. |
 | `warn` | The key signs only if `onWarn` returns true. Without `onWarn`, the signature is refused. |
 | `block` | Refused: `X402CheckBlockedError`, with `verdict.reasons`. |
-| Anything else: no credits (402), network error, timeout, `checked: false`, a signature that does not verify, or an attestation bound to another request (`request_hash`) | Refused (`not_verified`). **A missing check never means yes.** |
-| Danger the decoder proves locally (e.g. a `delegatecall`) | Refused before any call. |
-| `sign({ hash })`, an opaque 32-byte value | Refused unless `allowRawHashSigning: true`. Some smart-account flows need it, and with it those signatures go unchecked. |
+| Anything else: no credits (402), network error, timeout, `checked: false`, a signature that does not verify, an attestation signed by a key that is not pinned (`key_not_pinned`), or one bound to another request (`request_hash`) | Refused (`not_verified`). **A missing check never means yes.** |
+| Danger the decoder proves locally: a `delegatecall`, a control change of the signer's own account (a new owner, module or implementation), an order that sells for nothing or pays someone else | Refused before any call (`local_danger`). |
+| Content the guard cannot read: a hash or calldata carrier it cannot decode (e.g. a Safe message), a 1inch order with an extension | Refused (`opaque_signature`). |
+| `sign({ hash })` or a message of opaque bytes | Refused (`raw_hash_signing`) unless `allowRawHashSigning: true`. Some smart-account flows need it, and with it those signatures go unchecked. |
+| A transaction whose effects cannot be simulated (calldata too large, a deployment that carries value), or a call to the signer's own account with calldata it cannot read | Refused (`not_simulated`, `unreadable_self_call`): not signed on an address check alone. |
+| An EIP-7702 authorization valid on every chain (chainId 0) | Refused (`every_chain_authorization`) unless `allowEveryChainAuthorization: true`; then the delegate is checked on each chain the kit watch covers. |
+| A request with no chain; a fee above `maxFeeWei`; a signing method the guard does not intercept | Refused (`no_chain`, `fee_cap`, `unguarded_method`). Methods listed in `passthrough` are passed through **unchecked**. |
 
-- **Payments to x402check's own `pay_to` are not checked** (`trustedPayees`), so paying for a check never recurses.
+- **Payments to x402check's own `pay_to` are not checked, up to $0.25** (`trustedPayees`, `trustedPayeeMaxAmount`), so paying for a check never recurses. A larger payment to it, such as a credit pack, is checked like any other.
+- **Requests with nothing to check** (no counterparty and nothing to simulate, e.g. a zero-value deployment) are signed as inert.
+- **Pinned key:** by default only x402check's own attestation key is accepted (`X402CHECK_KEY_THUMBPRINTS`). `pinnedKeys` lists others; `false` disables pinning (for tests against a local issuer).
+- **What it checks is a copy,** and the copy is what gets signed: an object changed after the check is not what the key signs.
 - **Pay for the checks from prepaid credits.** Do not use a per-call payer that signs with the guarded account.
 
 **x402 buyers that do not wrap the account** can use the client hook instead. It checks the payee before the payment is created, and aborts it otherwise:
@@ -180,9 +187,11 @@ await signTransactionMessageWithSigners(message); // throws X402CheckBlockedErro
   - transfers between the signer's own token accounts;
   - a transaction the signer does not have to sign;
   - a plain message with no site.
-- **Sign-In With Solana:** the message's domain is checked.
+- **Sign-In With Solana:** the requesting site (`origin`) is checked, and a message whose domain differs from it is refused.
+- **Fees:** a transaction whose fees for the signer exceed `maxSolanaFeeLamports` (default 0.01 SOL, priority fee included) is refused (`fee_cap`). A Stake-program authority handed to someone else is refused locally, and a stake withdrawal's recipient is checked.
+- **RPC trust:** lookup tables and token-account owners come from the RPC. `solanaRpcUrls` names more endpoints that must agree, so no single RPC decides which address is checked.
 
-On real inputs (`eval/solana-guard.ts`), four decisions out of four were right:
+On real inputs (`eval/solana-guard.ts`: 1 real x402 payment and 3 constructed cases), four decisions out of four were as expected:
 - a real x402 payment, built by the official x402 SVM client for production's 402, was checked (the payee resolved on mainnet) and signed;
 - the owner-change drain was refused locally;
 - an unlimited approval to a fresh wallet was blocked by production;
@@ -327,12 +336,15 @@ DID documents are cached in memory for 5 minutes, per `fetch` implementation. Co
 | `baseUrl` | `https://x402check.xyz` | API origin |
 | `fetch` | `globalThis.fetch` | any fetch-compatible function |
 | `timeoutMs` | `10000` | per request, body included; it also bounds a `fetch` that ignores `AbortSignal` |
+| `creditToken` | none | a prepaid credit token (`x402c_…`, from `buyCredits`): checks are debited from it, with no payment round trip |
 
-The client has four methods. Each also accepts `{ signal }` as a last argument.
+`baseUrl` must be `https://` (plain `http://` only for localhost). The client has six methods. Each also accepts `{ signal }` as a last argument.
 
 - **`check(request)`** resolves to a `RiskCheckResult`, possibly `checked: false`.
 - **`checkBatch(requests)`** resolves to `RiskCheckResult[]` in request order. A batch takes at most 25 requests, and validation is all-or-nothing.
-- **`checkWithInfo(request)`** and **`checkBatchWithInfo(requests)`** also return `info`: `{ status, paymentResponse }`. `paymentResponse` is the decoded x402 settlement receipt (`{ success, transaction, network, payer }`) of a paid call.
+- **`checkWithInfo(request)`** and **`checkBatchWithInfo(requests)`** also return `info`: `{ status, paymentResponse, credits? }`. `paymentResponse` is the decoded x402 settlement receipt (`{ success, transaction, network, payer }`) of a paid call; `credits` is what a credit-paid call cost and the balance left.
+- **`buyCredits(amountUsd)`** buys a pack ($0.10–$100) with one x402 payment through the configured `fetch`, or tops up `creditToken`. The response carries the token, shown once.
+- **`creditBalance()`** resolves to the balance of `creditToken`.
 
 A request has the following fields. `wallet` is required.
 

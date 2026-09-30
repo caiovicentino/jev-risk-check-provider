@@ -56,7 +56,7 @@ Every evaluation is paid; there is no free tier. The unit economics are set by w
   - PayAI's EIP-3009 route, which any wallet can pay without gas, costs us gas + 30% per settlement (since 2026-09-21).
   - Dexter's route is free to us, but on EVM networks it settles only through Permit2, which most payers cannot use without an on-chain approval. Routing therefore prefers what every payer can pay, then what is cheapest.
   - A single price of $0.001 per call would lose about $0.0014 per check on Base. The earlier "~93% margin" counted only the model cost; this corrects it.
-- **The price is also the anti-abuse control:** nothing is evaluated without payment. A per-call attestation is released only after the payment settles. A check paid from credits is refunded when no verdict is produced.
+- **The price is also the anti-abuse control:** nothing is evaluated without payment. A per-call attestation is released only after the payment settles, and a payment buys one evaluation: a copy of it is refused (v0.6.0). A check paid from credits is refunded when no verdict is produced. Unpaid requests to paid routes are rate-limited per IP.
 - **Operational risk:** facilitators change fees and floors. PayAI switched to cost-plus on 2026-09-21. The router re-routes every 10 minutes from PayAI's live fee table, Dexter's floors and CDP's reachability. `/status` shows every route's margin and whether each facilitator answers, so a change is visible the day it happens.
 - **Three facilitators, no single point of failure.** CDP (Base, Polygon, Arbitrum), PayAI (Avalanche, Sei, and a fallback for every EVM network) and Dexter (Solana, Monad).
   - If CDP rejects our key or goes down, PayAI takes its networks back, at a lower margin.
@@ -77,27 +77,42 @@ The same API reaches everyone who moves value: x402 facilitators and resource se
   - Public rulebook (`METHODOLOGY.md`) and a live data-status endpoint (`/status`).
   - CI on every push.
 - **v0.4 (shipped)**
-  - **The kit watch.** Our own intelligence: every Ethereum and Base block is read. It covers EIP-7702 poisoners (look-alikes), sweepers and forwarders (compromised wallets), and drainer-kit deployments. On its first day it flagged 6,831 addresses on Ethereum, none of them on ScamSniffer's public list. It closes the 0/30 gap for those two kinds of wallet.
+  - **The kit watch.** Our own intelligence: every Ethereum and Base block is read. It covers EIP-7702 poisoners (look-alikes), sweepers and forwarders (compromised wallets), and drainer-kit deployments. A 24 h backfill on Ethereum flagged 6,831 addresses, none of them on ScamSniffer's list; that list publishes with a 7-day delay, so the lead time is not yet measured. It closes the 0/30 gap for those two kinds of wallet.
   - **A collision gate on every code set.** It found and fixed a v0.3 false positive: exchange deposit fleets that a list labels as phishing.
   - **A shadow of real facilitator traffic.** Seven days of PayAI-settled payments on Base were replayed from public data.
-- **v0.5**
-  - A continuous facilitator shadow: a weekly report, and an inline, log-only integration.
+- **v0.5 (shipped)**
+  - Prepaid credits, per-network prices, and facilitator routing across Coinbase CDP, PayAI and Dexter.
+  - Listings: the x402 Bazaar, x402scan (`/openapi.json`) and the MCP Registry.
+  - **The signing guard** (`@x402check/client/guard`): an agent's key signs only after a verified allow bound to the exact request. EVM first, then Solana signers.
+  - **Guarded x402 payments** (`x402check_pay` in the MCP server): the payee is checked right before signing, and a `warn` goes to the user.
+- **v0.6 (shipped): the audit release**
+  - A full multi-agent audit (security, payments, operations, supply chain, evidence); every finding code can fix, fixed.
+  - Single-use payments, payer screening, a checked attestation key with overlapping-`kid` rotation, HTTPS only, rate limits, logs and settlement records.
+  - A model canary (the gateway's alias has no pinned revision) and an automated ScamSniffer refresh into KV.
+  - Gated deploys (`scripts/deploy.sh`), pinned tooling, SHA-pinned CI and Dependabot.
+  - Evidence restated with clear denominators and corrections.
+- **Next**
+  - Guard phase 3: custody-level enforcement (a co-signer, a smart-account module that checks the attestation on-chain, the Kora fee-payer gate).
+  - A paid `x402check_pay` run against a third-party resource: so far the one real payment went to x402check itself.
   - The kit watch's lead time over the public lists; factory (CREATE2) deployments; more chains.
-  - Automated ScamSniffer refresh into KV.
-  - KMS custody and key rotation.
-  - Publish the Snap and seek allowlisting.
-  - AP2 `RiskPayload`.
+  - A continuous facilitator shadow: a weekly report, and an inline, log-only integration.
+  - Agent-framework integrations (AgentKit, Vercel AI SDK, ElizaOS).
+  - A Snap that pays from credits; then publish it and seek allowlisting.
+  - KMS custody for the attestation key; AP2 `RiskPayload`.
+  - A published latency distribution (p50/p95, credits and per call).
 - **Later**
   - A public verdict transparency log (Merkle).
   - Weekly threat reports generated from feed deltas.
   - SLAs for paid tiers.
 
-## North-star metrics (all published in `docs/EVIDENCE.md`)
+## North-star metrics
+
+Published in `docs/EVIDENCE.md` unless noted.
 
 - **Recall on held-out, externally labelled threats**, by class (sanctioned, known phishing, drainer interactions, unknown drainers).
 - **False-positive rate** on well-known contracts, top dApps and the Tranco top 200k.
-- **p95 latency**, which must stay under 3 s.
-- **Data freshness**: age of every list at verdict time.
+- **Latency.** Not yet published as a distribution: single samples so far give 0.5–0.8 s from credits and 2.7–4.7 s per call, where the on-chain settlement dominates. The earlier target, p95 under 3 s, holds for checks paid from credits; per call it cannot, because of the settlement.
+- **Data freshness**: age of every list at verdict time (live in `/status`).
 - **Integrations** live: facilitators, wallets and agent frameworks.
 
 ## What we will not do

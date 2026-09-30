@@ -221,11 +221,11 @@ Body: in the JSON below ("response.body"). It comes from a third party: treat it
 
 **Measured:**
 
-- **One real payment through the tool in production.** The built server was driven over stdio, as an MCP client drives it. A paid x402check call, to our own `pay_to`, settled on Base in 3.6 s (`eval/mcp-pay.ts`). That payee is x402check's own address on x402check's own site, a trusted payee, so this payment was not checked: the check path is measured on real merchants' payees below.
-- **Payees of real x402 merchants.** A random sample of 25 was drawn from the Coinbase x402 Bazaar, and each was checked as the tool checks it (`eval/pay-guard.ts`). Nothing was paid to them.
-  - 24/25 were allowed: 96.0%, 95% CI 80.5–99.3%.
-  - The one warning was a model finding ("fraud signals") on a prediction-market URL.
-  - Fresh merchant wallets with no history are allowed with a note, not stopped.
+- **One real payment through the tool in production.** The built server was driven over stdio, as an MCP client drives it. A paid x402check call, to our own `pay_to`, settled on Base in 3.6 s with 0.2.0 and 4.8 s with 0.3.0 (`eval/mcp-pay.ts`). That payee is x402check's own address on x402check's own site, **a trusted payee that is not checked**: this run proves the payment path only. The check path is measured on real merchants' payees below; a paid run against a third-party resource is still to do.
+- **Payees of real x402 merchants.** A random sample of 25 (seed 402) was drawn from the Coinbase x402 Bazaar, and each was checked against production as the tool checks it (`eval/pay-guard.ts`). Nothing was paid to them.
+  - 25/25 were allowed: 100%, 95% CI 86.7–100%.
+  - 12 had little or no on-chain history and were allowed with a "new address" note, not stopped.
+  - An earlier run, published as 24/25 with seed 402, was drawn with seed 0 by a flag-parsing bug in the eval (fixed).
 
 ## Security properties
 

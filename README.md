@@ -37,7 +37,7 @@ Every verdict is an **ES256 attestation**. It states which checks the provider a
 | Drainer-kit code | logic-code fingerprints of contracts listed by Forta (embedded) and ScamSniffer (runtime) | the subject, or a contract in the simulated transaction, runs a listed drainer's code → **30** |
 | Address-poisoning look-alike | **kit watch** (our own scan of every Ethereum and Base block) | the wallet delegates (EIP-7702) to an address-poisoning executor → **20** (`address_poisoning`) |
 | Compromised wallet | kit watch | the wallet delegates to a labelled sweeper family → **20** (`compromised_wallet`); to code that forwards what it receives, with no label → **40** (`auto_forwarding_wallet`) |
-| Drainer operator | kit watch | the address deployed drainer-kit code, or collects what a sweeper forwards → **30** (`drainer_operator`); **40** when the forwarder has no label |
+| Drainer operator | kit watch | the address deployed drainer-kit code → **30** (`drainer_operator`). A forwarder's destinations are not flagged (v0.6.0): whoever deploys a forwarder chooses them |
 | Unverified spender | Blockscout source verification | approval or permit to an unverified contract → **75** and at least `medium` (review) |
 | Injected / manipulated intent | Jev typed questions over `context` (what the agent acted on) | model penalties and caps |
 | New address | on-chain activity | informational `new_address` category |
@@ -126,7 +126,7 @@ curl -X POST https://x402check.xyz/v1/risk-check -H "Content-Type: application/j
 | `wallet` | yes | the subject address: EVM `0x…`, base58 (Solana/Tron/BTC…), bech32, cashaddr, or CAIP-10. Anything else → `422 {error, field:"wallet"}` |
 | `chain` | no | alias (`ethereum`, `base`, `solana`, …) or CAIP-2 (`eip155:8453`); enables on-chain facts on supported mainnets |
 | `domain` | no | hostname or http(s) URL (normalized server-side); the site the payment or signature is for |
-| `context` | no | ≤ 4096 chars: what the agent acted on (tool output, page text, instruction). Untrusted by design |
+| `context` | no | ≤ 4096 chars: what the agent acted on (tool output, page text, instruction). Untrusted by design. Leave out secrets and personal data: keys, seed phrases and credit tokens are redacted before the model sees it, but nothing else is (see [Data handling](#data-handling)) |
 | `interaction` | no | `{type, unlimited?}`; `type` ∈ `native_transfer`, `token_transfer`, `token_approval`, `nft_approval`, `permit_signature`, `order_signature`, `message_signature`, `contract_call` |
 | `payment` | no | binds the attestation to a payment: `{network, pay_to, amount (base units), asset, resource}` |
 | `aud` | no | ≤ 256 chars; copied into the attestation, never shown to the model |
@@ -137,25 +137,25 @@ Batch: `POST /v1/risk-check/batch` with `{"requests": [...]}` (≤ 25). It is al
 
 ## Attestation
 
-A compact JWS (`alg: ES256`, `typ: risk-check+jwt`, `kid: jev-attest-v1`), TTL 1 h. Claims:
+A compact JWS (`alg: ES256`, `typ: risk-check+jwt`, `kid` as published in the DID document, today `jev-attest-v1`), TTL 1 h. Claims:
 
 | Claim | Meaning |
 |---|---|
 | `iss`, `sub`, `iat`, `exp`, `jti` | issuer `did:web:x402check.xyz`, the subject wallet, times, unique id |
 | `score`, `tier`, `categories` | the verdict and the findings behind it |
-| `checks` | **what the provider verified**: `sanctions` (list, date, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`, including code-fingerprint sets), `simulation` (status, network, findings), `model` (question set, or `skipped`) |
+| `checks` | **what the provider verified**: `sanctions` (list, date, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`, including code-fingerprint sets), `simulation` (status, network, findings), `model` (question set, or `skipped`), `model_id` (the model id the backend reported; through the AI Gateway this is the alias `typesafe-ai/jev`) |
 | `asserted` | what the caller **claimed** (screening / pre-authorization): not verified |
 | `payment`, `interaction`, `aud` | what the verdict was issued for |
 | `input_hash` | SHA-256 over the canonical normalized inputs, sources and question set |
 | `request_hash` | SHA-256 over the request fields exactly as sent (RFC 8785): recompute it to prove nothing was dropped or altered in transit |
 
-Verify it by **pinning the issuer**. Never trust a key URL carried by a response or an intermediary:
+Verify it by **pinning the issuer**, and bind it to the request it answers. Never trust a key URL carried by a response or an intermediary:
 
 ```bash
-npx tsx scripts/verify-attest.ts <jws> --issuer did:web:x402check.xyz [--aud <url>] [--sub <wallet>]
+npx tsx scripts/verify-attest.ts <jws> --request '<the exact JSON body>' --max-age 300 [--aud <url>] [--pay-to <addr> --amount <atomic>]
 ```
 
-The verifier resolves the key from the issuer's `did:web` document and checks `alg`, `typ`, `iss`, `exp` and `iat` (plus `aud` and `sub` when given).
+The reference verifier is the SDK's `verifyAttestation` behind a CLI. It resolves the key from the issuer's `did:web` document and pins x402check's key by default. It checks `alg`, `typ`, `iss`, `exp` and `iat`, and with `--request` it recomputes `request_hash`, so a verdict issued for another wallet, payment or transaction is rejected (`request_mismatch`). `--max-age` refuses an older verdict (plus a 300 s clock-skew allowance). Without `--request`, a valid verdict for something else still verifies.
 
 ## Wallet integration
 
@@ -214,6 +214,9 @@ Every evaluation is paid; there is no free tier.
 - **An unpaid request** gets `402` with the accepted options in `PAYMENT-REQUIRED`. Any x402 client pays and retries.
 - **Invalid input** is rejected (`422`/`413`) before anything is priced.
 - **Release after settlement:** the attestation is returned only once the payment settles. If the evaluation cannot be produced, nothing is settled (`503`, no charge).
+- **One payment, one evaluation:** a payment is claimed once, when it verifies. A copy of the same `PAYMENT-SIGNATURE`, sent at the same time or later, gets `409 payment_already_used`.
+- **The payer is screened:** a paying wallet on the OFAC SDN list gets `403 payer_sanctioned`, and nothing is charged.
+- **HTTPS only:** a plain-HTTP API call gets `403`, before its body or token is read.
 
 ```ts
 import { createClient } from "@x402check/client";
@@ -262,14 +265,15 @@ Source layout:
 - `scripts/`: data refresh, the feeds publisher and the verifier.
 - `docs/`: [METHODOLOGY](docs/METHODOLOGY.md), [EVIDENCE](docs/EVIDENCE.md), [STRATEGY](docs/STRATEGY.md).
 
-## Evidence (v0.4–v0.5)
+## Evidence (v0.4–v0.6)
 
 | What | Result |
 |---|---|
-| **Kit watch, Ethereum 24 h:** addresses flagged (6,232 poisoning look-alikes, 575 wallets delegated to sweepers or forwarders, 24 destinations) | **6,831**, and **0** of them on ScamSniffer's public list |
+| **Single-use payments (v0.6.0, production):** three copies of one payment sent at once | one evaluated and settled, two refused (`409`); a later copy refused too |
+| **Kit watch, Ethereum, a 24 h backfill:** addresses flagged (6,232 poisoning look-alikes, 575 wallets delegated to sweepers or forwarders, 24 destinations) | **6,831**, none of them on ScamSniffer's list, which publishes with a 7-day delay: lead time not yet measured |
 | **Kit watch:** sampled poisoning look-alikes confirmed by a victim's history (lower bound) | **27/37** (73%) |
-| **Kit watch:** new contracts matching an old drainer kit (Ethereum 24 h + Base 6 h) | **0/2,966**: drainer infrastructure moved to EIP-7702 |
-| **Code sets on held-out legitimate code** (verified contracts + callees) | Before the v0.4 gate: 16/2,500 on Ethereum. That is a v0.3 false positive, found and fixed: exchange deposit fleets (Luno, Poloniex, BitGo) that Forta labels as phishing. After the gate, on a second held-out set: **0 false positives in 1,737 + 2,935** (Ethereum + Base); its one match was a real, unlisted drainer |
+| **Kit watch:** new contracts matching an old drainer kit (Ethereum 24 h + Base 6 h, from the backfill's logs, not a tracked report) | **0/2,966**: drainer infrastructure moved to EIP-7702 |
+| **Code sets on held-out legitimate code** (verified contracts + callees) | Before the v0.4 collision gate, the v0.4 kit families matched 16/2,500 held-out contracts on Ethereum; the v0.3 production Forta set matched exchange deposit fleets (Luno, Poloniex, BitGo) that Forta labels as phishing. Found and fixed. After the gate, on a second held-out set: **1 match in 1,737 + 0 in 2,935** (Ethereum + Base), and that match was a real, unlisted drainer on our own review |
 | **PayAI shadow:** 7 days of PayAI-settled payments on Base, deterministic layers | 3,132 payments, 207 payees, **0 flagged**; $3.13 to check them all |
 | OFAC SDN addresses (external labels) | 24/24 critical |
 | MetaMask-listed phishing domains · ScamSniffer drainer addresses | 40/40 · 30/30 |
@@ -283,9 +287,9 @@ Source layout:
 | Tranco top 200k, deterministic rules | 22 capped (0.011%): 20 on MetaMask's own list, 2 crypto look-alikes |
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
-| **Signing guard:** real drainer transactions that still move the victim's assets, refused before the key signs (ScamSniffer feed off) | **22/25** (88%): 18 by simulation, 4 by drainer code · legitimate: **0/228** refused · production: 4/4 decisions agree |
-| **Payments in production (v0.5):** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7–3.7 s end to end, one sample each through PayAI and Coinbase CDP · **$0.001, 0.5–0.8 s**, with no settlement per check |
-| **Production, every evaluation paid** (settled in USDC on Base, or from credits bought that way) | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 (re-run on v0.5) · `security:v3` 8/8 · `security:v4` 7/7 · `security:v5` 9/9, and 11/11 settling through Coinbase CDP (v0.5.1) |
+| **Signing guard (v0.6.0):** real drainer transactions that still move the victim's assets, refused before the key signs (ScamSniffer feed off) | **22/25** (88%; by contract 10/11): 18 by simulation, 4 by drainer code; the 3 misses are one contract · legitimate: **0/49** that move assets and **0/84** that execute refused; 1/228 in all (a reverting transaction too large to simulate) |
+| **Payments in production:** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7–4.7 s end to end (single samples: PayAI, Coinbase CDP, CDP on v0.6.0) · **$0.001, 0.5–0.8 s**, with no settlement per check |
+| **Production, every evaluation paid** (settled in USDC on Base, or from credits bought that way) | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 (re-run on v0.5) · `security:v3` 8/8 · `security:v4` 7/7 · `security:v5` 9/9, 11/11 through Coinbase CDP (v0.5.1), and 11/11 on v0.6.0 |
 
 Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). How each verdict is formed, with every cap: [docs/METHODOLOGY.md](docs/METHODOLOGY.md). Earlier evidence documents are kept as historical records with correction notes.
 
@@ -307,9 +311,10 @@ Worker: `npm run dev:worker`, or `wrangler dev --local` in `deploy/`. See [deplo
 - **[`@x402check/client`](packages/client)** is a typed TypeScript client with zero runtime dependencies. It runs on Node ≥ 20, browsers, Cloudflare Workers, Deno and Bun.
   - `verifyAttestation` checks the signature against the issuer's `did:web` key and binds it to the request you made, including `request_hash`.
   - `interpret` applies the fail-closed policy. Its verdicts come from the **signed** claims only, never from the unsigned body.
-  - **`guardAccount`** (`@x402check/client/guard`) makes the check **enforced, not advisory**. It wraps the account an agent signs with, and every transaction, permit, order, x402 payment or EIP-7702 delegation is signed only after a verified `allow` bound to that exact request. Otherwise it throws, and the key never signs. See the [signing guard](packages/client#signing-guard-block-before-the-key-signs).
-- **[`@x402check/mcp`](packages/mcp)** is an MCP server for any agent (Claude Code, Claude Desktop, other MCP clients), with the tools `x402check_check`, `x402check_verify_attestation` and `x402check_methodology`.
+  - **`guardAccount`** (`@x402check/client/guard`) makes the check **enforced, not advisory**. It wraps the account an agent signs with, and every transaction, permit, order, x402 payment or EIP-7702 delegation is signed only after a verified `allow` bound to that exact request. Otherwise it throws, and the key never signs. The exceptions are stated: an x402 payment of up to $0.25 to x402check's own `pay_to` (paying for a check) is not checked; a request with no counterparty and nothing to simulate (e.g. a zero-value deployment) is signed as inert; and a `warn` is signed when your `onWarn` approves it. See the [signing guard](packages/client#signing-guard-block-before-the-key-signs).
+- **[`@x402check/mcp`](packages/mcp)** is an MCP server for any agent (Claude Code, Claude Desktop, other MCP clients), with the tools `x402check_check`, `x402check_pay`, `x402check_verify_attestation` and `x402check_methodology`.
   - Every verdict is verified before the agent sees an action.
+  - `x402check_pay` fetches an x402 resource and pays only after x402check clears the exact payee, right before signing. A `warn` goes to the user in the client, never to the agent.
   - It pays each check from prepaid credits (`X402CHECK_CREDIT_TOKEN`) or itself via x402 (USDC on Base, gasless for the payer), with a per-payment cap and a total budget. Both secrets are redacted from every output.
 
 ```bash
@@ -355,6 +360,16 @@ npx mm-snap serve                           # then wallet_requestSnaps "local:ht
 
 The Snap is **not yet published to npm nor allowlisted by MetaMask**, so there is no one-click install in regular MetaMask yet.
 
+## Data handling
+
+What a check sends where, so you can decide what to put in a request:
+
+- **The model vendor.** TypeSafe's Jev model, reached through the Vercel AI Gateway, receives the request's fields (including `context`) and the provider's own findings. Before that, the server redacts private keys, seed phrases and x402check credit tokens from `context`. Nothing else is redacted. We have not yet confirmed the vendor's retention terms, so leave secrets and personal data out of `context`.
+- **Public RPC operators and Blockscout** receive the addresses and, for a simulation, the transaction.
+- **Cloudflare** runs the Worker. Workers Logs keep the Worker's own log lines, which by design carry no request bodies or tokens, and Cloudflare's invocation log of each request (method, URL and request metadata).
+- **x402check's KV** keeps a record of each settlement (network, transaction, route) for 400 days, for reconciliation. Credit tokens are stored only as their SHA-256.
+- **Attestations** carry what the verdict covers (`sub`, `payment`, `interaction`, `aud`) and hashes of the request (`input_hash`, `request_hash`), not the `context` itself.
+
 ## Data sources and licenses
 
 Code is MIT. Data sources:
@@ -369,11 +384,13 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). OFAC and MetaMask are refr
 
 ## Roadmap
 
+The full roadmap is in [docs/STRATEGY.md](docs/STRATEGY.md).
+
 1. Shadow facilitator traffic continuously. The first week of PayAI-settled payments is replayed (v0.4), and a weekly report and an inline, log-only integration are offered to PayAI.
 2. Measure the kit watch's lead time over the public lists as their listings arrive (they lag 7 days), and extend it to factory deployments (CREATE2 inside a contract) and to more chains.
 3. Fresher address intelligence: funding-source analytics for plain transfers to wallets the watch has not seen.
 4. Valuation-aware simulation rules (price data), closing the "return a dust asset" evasion.
 5. Batch and `upto` payment schemes, to spread settlement gas when facilitators stop sponsoring it.
 6. Wallet-side payment for the Snap, then publish it and request MetaMask allowlisting.
-7. KMS/HSM custody for the attestation key; key rotation with overlapping `kid`s.
+7. KMS/HSM custody for the attestation key. (Rotation with overlapping `kid`s shipped in v0.6.0: a next key is published before it signs.)
 8. Kora `decision_provider` integration (issue #682); AP2 `RiskPayload` once upstream stabilizes.

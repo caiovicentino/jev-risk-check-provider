@@ -24,7 +24,7 @@ This is the map that every AI agent working on x402check reads first: Claude Cod
 
 Every verdict is an ES256 attestation that states which checks ran. **Every check is paid; there is no free tier.**
 - **Prepaid credits:** $0.001 a check.
-- **Per call via x402:** priced by network, from $0.0035 on Base.
+- **Per call via x402:** priced by network, from $0.001 ($0.0035 on Base).
 - **Simulated transaction:** $0.005.
 
 The service runs as one Cloudflare Worker. The repository is `caiovicentino/jev-risk-check-provider` (MIT).
@@ -78,8 +78,8 @@ One agent may hold several roles in one session. Know which lane you are working
 | `packages/mcp/src/pay.ts`, `packages/mcp/src/payer.ts` | **`x402check_pay`**: the MCP server pays an x402 resource only after the guard clears the exact option, inside `onBeforePaymentCreation` (`payer.payResource`). A `warn` goes to the user through MCP elicitation. |
 | `packages/client/src/decode/` | The Snap's decoders, **vendored**: never edit them there. Edit `snap/src`, then run `node scripts/sync-decoders.mjs`. `test/decoders-sync.test.ts` fails on drift. |
 | `snap/` | MetaMask Snap (preview). |
-| `eval/` | Evaluations and paid production probes. Reports go to `eval/evidence/`. `paid-fetch.ts` pays with the probe payer. |
-| `scripts/` | `deploy.sh` (the only deploy path, §3.2), feed builders, kit-watch tooling, `publish-npm.sh`, `verify-attest.ts`, `payai-shadow.ts`. **Money scripts:** `x402-pay.ts`, `sol-treasury-transfer.ts`, `gen-payer-wallets.ts` (see §4). |
+| `eval/` | Evaluations and paid production probes. Reports go to `eval/evidence/`. `paid-fetch.ts` pays with the probe payer, `flags.ts` parses the scripts' flags, `redact.ts` writes ScamSniffer-only entries as hashes (every report writer that handles that data uses it), and `replay.ts` probes single-use payments. |
+| `scripts/` | `deploy.sh` (the only deploy path, §3.2), feed builders, kit-watch tooling, `publish-npm.sh`, `verify-attest.ts` (the SDK's verifier as a CLI: `--request`, `--max-age`, key pinned), `redact-evidence.ts` (`--check`: no ScamSniffer-only entry in the reports), `payai-shadow.ts`. **Money scripts:** `x402-pay.ts`, `sol-treasury-transfer.ts`, `gen-payer-wallets.ts` (see §4). |
 | `docs/` | `STRATEGY.md` (direction), `METHODOLOGY.md` (verdict rules), `EVIDENCE.md` (measurements). The rest are historical records: `DISTRIBUTION.md` holds superseded drafts, `PR-PLAN.md` dates from 2026-09-27, and the `EVIDENCE-*` files and `hackathon/` are older. |
 | `test/` | Provider tests (`npm test`). |
 | `.github/workflows/` | `ci.yml` (push to main and PRs: provider, Worker bundle dry-run, Snap with a manifest-vs-rebuild check, client and MCP, production `npm audit`), `feeds.yml` (daily at 05:17 UTC → `feeds` branch), `publish-mcp-registry.yml` (tag `mcp-v*` → waits for green CI on that main commit → pinned, SHA-256-verified `mcp-publisher` → MCP Registry). Every action is pinned to a commit SHA and every token is least-privilege. |
@@ -93,7 +93,7 @@ One agent may hold several roles in one session. Know which lane you are working
 |---|---|
 | `POST /v1/risk-check`, `POST /v1/risk-check/batch` | Paid checks. Without payment the answer is a 402 challenge. `Authorization: Bearer x402c_…` pays from credits. A GET gets 405 with usage instructions. Each x402 payment is single-use (a copy gets 409 `payment_already_used`), an OFAC-listed payer gets 403 `payer_sanctioned`, and only x402 v2 payloads are processed. |
 | `POST /v1/credits`, `GET /v1/credits` | Buy or top up credits (x402), and read a balance (bearer). |
-| `GET /status` | Feeds, kit-watch coverage (aggregates only), `payments` (route and margin per network), `facilitators` (health and published signers), credits, `attestation` (kid, RFC 7638 thumbprint, self-check). |
+| `GET /status` | Feeds (ScamSniffer with `refreshed_at` and `stale`), kit-watch coverage (aggregates only), `payments` (route and margin per network), `facilitators` (health and published signers), credits, `attestation` (kid, RFC 7638 thumbprint, self-check), `model` (the last canary and the model id the gateway reports). |
 | `GET /healthz` | Version, deployed commit, and attestation-key health: 503 while the key cannot sign verifiable attestations (paid routes then refuse all work, with no charge). |
 | `GET /openapi.json` | Discovery document read by x402scan and AgentCash. |
 | `GET /.well-known/risk-check.json` | Discovery document for the risk-check extension (also served at `/` without `Accept: text/html`). |
@@ -160,6 +160,8 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | Every 10 min per isolate | Facilitator routing: `/supported`, PayAI's `/pricing`, CDP reachability | `/status` → `payments`, `facilitators` |
 | Daily at 05:17 UTC | `feeds.yml`: OFAC and MetaMask refresh → `feeds` branch → the Worker refreshes in the background | `/status` → `refresh` |
 | Every push to `main` | `ci.yml` | The GitHub Actions status |
+| 05:37 and 17:37 UTC | Worker cron: the ScamSniffer domain and address sets are rebuilt into KV (GPL, runtime only) | `/status` → `data.scamsniffer.stale` is false |
+| 06:07 and 18:07 UTC | Worker cron: the model canary (fixed cases through the live model) | `/status` → `model.canary.ok` is true and `stale` false |
 | Weekly | Dependabot version-update PRs (grouped; majors one by one) | Review and merge like any change (§3.1) |
 | Tag `mcp-v*` | `publish-mcp-registry.yml` | The run log, and the registry API |
 
@@ -202,11 +204,14 @@ Local dev uses **port 8799**: `npm run dev:worker`.
 
 ### 3.4 Evidence in production
 
-Each paid probe spends from the probe payer to our own `pay_to`:
+Each paid probe spends from the probe payer to our own `pay_to`, or from its prepaid credits:
 - `X402CHECK_BASE=https://x402check.xyz PAY_NETWORK=eip155:8453 npm run security:v5` costs about $0.10;
-- `npx tsx eval/bazaar.ts` costs $0.007.
+- `PAY_NETWORK=eip155:8453 npx tsx eval/replay.ts` costs $0.0035 (single-use payments);
+- `npx tsx eval/bazaar.ts` costs $0.007 (`PAY=none` reads the listing only);
+- `npx tsx eval/pay-guard.ts --n 25 --seed 402` costs $0.025 in credits;
+- `npx tsx eval/guard.ts` costs nothing (in-process provider).
 
-Record the results in `docs/EVIDENCE.md` §7. Reports carry credit tokens only as a SHA-256 prefix.
+`security:v3` and `security:v4` are historical: against another version they stop before paying. Record the results in `docs/EVIDENCE.md` §7. Reports carry credit tokens only as a SHA-256 prefix, and ScamSniffer-only entries as hashes (`scripts/redact-evidence.ts --check`).
 
 ### 3.5 Catalogs
 
@@ -309,17 +314,20 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
 
 ## 5. State as of 2026-09-30 (update when it changes)
 
-- **Production:**
-  - v0.5.4: credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;
+- **Production:** v0.6.0, the audit release, deployed on 2026-09-30 from commit `339a883` with `scripts/deploy.sh`.
+  - Single-use payments, payer screening, a checked attestation key (with next-key rotation), HTTPS only, rate limits, Workers Logs and settlement records;
+  - the model canary and the ScamSniffer refresh on the cron;
+  - credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;
   - Bazaar and x402scan listings, `/openapi.json`.
-- **Packages:** `@x402check/client` 0.3.0 and `@x402check/mcp` 0.2.0 on npm, and the MCP server in the MCP Registry.
-- **Solana signing guard** (`guardSolanaSigner`, `@x402check/client` 0.3.0): decodes each transaction (lookup tables and token-account owners over RPC), refuses owner-change drains locally, and checks recipients, delegates and called programs. On real inputs, 4/4 right (`eval/solana-guard.ts`).
-- **Guarded x402 payments** (`x402check_pay`, `@x402check/mcp` 0.2.0): the MCP server pays a resource only after x402check clears the exact payee, right before signing. A `warn` goes to the user through elicitation.
-  - One real payment through the tool settled on Base (`eval/mcp-pay.ts`).
-  - 24/25 real Bazaar payees were allowed (`eval/pay-guard.ts`).
-- **Signing guard** (`@x402check/client/guard`, v0.5.5): `guardAccount` and `x402PaymentGuard`. The agent's key signs only after a verified `allow` bound to the exact request.
-  - Proof on real mainnet transactions (`eval/guard.ts`): 22/25 drainer transactions that still move assets refused, and 0/228 legitimate.
-  - In production from credits, 4/4 decisions agreed.
+- **Audit (2026-09-30):** no critical findings, 11 high. Every finding code can fix is fixed. What remains needs the owner: repository settings, DNS, the git history rewrite, npm names.
+- **Packages:** `@x402check/client` 0.4.0 and `@x402check/mcp` 0.3.0 are being published (the owner's passkey); 0.3.0 and 0.2.0 are the current npm versions. The MCP server is in the MCP Registry.
+- **Solana signing guard** (`guardSolanaSigner`, since `@x402check/client` 0.3.0): decodes each transaction (lookup tables and token-account owners over RPC), refuses owner-change drains locally, and checks recipients, delegates and called programs. 4/4 on 1 real x402 payment and 3 constructed cases (`eval/solana-guard.ts`).
+- **Guarded x402 payments** (`x402check_pay`, since `@x402check/mcp` 0.2.0): the MCP server pays a resource only after x402check clears the exact payee, right before signing. A `warn` goes to the user through elicitation.
+  - One real payment through the tool settled on Base (`eval/mcp-pay.ts`), to x402check's own `pay_to`, a trusted payee that is not checked.
+  - 25/25 real Bazaar payees were allowed, seed 402 (`eval/pay-guard.ts`); the earlier 24/25 was drawn with seed 0 by a parser bug.
+- **Signing guard** (`@x402check/client/guard`): `guardAccount` and `x402PaymentGuard`. The agent's key signs only after a verified `allow` bound to the exact request.
+  - Proof on real mainnet transactions (`eval/guard.ts`, v0.6.0): 22/25 drainer transactions that still move assets refused (10/11 contracts), and 0/49 legitimate ones that move assets (0/84 that execute; 1/228 in all, a reverting one too large to simulate).
+  - In production from credits, 4/4 decisions agreed (both legitimate cases revert).
   - Probe credits: `~/.config/paysol/x402check-credit-token` (mode 600; never print it).
 - **Revenue from outside:** $0. Every payment so far has come from our own probe wallets.
 - **Next** (`docs/STRATEGY.md`):

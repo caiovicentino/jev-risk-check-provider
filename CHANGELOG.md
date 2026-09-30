@@ -13,11 +13,12 @@ A full multi-agent audit (security, payments, operations, supply chain, evidence
 - **Credits.** A pack whose ledger write fails after settlement returns its token anyway (202, credited by the cron). The simulation surcharge is refunded when the simulation did not run. A thrown or abandoned evaluation is refunded, even after the client disconnects. The 1 KiB body cap is enforced while streaming.
 - **Verdicts.** A drainer's own fake Transfer event, dust of a real asset, or padded logs no longer turn the simulation's drain finding off. Lookups that fail (contract verification, the kit watch, an unknown chain) raise a review floor instead of passing as clear. Chain ids have one spelling. Mixed-case bech32/cashaddr and TRON hex forms are rejected, and XRP addresses are now screened (the one XRP SDN listing was unreachable). Secrets pasted into `context` never reach the model.
 - **The kit watch cannot be poisoned** into flagging an arbitrary wallet: forwarding destinations are no longer recorded, a delegation must be in effect, and a failed `eth_getCode` is never cached as benign. One transaction cannot exhaust the KV budget, and `/status` shows a stalled cron as `stale`.
-- **The model.** The revision that answered is signed in `checks.model_id`. The gateway offers no pinned revision, so twice a day the cron runs fixed cases (an injected instruction, a drain request, a configured payment) through the live model; `/status` → `model` shows the result. The model call has an 8 s total deadline.
+- **The model.** The model id the backend reports is signed in `checks.model_id`. Through the AI Gateway that id is the alias itself (`typesafe-ai/jev`): the gateway exposes no revision to pin. So twice a day the cron runs fixed cases (an injected instruction, a drain request, a configured payment) through the live model; `/status` → `model` shows the result. In production the three cases came back critical, critical and low. The model call has an 8 s total deadline.
 - **Feeds.** The cron rebuilds the ScamSniffer domain and address sets twice a day (GPL: runtime KV only, parsed as a stream). `/status` marks the feed stale after 3 days.
 - **HTTP.** Plain HTTP is redirected (pages) or refused (API). HSTS, `nosniff` and `Referrer-Policy` on every response; a strict CSP and `frame-ancestors 'none'` on the site; `/.well-known/security.txt` and `SECURITY.md`. Unpaid requests to paid routes and `/status` are rate-limited per IP. Workers Logs are on, and every settlement is recorded for reconciliation.
 - **Operations.** `scripts/deploy.sh` deploys only a clean, pushed, CI-green `main` and stamps `/healthz` with the commit. wrangler is pinned. CI bundles the Worker, rebuilds the Snap against its manifest and audits production dependencies; actions are pinned to SHAs with least-privilege tokens; Dependabot is on; the MCP Registry publish waits for green CI and verifies its publisher binary.
-- **Evidence hygiene.** Committed reports carry ScamSniffer-only entries as hashes, and tests use synthetic entries. The eval flag parser read `argv[0]` when a flag was absent (pay-guard's "seed 402" sample was drawn with seed 0). Historical suites stop before paying against another version. `scripts/verify-attest.ts` binds a verdict to its request, payment and a maximum age, and pins the key.
+- **Evidence hygiene.** Committed reports carry ScamSniffer-only entries as hashes, and tests use synthetic entries. The eval flag parser read `argv[0]` when a flag was absent: pay-guard's "seed 402" sample was drawn with seed 0 (24/25); with seed 402, 25/25 payees are allowed. Historical suites stop before paying against another version. `scripts/verify-attest.ts` binds a verdict to its request, payment and a maximum age, and pins the key. The evidence is restated with clear denominators: the guard refuses 22/25 drainer transactions that move assets (10/11 contracts) and 0/49 legitimate ones that do; the kit watch's 6,831 addresses came from a 24 h backfill, and ScamSniffer's 7-day delay means its lead time is not yet measured.
+- **Production evidence (v0.6.0):** single-use payments PASS (three copies of one payment: one verdict, two 409s), `security:v5` 11/11, one real `x402check_pay` payment (to x402check's own `pay_to`, a trusted payee that is not checked).
 - Local development moved off ports 8787–8789 (now 8799, and 8800–8802 for the demo).
 
 ## `@x402check/client` 0.4.0 — 2026-09-30
@@ -50,7 +51,7 @@ A full multi-agent audit (security, payments, operations, supply chain, evidence
     - a nonce account's authority handed over;
     - a "message" whose bytes are a transaction.
   - **`not_verified`, never a guess:** an instruction it cannot read, an unresolved lookup table or token-account owner, or more than 5 counterparties.
-- **Measured on real inputs** (`eval/solana-guard.ts`, 4/4 right, nothing sent):
+- **Measured on real inputs** (`eval/solana-guard.ts`, 4/4 right, nothing sent; 1 real x402 payment and 3 cases the eval constructed, so 95% CI 51–100%):
   - a real x402 payment, built by the official x402 SVM client for production's 402, was checked with its payee resolved on mainnet, then signed (1.9 s);
   - the owner-change drain and a transfer disguised as a message were refused locally;
   - an unlimited SPL approval to a fresh wallet was blocked by production (0.6 s).
@@ -69,8 +70,8 @@ A full multi-agent audit (security, payments, operations, supply chain, evidence
     - the query string is never sent to x402check.
 - **Credits and a wallet together:** checks are paid from credits, and resources from the payer, which has one budget for both.
 - **Measured:**
-  - **one real payment through the tool** settled on Base in production, to x402check's own `pay_to`, with no secret in the output;
-  - **24/25 payees of real x402 merchants,** sampled from the Coinbase x402 Bazaar, were allowed: 96.0%, 95% CI 80.5–99.3%. The one warning was a model finding on a prediction-market URL. New merchant wallets are not stopped.
+  - **one real payment through the tool** settled on Base in production, to x402check's own `pay_to` (a trusted payee that is not checked, so it proves the payment path only), with no secret in the output;
+  - **24/25 payees of real x402 merchants,** sampled from the Coinbase x402 Bazaar, were allowed: 96.0%, 95% CI 80.5–99.3%. The one warning was a model finding on a prediction-market URL. New merchant wallets are not stopped. *(Correction, v0.6.0: a flag-parsing bug drew this sample with seed 0, not the published 402. With seed 402: 25/25.)*
 
   Details are in `docs/EVIDENCE.md`.
 - **Tests:** 61 (16 new), covering every outcome, the user's decision through elicitation, checks paid by the same wallet, limits, time limits, and URL and header refusals.
@@ -87,6 +88,8 @@ A full multi-agent audit (security, payments, operations, supply chain, evidence
   - **22/25** drainer transactions that still move assets are refused, 4 more than simulation alone;
   - **0/228** legitimate transactions are refused;
   - in production, from credits, **4/4** decisions agree.
+
+  *(Correction, v0.6.0: 144 of the 228 legitimate transactions revert at the latest block, where the simulation rules cannot fire. The rate that means something is 0/49 among those that move assets (95% CI 0.0–7.3%), and 0/84 among those that execute. Both legitimate cases in the production 4/4 revert.)*
 
   Details are in `docs/EVIDENCE.md`.
 - **Site:** a news row, and the guard in the integration example.
@@ -205,8 +208,8 @@ A full multi-agent audit (security, payments, operations, supply chain, evidence
   - Every code set and kit family now passes a **collision gate** against code in legitimate use (`scripts/legit-corpus.ts`).
   - The four fleets are guarded explicitly.
   - Forta contracts from before 2021 no longer seed a set. All four collisions came from them, and dropping them costs no recall.
-  - On held-out legitimate code, before the fix: 16/2,500 on Ethereum.
-  - After the fix, on a second held-out set: 0 false positives among 1,737 (Ethereum) and 2,935 (Base) contracts. Its only match was a real `SecurityUpdates` drainer on no public list.
+  - On held-out legitimate code, before the fix: 16/2,500 on Ethereum. *(Correction, v0.6.0: that figure is the v0.4 kit families before the gate, `kit_families_before_gate` in the report, not the v0.3 production code set.)*
+  - After the fix, on a second held-out set: 0 false positives among 1,737 (Ethereum) and 2,935 (Base) contracts. Its only match was a real `SecurityUpdates` drainer on no public list. *(The report records that raw match, 1/1,737; "drainer" is our own review, not an external label.)*
   - The embedded Forta set went from 46 to 27 fingerprints. Confirmed in production: a Luno deposit address and a BitGo forwarder now score low.
 - **Fix, found while building the catalog:** the delegates of ScamSniffer-listed EIP-7702 wallets were never fingerprinted. Only the listed addresses' own code was, so a wallet delegated to a known sweeper was not caught by code. 7 sweeper families that forward what they receive now seed the watch.
 - **Operations:** the cron needs Workers Paid. It uses about 250 ms of CPU per run, and the Free plan's 10 ms ends in `exceededCpu`; evaluations are unaffected. `limits.cpu_ms` is set in `wrangler.toml`.

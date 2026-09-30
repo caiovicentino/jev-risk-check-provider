@@ -8,15 +8,22 @@
 | `POST /v1/risk-check/batch` | up to 25 evaluations, billed per item |
 | `POST /v1/credits` / `GET /v1/credits` | buy or top up prepaid credits ($0.10–$100, one x402 payment) / read a token's balance |
 | `GET /.well-known/risk-check.json` | discovery: pricing networks, data sources, attestation claims |
-| `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation key (`kid jev-attest-v1`), `did:web` document |
-| `GET /healthz` | liveness and version |
-| `GET /status` | data freshness and payments. It shows the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. It also shows each payment network's facilitator, transfer method, fee, floor and margin, and the credit terms. Edge-cached 60 s |
+| `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation keys (the current `kid`, today `jev-attest-v1`, plus the next one during a rotation), `did:web` document |
+| `GET /.well-known/security.txt` | how to report a vulnerability (RFC 9116) |
+| `GET /healthz` | version, deployed commit, and attestation-key health: 503 while the key cannot sign verifiable attestations |
+| `GET /status` | data freshness and payments. It shows the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. It also shows each payment network's facilitator, transfer method, fee, floor and margin, the credit terms, the attestation key (`kid`, thumbprint, self-check) and the last model canary. Edge-cached 60 s |
+
+Plain HTTP is never served: a page gets a 301 to HTTPS and an API call a 403, before its body or token is read. Every response carries HSTS, `nosniff` and a `Referrer-Policy`; the site also has a strict CSP.
 
 ## Layout
 
 - `worker.ts` — entry point: routing, CORS, `/healthz`, `/status`, embedded MetaMask and Forta sets (`.bin` Data modules)
 - `fresh-feeds.ts` — runtime refresh of OFAC and MetaMask from the `feeds` branch (checksums, counts, no large shrink), in the background
-- `protected.ts` — the paid flow: validate → price (per item and network) → verify payment → evaluate → settle → release; facilitator routing by compatibility and cost, and `/status` payment routes
+- `protected.ts` — the paid flow: validate → price (per item and network) → verify payment → screen the payer → claim the payment → evaluate → settle → release; facilitator routing by compatibility and cost, `/status` payment routes, and the attestation key's load-time check
+- `payment-claims.ts` — `PaymentClaim` Durable Object: each x402 payment is claimed once (binding `PAYMENT_CLAIMS`, migration `v4`)
+- `http-util.ts` — body cap while streaming, settlement receipts and records, the payer's OFAC screen
+- `model-canary.ts` — fixed cases through the live model, twice a day (cron), shown in `/status` → `model`
+- `scamsniffer-refresh.ts` — ScamSniffer domain and address sets rebuilt into KV twice a day (cron), parsed as a stream
 - `pricing.ts` — prices by payment network, the simulation price, micro-dollar arithmetic
 - `credits.ts` — prepaid credits: the `CreditLedger` Durable Object (one per token), purchase, balance and spending
 - `cdp.ts` — the Coinbase CDP facilitator: a JWT per call, signed with WebCrypto from the Worker secrets
@@ -32,7 +39,12 @@
 2. **Every evaluation is paid; there is no free tier.**
    - **Price:** the x402 price is unit × units, 1 unit per evaluation, so a batch of *n* costs *n*. `adapter.getBody()` exposes the validated body to the SDK's dynamic price.
    - **Unpaid request:** it gets the `402` challenge with the accepted options.
-   - **Paid request:** verify → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed` and no attestation is returned.
+   - **Paid request:** verify → screen the payer → claim the payment → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed`, no attestation is returned, and the claim is released so the payer can retry.
+   - **Only x402 v2** payloads are processed; anything else gets the v2 challenge.
+   - **A payer on the OFAC SDN list** gets `403 payer_sanctioned`, before any evaluation or settlement.
+   - **Single use:** a payment is claimed once, when it verifies (`PaymentClaim`, one Durable Object per payload, kept 24 h). A copy gets `409 payment_already_used`; a claim store that cannot be reached refuses the payment (`503`, no charge).
+   - **The attestation key:** on x402check.xyz, a missing or mismatched key pair makes every paid route answer `503 attestation_key_unavailable` (no charge).
+   - Every settlement is recorded in KV (`st:<network>:<tx>`, 400 days) for reconciliation against the chain.
 3. **Facilitator routing** (`paymentRouting` in `protected.ts`, recomputed every 10 minutes). For each network the router picks, in order:
    1. a facilitator that accepts our price (Dexter refuses payments below its floor);
    2. one every payer can pay through: EIP-3009 (PayAI, Coinbase CDP) over Dexter's EVM Permit2, which needs an on-chain allowance most wallets lack;
@@ -52,30 +64,34 @@
    - a batch is the sum of its items;
    - the discovery document states `amounts_by_network`, `amount_with_transaction` and the `credits` terms.
 5. **Prepaid credits** (`deploy/credits.ts`, Durable Object binding `CREDITS`, migration `v3`):
-   - **Purchase:** a pack costs its face value on every network. After settlement the token's ledger is credited, keyed by the settlement's transaction, so it is credited once.
-   - **Checks:** a check with the token debits the ledger atomically, runs, and is refunded when no verdict is produced. There is no 402 and no settlement.
+   - **Purchase:** a pack costs its face value on every network. After settlement the token's ledger is credited, keyed by the settlement's transaction, so it is credited once. If the ledger cannot be written, the buyer still gets the token (`202`, `status: "pending"`) and the cron applies the queued credit (`pc:*` in KV, holding the token's SHA-256, never the token).
+   - **Checks:** a check with the token debits the ledger atomically, runs, and is refunded when no verdict is produced, including when the evaluation throws or the client disconnects (the refund runs in `waitUntil`). The simulation surcharge is refunded when the simulation did not run. There is no 402 and no settlement.
    - **Storage:** the token is shown once. Only its SHA-256, the ledger's name, is stored.
-6. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet. **Never enable it in production**: testnet USDC is free.
+6. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet on a local host only; on x402check.xyz it is ignored and logged, because testnet USDC is free.
+7. **Outages:** a facilitator's `/supported` has 5 s and verify/settle 30 s. A network whose facilitator is down leaves the 402 challenge, a failed stack build is never cached, and identity documents and the site never wait for the payment stack.
+8. **Rate limit:** unpaid, unauthenticated requests to paid routes, and `/status`, are limited to 60 a minute per IP (`UNPAID_LIMITER`).
 
 ## Secrets and variables
 
 ```bash
 cd deploy
 wrangler secret put AI_GATEWAY_API_KEY          # or TYPESAFE_API_KEY
-wrangler secret put JEV_ATTEST_PRIVATE_KEY      # PEM: SEC1 "EC PRIVATE KEY" or PKCS#8 — keep it stable
+wrangler secret put JEV_ATTEST_PRIVATE_KEY      # PEM: SEC1 "EC PRIVATE KEY" or PKCS#8 (escaped \n newlines are accepted)
 wrangler secret put JEV_ATTEST_PUBLIC_JWK       # the matching public JWK (kty/crv/x/y/kid/alg/use)
+# only during a rotation (AGENTS.md §3.12): the next public JWK, published in jwks.json and did.json before it signs
+wrangler secret put JEV_ATTEST_NEXT_PUBLIC_JWK
 # optional: settle through Coinbase CDP (portal.cdp.coinbase.com → API Keys → Secret API key, Ed25519, no IP allowlist)
 wrangler secret put CDP_API_KEY_ID              # the key's id
 wrangler secret put CDP_API_KEY_SECRET          # its secret: base64 Ed25519, or an EC key in PEM
 ```
 
-The public JWK must be derived from the private PEM:
+The public JWK must be derived from the private PEM. A new key needs a **new** `kid` (for example `jev-attest-v2`); replace `KID` below:
 
 ```bash
-node -e 'const c=require("crypto");const k=c.createPublicKey(require("fs").readFileSync("jev-attest.pem","utf8")).export({format:"jwk"});console.log(JSON.stringify({kty:"EC",crv:"P-256",x:k.x,y:k.y,kid:"jev-attest-v1",alg:"ES256",use:"sig"}))'
+node -e 'const c=require("crypto");const k=c.createPublicKey(require("fs").readFileSync("jev-attest.pem","utf8")).export({format:"jwk"});console.log(JSON.stringify({kty:"EC",crv:"P-256",x:k.x,y:k.y,kid:"KID",alg:"ES256",use:"sig"}))'
 ```
 
-Keep the PEM outside the repository with `chmod 600`. Without the secret, the Worker falls back to an ephemeral key, which is demo-only: attestations stop verifying across isolates.
+Keep the PEM outside the repository with `chmod 600`. At load the Worker checks that both secrets are present, that the private key matches the public JWK, and that a canary attestation signs and verifies. On x402check.xyz a failure makes paid routes refuse all work with no charge, and `/healthz` answers 503 with `/status` → `attestation.reason`. Only a local host falls back to an ephemeral key. The SDK and the MCP server pin the key by thumbprint, so a rotation follows AGENTS.md §3.12: pin the new thumbprint in a client release first.
 
 Optional variables:
 
@@ -84,7 +100,8 @@ Optional variables:
 | `ENABLE_TESTNETS` | `"true"` adds testnet payments (staging only) |
 | `ONCHAIN` | `"off"` disables provider-side JSON-RPC lookups |
 | `RPC_URLS` | JSON `{caip2: url}` overriding the public RPCs in `src/onchain.ts` |
-| `SOL_RPC_URL_MAINNET` | Solana RPC for on-chain facts and x402 Solana settlement |
+| `SOL_RPC_URL_MAINNET` | Solana RPC for on-chain facts and for x402 Solana payment requirements (default for the latter: publicnode; `api.mainnet-beta.solana.com` refuses Worker egress) |
+| `GIT_COMMIT` | set by `scripts/deploy.sh`; shown in `/healthz` |
 | `SIMULATION` | `"off"` disables transaction simulation (`eth_simulateV1`) |
 | `SIMULATION_RPC_URLS` | JSON `{caip2: url}` overriding the simulation RPCs (they must serve `eth_simulateV1`) |
 | `CONTRACT_INTEL` | `"off"` disables contract-verification lookups (Blockscout) |
@@ -97,7 +114,7 @@ Optional variables:
 npm run ofac:update                                  # OFAC SDN → src/data/ofac-sdn.ts (commit it)
 npm run feeds:update                                 # MetaMask list → src/data/*.bin + threat-feeds.ts (commit it)
 npx tsx scripts/update-threat-feeds.ts --forta       # + Forta drainer-code fingerprints → src/data (static dataset)
-npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer domains, addresses and code fingerprints → KV (binding RATE), 4 writes
+npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer domains, addresses and code fingerprints → KV (binding RATE), 4 writes; the cron refreshes domains and addresses on its own
 ```
 
 - OFAC and MetaMask are embedded **and** refreshed at runtime. `.github/workflows/feeds.yml` rebuilds them daily with a read-only token and no install scripts. A separate job signs the manifest with Ed25519 and publishes it to the `feeds` branch; the key is in the `FEEDS_SIGNING_KEY` repository secret.
@@ -109,7 +126,7 @@ npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer do
 
   Otherwise it keeps the current list. `/status` shows which version is in use.
 - **To rotate the publisher key,** generate a new Ed25519 key, store the PKCS#8 PEM with `gh secret set FEEDS_SIGNING_KEY`, put the raw public key (base64url) in `FEEDS_PUBLIC_KEY`, and deploy.
-- ScamSniffer lives only in KV and is picked up within an hour. Refresh it daily; the public data already lags 7 days. The code fingerprints come from the listed addresses' runtime code on 7 EVM chains (about 2 minutes via publicnode).
+- ScamSniffer lives only in KV and is picked up within an hour. The Worker's cron rebuilds the domain and address sets at 05:37 and 17:37 UTC (`scamsniffer-refresh.ts`: a list that shrank by half is refused, and the code set keeps its own date, `code_as_of`). `/status` marks the feed stale after 3 days without a refresh. The code fingerprints come from the listed addresses' runtime code on 7 EVM chains (about 2 minutes via publicnode), with the manual upload above.
 - Every attestation states the date and status of each list it consulted (`checks.sanctions`, `checks.feeds`).
 
 ## Kit watch
@@ -137,10 +154,14 @@ npx tsx scripts/hunt-kits.ts --chain eip155:1 --upload-all  # watchlist, delegat
 ```bash
 npm test && npm run typecheck
 X402CHECK_BASE=http://localhost:8799 npm run security:v2      # against `wrangler dev --local --port 8799`
-cd deploy && wrangler deploy
+git push origin main                                           # then wait for CI on that commit
+scripts/deploy.sh                                              # refuses unless the tree is clean, HEAD is main on GitHub and CI passed
 export PAY_NETWORK=eip155:8453                                 # pay the probes in USDC on Base
-npm run security:v3 && npm run security:v2 && npm run prod     # against production (~$0.07, every evaluation paid)
-wrangler rollback                                              # previous version, if anything regresses
+npm run security:v5 && npx tsx eval/replay.ts                  # against production (~$0.11, every evaluation paid)
+PAY=none npx tsx eval/bazaar.ts                                # the Bazaar listing, read-only
+npx wrangler rollback                                          # previous version, if anything regresses
 ```
 
-Every evaluation is paid, so the production suites need a funded payer. They read the key from `~/.config/paysol/payer-evm.key` (Base USDC; the x402 exact scheme is gasless for the payer), or `payer-sol.b58` for Solana. Each report records the settlement tx hashes. Without a payer, the probes that need a verdict are reported as SKIP, never as PASS.
+Then check `/healthz` (version, commit, `attestation_key: "ok"`) and `/status` (routes, facilitators, kit watch lag 0 and gaps 0). `security:v3` and `security:v4` are historical suites: against another version they stop before paying.
+
+Every evaluation is paid, so the production suites need a funded payer. They read the key from `~/.config/paysol/payer-evm.key` (Base USDC; the x402 exact scheme is gasless for the payer), or `payer-sol.b58` for Solana. The `security:v5`, `replay`, `bazaar` and `mcp-pay` reports record the settlement transactions. Without a payer, the probes that need a verdict are reported as SKIP, never as PASS.

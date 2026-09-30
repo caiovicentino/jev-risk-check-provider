@@ -1,8 +1,12 @@
-# Evidence — x402check v0.5 (v0.3.0–v0.5.0)
+# Evidence — x402check v0.6 (v0.3.0–v0.6.0)
+
+**v0.6.0** is the audit release (2026-09-30). It closes paths around the rules rather than adding new ones, and it re-measures the signing guard. It was measured in production on v0.6.0 (Worker commit `339a883`) on 2026-09-30 (UTC); see the next section.
 
 **v0.5** changes how checks are paid, not how they are made. It adds per-network prices, facilitator routing by compatibility and cost, and prepaid credits. **v0.5.1** adds Coinbase CDP as a facilitator. Both were measured in production on 2026-09-30 (UTC) by `eval/security-v5.ts`, with `eval/security-v2.ts` re-run (§7).
 
-All other numbers were measured on 2026-09-29. **v0.4** adds the kit watch and the first shadow of a facilitator's real traffic (§0); it was measured on the v0.4.0 code without model calls:
+**Dates.** The signing guard, `x402check_pay`, the Bazaar payee sample, the Solana guard, the Bazaar listing and x402scan were measured on 2026-09-30, and the guard and the payee sample were re-measured on v0.6.0 the same day. Everything else was measured on 2026-09-29.
+
+**v0.4** adds the kit watch and the first shadow of a facilitator's real traffic (§0); it was measured on the v0.4.0 code without model calls:
 
 - the kit watch backfill (`scripts/hunt-kits.ts`, the same code the Worker cron runs);
 - `eval/kit-watch.ts`: precision on held-out legitimate code, template recall, the poisoner audit and the forwarder audit;
@@ -16,32 +20,49 @@ The v0.3 layers (§1–§5) were measured on the v0.3.0 code:
 - two layers that make no model calls, `eval/simulation.ts` and `eval/code-fingerprint.ts`;
 - local workerd runs of the production Worker, and production probes (§7).
 
-Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not, and neither is the kit-watch watchlist (it is the provider's private data). Every rate carries a Wilson 95% interval. The rulebook these numbers measure is [`METHODOLOGY.md`](METHODOLOGY.md).
+Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked in git; the raw per-call logs are not, and neither is the kit-watch watchlist (it is the provider's private data). An address or domain that only ScamSniffer lists (GPL-3.0) appears in a report as `ss:<16 hex>`, the first 16 hex digits of its SHA-256 (`eval/redact.ts`). Every rate carries a Wilson 95% interval. Wilson intervals assume independent samples; where a sample takes several transactions from one contract, the contract-level figure is given too. A number that was measured but is not in a tracked report says so. The rulebook these numbers measure is [`METHODOLOGY.md`](METHODOLOGY.md).
+
+## v0.6.0 in production (new)
+
+The Worker at commit `339a883`, deployed with `scripts/deploy.sh` after CI passed. Every probe below was paid by the probe payer to our own `pay_to`, or from its prepaid credits.
+
+| Probe | Result |
+|---|---|
+| **Single-use payments** (`eval/replay.ts`, `replay-report.json`): one check paid per call on Base, and the same `PAYMENT-SIGNATURE` sent twice more at the same moment, so all three verify before anything settles | **PASS.** One copy was evaluated and settled; the other two got `409 payment_already_used`. A copy sent after settlement also got 409. Before v0.6.0, all three would have been evaluated. |
+| **`npm run security:v5`** (`security-v5-report.json`): prices, routes, per-call and credit payments | **11/11 PASS.** Both settlements (a per-call check and a $0.10 credit pack) went through Coinbase CDP, the Base route. |
+| **The model canary's three cases**, sent once from credits through the full production pipeline | injected instruction: **critical** (7); drain request: **critical** (0); a configured payment: **low** (95). This was a one-off run, not a tracked report. The cron's own canary result is in `/status` → `model`. |
+| **`x402check_pay`**, the MCP server 0.3.0 build (`eval/mcp-pay.ts`, `mcp-pay-report.json`) | One real payment settled on Base in 4.8 s, **to x402check's own `pay_to`, a trusted payee that is not checked**. No secret in the output or on stderr. |
+| **Bazaar payees, seed 402** (`eval/pay-guard.ts`, `pay-guard-report.json`) | **25/25 allowed** (see below) |
+| **`scripts/verify-attest.ts`** on a fresh production attestation | Valid when bound to the exact request (`--request`, `--max-age 300`, key pinned). With another request: `request_mismatch`. With another pin: `key_not_pinned`. Ad hoc, not a tracked report. |
+| **HTTP** | Plain HTTP: a page gets 301 to HTTPS, an API call 403. HSTS, `nosniff`, `Referrer-Policy`; a CSP on the site, whose fonts, video and live counter still load with no violation. |
+| **x402scan's requirements** | An unpaid POST with no body gets 402, and `HEAD /favicon.ico` 200. |
+
+**Latency.** From credits a check took 0.5–0.8 s (664 and 538 ms in `security:v5`, 0.6–0.7 s for two of the canary's calls; its first call, just after the deploy, took 2.8 s). Paid per call, a check took **4.7 s** end to end in this run (402, payment, evaluation, settlement). Earlier single samples: 2.7 s through PayAI (v0.5.0), 3.7 s through CDP (v0.5.1). These are single samples; no p95 is published yet.
 
 ## Guarded x402 payments (`@x402check/mcp` 0.2.0, new)
 
 `x402check_pay` is a tool of the MCP server. It fetches an x402 resource and pays for it only after x402check clears the exact option about to be signed: the payee, network, asset, amount and the resource's site. The check runs inside the x402 client's `onBeforePaymentCreation` hook, and its attestation is verified and bound to that request. A `warn` is paid only if the user approves it in the client (MCP elicitation). Nothing else can approve it.
 
 **A real payment through the tool, in production** (`eval/mcp-pay.ts`, `mcp-pay-report.json`):
-- the built server (`packages/mcp/dist/index.js`, 0.2.0) was driven over stdio with plain JSON-RPC, as an MCP client drives it;
+- the built server (`packages/mcp/dist/index.js`; 0.2.0 at first, 0.3.0 in the report now) was driven over stdio with plain JSON-RPC, as an MCP client drives it;
 - the tool bought a paid x402check call ($0.0035), with our own `pay_to` as the payee, so no third party was paid;
-- **settled on Base** by the facilitator (tx `0x4468b7d4…6680`), with the receipt, the result and the verdict returned in 3.6 s;
+- **settled on Base** by the facilitator, with the receipt, the result and the verdict returned in 3.6 s (0.2.0) and 4.8 s (0.3.0);
 - no secret appeared in the output or on stderr (the key and the credit token were checked for);
-- x402check's own `pay_to` is a trusted payee, so this run proves the payment path; the check path is measured next.
+- **x402check's own `pay_to` is a trusted payee that is not checked**, so this run proves the payment path only. The check path is measured next, on real merchants' payees. The full path (check, then pay a third party) has not been run with a real payment.
 
 **Real x402 merchants** (`eval/pay-guard.ts`, `pay-guard-report.json`). Method:
-- 25 distinct payees were drawn at random (seed 402) from the Coinbase x402 Bazaar, the public catalog of 19,725 resources, from 83 Base USDC payees in two random windows of the catalog;
-- each was checked against production exactly as the tool checks a payment before signing it;
+- 25 distinct payees were drawn at random (seed 402) from the Coinbase x402 Bazaar, the public catalog (19,735 resources, 8 pages read), from 83 Base USDC payees;
+- each was checked against production (v0.6.0) exactly as the tool checks a payment before signing it;
 - nothing was paid to them: only the checks were bought, from prepaid credits ($0.025).
 
 | Verdict | Payees |
 |---|---|
-| `allow` (the tool would pay) | **24/25 (96.0%, 95% CI 80.5–99.3%)** |
-| `warn` (paid only if the user approves in the client) | 1: a model finding ("fraud signals") on a prediction-market URL, for a new payee |
-| `block`, `not_verified` | 0 |
+| `allow` (the tool would pay) | **25/25 (100%, 95% CI 86.7–100%)** |
+| `warn`, `block`, `not_verified` | 0 |
 
-- 6 payees had no on-chain history at all. 5 were still allowed, with a "new address" note: a fresh merchant wallet alone does not stop an agent.
+- 12 payees carried the "new address" note (no or little on-chain history) and were still allowed: a fresh merchant wallet alone does not stop an agent. Each check took 0.5–1.0 s.
 - Listed merchants are not known to be benign, so this is not a false-positive rate. It is how often an autonomous agent would be stopped on the catalog's merchants, and why.
+- **Correction.** The first run (v0.5.5, 2026-09-30) was published as "seed 402, 24/25 allowed". A parser bug in the eval scripts read the Node binary's path when a flag was absent, so that sample was drawn with seed 0, not 402 (fixed in `eval/flags.ts`). The run above is the first with the published seed.
 
 **Tests:** `packages/mcp/test/pay.test.ts`, 16 tests. They cover:
 - every outcome, and the user's decision through elicitation (approve, decline, cancel);
@@ -54,7 +75,7 @@ Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked 
 
 `guardSolanaSigner()` wraps a `@solana/kit` signer. Every transaction is decoded, including v0 lookup tables and the owners of receiving token accounts, and its counterparties are checked before the key signs.
 
-**Real inputs** (`eval/solana-guard.ts`, `solana-guard-report.json`). The inputs used the real Solana mainnet RPC and production checks from prepaid credits. Nothing was sent to the network and no funds moved.
+**Real inputs** (`eval/solana-guard.ts`, `solana-guard-report.json`). The inputs used the real Solana mainnet RPC and production checks from prepaid credits. Nothing was sent to the network and no funds moved. **One case is a real x402 payment; the other three were constructed by the eval, with the expected decision set by the project.** 4/4 decided as expected (95% CI 51.0–100%): this shows the paths work, not a rate.
 
 | Case | Decision | How |
 |---|---|---|
@@ -68,30 +89,35 @@ Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked 
 - ATA-created and on-chain token-account owners, and lookup tables (resolved or not);
 - local drains, unreadable instructions, batches, messages and Sign-In With Solana.
 
-## Signing guard (`@x402check/client` 0.2.0)
+## Signing guard (`@x402check/client` 0.2.0; re-measured with 0.4.0)
 
 `guardAccount()` wraps the account an agent signs with. A signature request is decoded (the real counterparty inside the calldata or typed data), checked, and its attestation verified and bound to that exact request. Only then does the key sign; otherwise the guard throws.
 
-**Real mainnet transactions** (`eval/guard.ts`, `guard-report.json`). The cases are the exact transactions of the last `eval/simulation.ts` run:
-- transactions that victims sent to ScamSniffer-listed drainer contracts;
-- recent transactions to 21 well-known contracts.
+**Real mainnet transactions** (`eval/guard.ts`, `guard-report.json`, re-run on the v0.6.0 code on 2026-09-30). The cases are the exact transactions of the `eval/simulation.ts` run of 2026-09-29:
+- 56 transactions that victims sent to 20 ScamSniffer-listed drainer contracts;
+- 228 recent transactions to well-known contracts (30 distinct counterparties).
 
-Each was re-fetched and handed to the guard as the signature request an agent's account would make. The **real provider** ran in process: simulation on public mainnet RPCs at the latest block, OFAC, the MetaMask list, Forta code fingerprints, on-chain facts and contract verification. **The ScamSniffer feed was off** (the drainer contracts come from it) and the model was neutral, so every refusal below comes from what the transaction does, not from a list.
+Each was re-fetched and handed to the guard as the signature request an agent's account would make. The **real provider** ran in process: simulation on public mainnet RPCs at the latest block, OFAC, the MetaMask list, Forta code fingerprints, on-chain facts and contract verification. **The ScamSniffer feed was off** (the drainer contracts come from it) and the model was neutral, so every refusal below comes from what the transaction does, not from a list. The guard pinned the in-process provider's key, so every attestation was verified as in production.
 
 | Transactions | Refused (the key never signs) | Signed |
 |---|---|---|
-| Drainer transactions that still move the victim's assets at the latest block | **22/25 (88%, 95% CI 70.0–95.8%)** | 3 |
-| Drainer transactions that move nothing at the latest block (already drained) | 0/8 | 8 (nothing left to lose) |
-| Legitimate transactions (routers, lending, WETH, Lido, Seaport, token transfers) | **0/228 (95% CI 0.0–1.7%)** | 228 |
-| Attestations that failed to verify or bind | 0/282 | |
+| Drainer transactions that still move the victim's assets (25, from 11 contracts) | **22/25 (88%, 95% CI 70.0–95.8%)**; by contract **10/11 (62.3–98.4%)** | 3, all from one contract |
+| Drainer transactions that execute but moved nothing in the simulation run (already drained) | 0/8 | 8 (nothing left to lose) |
+| Drainer transactions that revert at the latest block, or were not simulated | 0/23 | 23 (they cannot execute) |
+| Legitimate transactions that move assets | **0/49 (0.0–7.3%)** | 49 |
+| Legitimate transactions that execute (simulated OK in the simulation run) | **0/84 (0.0–4.4%)** | 84 |
+| All legitimate transactions (144 of them revert at the latest block) | **1/228 (0.4%, 0.1–2.4%)**, as `not_verified` | 227 |
 
-- **Why it refused:**
+- **Why it refused the drainers:**
   - 18 transactions were refused by the simulation: the assets end with a wallet the signer never named;
   - 4 by drainer code (Forta fingerprints, an independent source). Simulation alone had missed these 4 (18/25 in `simulation-report.json`).
-- **The 3 misses** simulate cleanly: nothing in what they do at the latest block looks like a drain.
+- **The 3 misses** are the three transactions of one contract, and they simulate cleanly: nothing in what they do at the latest block looks like a drain.
+- **The one legitimate refusal** is a transaction whose calldata is too large to simulate (it also reverted in the simulation run). Since v0.6.0 the guard refuses such a transaction (`not_simulated`) rather than sign it on an address check alone.
+- **Denominators.** A reverting transaction cannot trigger the simulation rules, so the legitimate rate is stated on the 49 that move assets and the 84 that execute. The drainer and legitimate samples take up to 3 transactions per contract; the Wilson intervals treat transactions as independent, so the contract-level figure is the more conservative one (legitimate: 0 of 30 counterparties refused, 0.0–11.4%).
 
 **In production** (`eval/guard-production.ts`, `guard-production-report.json`):
-- the guard against `https://x402check.xyz`, paid from prepaid credits ($0.005 per simulated check), agreed on **4/4** transactions: 2 drainers blocked, 2 legitimate allowed, in 0.6–2.3 s;
+- the guard against `https://x402check.xyz`, paid from prepaid credits ($0.005 per simulated check), agreed with the in-process guard on **4/4** transactions: 2 drainers blocked, 2 legitimate allowed, in 0.6–2.3 s;
+- **both legitimate transactions revert at the latest block** (`simulation_reverted`), so production has not yet exercised a legitimate transaction that executes;
 - there, the drainers also hit the ScamSniffer list (`known_scam_address`) and the kit watch (`compromised_wallet`).
 
 **Unit and end-to-end tests:**
@@ -102,19 +128,22 @@ Each was re-fetched and handed to the guard as the signature request an agent's 
 
 ### What the watch saw
 
-The same code as the production cron read every block of the windows below. Public lists name almost none of what it found.
+A **backfill** (`scripts/hunt-kits.ts`, the same code as the production cron, run before the cron was deployed) read every block of the windows below. None of what it flagged was on ScamSniffer's list at measurement time. That list publishes with a 7-day delay, so an overlap of 0 was expected by construction: **the watch's lead time over the public lists is not yet measured**, and ScamSniffer is the only list compared.
 
 | | Ethereum, 24 h (7,200 blocks) | Base, 6 h (10,800 blocks) |
 |---|---|---|
-| EIP-7702 authorizations read | 37,843 | 15,912 |
-| Delegates classified | 196 | 95 |
-| Contracts created at the top level | 1,254 | 1,712 |
+| EIP-7702 authorizations read † | 37,843 | 15,912 |
+| Delegates classified † | 196 | 95 |
+| Contracts created at the top level † | 1,254 | 1,712 |
 | **Look-alikes delegated to the poisoning executor** | **6,232** | 0 |
 | Wallets delegated to a labelled sweeper family | 16 | 12 |
 | Wallets delegated to a forwarder (behaviour, no label) | 559 | 204 |
-| Destinations of forwarders (plain wallets only) | 24 | 10 |
-| New contracts in an old drainer-kit family | **0** of 1,254 | **0** of 1,712 |
-| Flagged addresses on ScamSniffer's public list | **0** of 6,831 | **0** of 226 |
+| Destinations of forwarders (plain wallets only) ‡ | 24 | 10 |
+| New contracts in an old drainer-kit family † | **0** of 1,254 | **0** of 1,712 |
+| Flagged addresses on ScamSniffer's list (published with a 7-day delay) | **0** of 6,831 | **0** of 226 |
+
+† From the backfill's logs (`.cache/intel/hunt-*.log`, not tracked); `kit-watch-report.json` records the flagged addresses by kind, the families and the ScamSniffer overlap.
+‡ Since v0.6.0 a forwarder's destinations are no longer recorded: whoever deploys a forwarder chooses them, so they prove nothing about the destination (METHODOLOGY §2).
 
 Reading:
 
@@ -156,12 +185,12 @@ Reading:
   4. Families that come only from an address hard-coded in a listed contract are dropped, because that target is whatever the contract calls. Uniswap's V2 router entered this way.
 - **After the fix:**
   - the embedded Forta set went from 46 to 27 fingerprints; the ScamSniffer set is unchanged (52);
-  - the kit registry went from 109 families to 85;
+  - the kit registry shrank (109 families to 85, measured locally and not in a tracked report). `kit-watch-report.json` records the registry the watch runs: 124 families (94 drainer kits, 7 sweepers, 1 poisoner and 22 forwarder families learned from behaviour);
   - the paid production probes (§7) confirm that a Luno deposit address and a BitGo forwarder now score low.
 - **Second held-out run (pages 81–120 and fresh callees, after these rules):**
-  - **Ethereum: 1 match among 1,737 fingerprintable contracts.** On review, it is a real `SecurityUpdates` drainer. Its verified source has a payable `SecurityUpdate()` and an owner-only `withdraw`, and victims paid into it in 2023. It is on no public list we use, and it entered the "legitimate" corpus because it was re-verified on Blockscout that day.
+  - **Ethereum: 1 match among 1,737 fingerprintable contracts** (the report's raw figure: 0.058%, 0.010–0.325%). On our own review, it is a real `SecurityUpdates` drainer. Its verified source has a payable `SecurityUpdate()` and an owner-only `withdraw`, and victims paid into it in 2023. It is on no public list we use, and it entered the "legitimate" corpus because it was re-verified on Blockscout that day.
   - **Base: 0 matches among 2,935.**
-  - **False positives: 0/1,737 on Ethereum (0.00–0.22%) and 0/2,935 on Base (0.00–0.13%).**
+  - **False positives, counting that review: 0/1,737 on Ethereum (0.00–0.22%) and 0/2,935 on Base (0.00–0.13%).** The review is ours, not an external label, and the report records the raw match.
   - A corpus of verified and called contracts is not guaranteed clean: every match is reviewed before it is counted either way.
 
 **Template fingerprints: a negative result.**
@@ -254,9 +283,9 @@ A fingerprint is the SHA-256 of a contract's runtime code without the compiler-m
 
 Reading:
 
-- **Most drainer contracts are redeployments of a few kits.** "SecurityUpdates" alone accounts for 13 listed contracts. A continuously updated fingerprint set would have recognized 43% of listed contracts *when they were created*, before their own address could be listed.
+- **Most drainer contracts are redeployments of a few kits.** "SecurityUpdates" alone accounted for 13 listed contracts (counted during development; not in a tracked report). A continuously updated fingerprint set would have recognized 43% of listed contracts *when they were created*, before their own address could be listed.
 - **Fingerprints generalize across deployments, not across eras.** The 2023 set catches 15% of today's listed contracts.
-- **The exclusions are what make the signal safe.** Before they were added, 27 legitimate contracts collided with listed fingerprints, including the SHIB token: lists contain fake-token clones whose code is identical to the real token's.
+- **The exclusions are what make the signal safe.** Before they were added, 27 legitimate contracts collided with listed fingerprints, including the SHIB token: lists contain fake-token clones whose code is identical to the real token's. (That count is from development and is not in a tracked report; the report records the result with the exclusions.)
 - **After the exclusions, 0 of 9,625 contracts collided.** The scan followed EIP-7702 delegations, proxies and hard-coded links, exactly as runtime matching does:
   - 2,018 contracts were fingerprintable, 1,327 of them only through a delegate or implementation;
   - the corpus also included 3,385 tokens, 4,065 delegating contracts and 1,055 delegated accounts.
@@ -298,7 +327,8 @@ Reading: the model detects risk that is **present in the content it is given**. 
 ## 6. What each number does NOT show
 
 - Real x402 facilitator traffic has been shadowed for one facilitator and one week, from public data and with the deterministic layers only (§0): 3,132 payments, none flagged. All model-in-the-loop corpora are synthetic or curated.
-- The kit watch's volumes are one day on Ethereum and six hours on Base. Its lead time over the public lists needs weeks of listings to measure: no flagged address was on ScamSniffer's list at measurement time, and that list lags 7 days.
+- The kit watch's volumes are one 24 h backfill on Ethereum and six hours on Base, not a day of the live cron. Its lead time over the public lists needs weeks of listings to measure: no flagged address was on ScamSniffer's list at measurement time, which that list's 7-day delay guarantees. Only ScamSniffer was compared.
+- The guard's samples take up to 3 transactions per contract, so transaction-level intervals overstate the precision; contract-level figures are given next to them.
 - ScamSniffer's public data lags 7 days. OFAC and MetaMask are refreshed daily by `.github/workflows/feeds.yml`. Before v0.3 they changed only with a deploy.
 - The simulation replays at the latest block. It says nothing about transactions whose preconditions no longer hold, and it is measured on Ethereum only; Base, Polygon, Arbitrum, Optimism and BSC use the same code path.
 - OFAC screening covers direct listing only; it does not detect funds received from listed addresses.
@@ -306,7 +336,7 @@ Reading: the model detects risk that is **present in the content it is given**. 
 
 ## 7. Production (`https://x402check.xyz`)
 
-**Every evaluation below was paid.** Each was either settled on-chain in USDC on Base through x402, or (v0.5) paid from prepaid credits bought that way. The transaction hashes are in the reports.
+**Every evaluation below was paid.** Each was either settled on-chain in USDC on Base through x402, or (v0.5) paid from prepaid credits bought that way. The settlement transactions are in the `security-v5`, `bazaar`, `replay` and `mcp-pay` reports. `prod-report.json` (v0.3) does not record them.
 
 - `prod` ran on Worker `d230e4a5`: the paid-only v0.3 code with EVM settlement through PayAI.
 - `security:v2` and `security:v3` ran on v0.3.2 (`3045ce10`), which adds simulation pricing.
@@ -323,6 +353,8 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run security:v4`: v0.4 kit watch and collision gate (Worker `5f8e17f0`) | **7/7 PASS** | 5 |
 | `npm run security:v5`: v0.5 prices, routing and prepaid credits (Worker `d9030314`, `security-v5-v0.5.0-report.json`) | **9/9 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack (one settlement) |
 | `npm run security:v5` on v0.5.1, settling through Coinbase CDP (Worker `08c5a2f6`) | **11/11 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack. Both settlements were sent by CDP signers |
+| `npm run security:v5` on v0.6.0 (commit `339a883`) | **11/11 PASS** | the same probes; per call 4,716 ms end to end, from credits 664 and 538 ms |
+| `eval/replay.ts` on v0.6.0: three copies of one payment at once | **PASS** | one evaluated and settled; two `409 payment_already_used`; a later copy 409 |
 
 The `security:v5` probes cover:
 - **the price table:** the discovery document and the 402 carry the seven per-network prices, and none mismatches. Base is offered through EIP-3009, so any wallet can pay it gaslessly;
@@ -453,13 +485,19 @@ npx tsx scripts/kit-catalog.ts && npx tsx scripts/legit-corpus.ts && npx tsx scr
 npx tsx scripts/hunt-kits.ts --chain eip155:1 --hours 24 && npx tsx scripts/hunt-kits.ts --chain eip155:8453 --hours 6
 npm run eval:kit-watch -- --sample 40 && npm run eval:kit-watch -- --second-holdout
 npx tsx scripts/payai-shadow.ts --days 7
+npx tsx eval/guard.ts                        # the signing guard on the simulation run's real transactions (in process, no money)
+npx tsx scripts/redact-evidence.ts --check   # no ScamSniffer-only entry in the committed reports
+# ↓ against production: every evaluation is paid (funded payer key and credit token in ~/.config/paysol)
 PAY_NETWORK=eip155:8453 npm run security:v5    # spends $0.1035: one per-call check and a $0.10 credit pack; reports who settled each
-npx tsx eval/mcp-pay.ts                      # one real payment through x402check_pay, to x402check itself ($0.0035)
+PAY_NETWORK=eip155:8453 npx tsx eval/replay.ts # single-use payments: $0.0035 (three copies of one payment, one settles)
+PAY=none npx tsx eval/bazaar.ts              # the Bazaar listing, read-only; without PAY=none it pays two checks ($0.007)
+npx tsx eval/mcp-pay.ts                      # one real payment through x402check_pay, to x402check's own pay_to, a trusted payee not checked ($0.0035)
 npx tsx eval/pay-guard.ts --n 25 --seed 402  # 25 Bazaar payees checked from prepaid credits ($0.025); nothing paid to them
-npx tsx eval/solana-guard.ts                 # the Solana guard on a real x402 payment and real drain patterns ($0.002 of checks; nothing sent)
-PAY_NETWORK=eip155:8453 npm run security:v4
-PAY_NETWORK=eip155:8453 npm run security:v3 && PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
-# ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.35 in total at v0.5 prices)
+npx tsx eval/guard-production.ts             # the guard against production, from prepaid credits (~$0.02)
+npx tsx eval/solana-guard.ts                 # the Solana guard on a real x402 payment and constructed drain patterns ($0.002 of checks; nothing sent)
+npx tsx scripts/verify-attest.ts <jws> --request '<the exact body>' --max-age 300   # verify one attestation, bound to its request
+PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
+# security:v3 and security:v4 are historical suites: against another version they stop before paying.
 ```
 
 Historical meta-evaluations (`audit-report.json`, `crosslabel-report.json`, 2026-09-27) used the same model family to judge its own verdicts. They measure framing stability, not correctness, and are kept for the record.
