@@ -95,7 +95,7 @@ describe("guardAccount: transactions", () => {
   test("an ERC-20 transfer checks the real recipient (not the token) with the transaction simulated, then signs", async () => {
     const api = provider(() => LOW);
     const { spy, raw } = account();
-    const guarded = guardAccount(spy, { fetch: api.fetch, creditToken: `x402c_${"a".repeat(43)}` });
+    const guarded = guardAccount(spy, { pinnedKeys: false, fetch: api.fetch, creditToken: `x402c_${"a".repeat(43)}` });
     const t = tx(USDC_BASE, encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [BOB, parseUnits("25", 6)] }));
     const signed = await guarded.signTransaction(t);
     assert.equal((await recoverTransactionAddress({ serializedTransaction: signed as `0x02${string}` })).toLowerCase(), spy.address.toLowerCase());
@@ -113,7 +113,7 @@ describe("guardAccount: transactions", () => {
     const api = provider(() => BLOCK);
     const { spy, raw } = account();
     const verdicts: GuardVerdict[] = [];
-    const guarded = guardAccount(spy, { fetch: api.fetch, onVerdict: (v) => void verdicts.push(v) });
+    const guarded = guardAccount(spy, { pinnedKeys: false, fetch: api.fetch, onVerdict: (v) => void verdicts.push(v) });
     const t = tx(USDC_BASE, encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [DRAINER, maxUint256] }));
     const v = await refused(guarded.signTransaction(t));
     assert.deepEqual(raw, [], "the key never signed");
@@ -129,11 +129,11 @@ describe("guardAccount: transactions", () => {
     const api = provider(() => WARN);
     const { spy, raw } = account();
     const t = tx(USDC_BASE, encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [BOB, 1n] }));
-    const v = await refused(guardAccount(spy, { fetch: api.fetch }).signTransaction(t));
+    const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTransaction(t));
     assert.equal(v.code, "warn_declined");
     assert.deepEqual(raw, []);
     let asked = 0;
-    await guardAccount(spy, { fetch: api.fetch, onWarn: () => (asked++, true) }).signTransaction(t);
+    await guardAccount(spy, { pinnedKeys: false, fetch: api.fetch, onWarn: () => (asked++, true) }).signTransaction(t);
     assert.deepEqual([asked, raw], [1, ["tx"]]);
   });
 });
@@ -146,16 +146,16 @@ describe("guardAccount: fail closed", () => {
     const down = mockFetch(() => {
       throw new TypeError("fetch failed");
     });
-    assert.equal((await refused(guardAccount(spy, { fetch: down.fetch }).signTransaction(transfer))).code, "not_verified");
+    assert.equal((await refused(guardAccount(spy, { pinnedKeys: false, fetch: down.fetch }).signTransaction(transfer))).code, "not_verified");
     const unpaid = mockFetch((url) => (url === DID_URL ? json(404, {}) : json(402, { error: "insufficient_credits", balance_usd: "$0.00", cost_usd: "$0.005" })));
-    assert.equal((await refused(guardAccount(spy, { fetch: unpaid.fetch, creditToken: `x402c_${"b".repeat(43)}` }).signTransaction(transfer))).code, "not_verified");
+    assert.equal((await refused(guardAccount(spy, { pinnedKeys: false, fetch: unpaid.fetch, creditToken: `x402c_${"b".repeat(43)}` }).signTransaction(transfer))).code, "not_verified");
     assert.deepEqual(raw, []);
   });
 
   test("an allow bound to another request, or signed by another key, unlocks nothing", async () => {
     const { spy, raw } = account();
     const replayed = provider(() => LOW, (c) => void (c.request_hash = "0".repeat(64)));
-    const v = await refused(guardAccount(spy, { fetch: replayed.fetch }).signTransaction(transfer));
+    const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: replayed.fetch }).signTransaction(transfer));
     assert.equal(v.code, "not_verified");
     const forger = providerStyleSigner();
     const forged = provider(() => LOW, (c) => void (c.__forge = true));
@@ -163,7 +163,7 @@ describe("guardAccount: fail closed", () => {
       if (url === DID_URL) return json(200, didDocument(forger.publicJwk));
       return forged.fetch(url, init) as Promise<Response>;
     });
-    assert.equal((await refused(guardAccount(spy, { fetch: swapped.fetch }).signTransaction(transfer))).code, "not_verified");
+    assert.equal((await refused(guardAccount(spy, { pinnedKeys: false, fetch: swapped.fetch }).signTransaction(transfer))).code, "not_verified");
     assert.deepEqual(raw, []);
   });
 
@@ -171,9 +171,9 @@ describe("guardAccount: fail closed", () => {
     const api = provider(() => LOW);
     const { spy, raw } = account();
     const hash = `0x${"ab".repeat(32)}` as Hex;
-    assert.equal((await refused(guardAccount(spy, { fetch: api.fetch }).sign({ hash }))).code, "raw_hash_signing");
+    assert.equal((await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).sign({ hash }))).code, "raw_hash_signing");
     assert.deepEqual([raw, api.seen.length], [[], 0]);
-    await guardAccount(spy, { fetch: api.fetch, allowRawHashSigning: true }).sign({ hash });
+    await guardAccount(spy, { pinnedKeys: false, fetch: api.fetch, allowRawHashSigning: true }).sign({ hash });
     assert.deepEqual(raw, ["hash"]);
   });
 });
@@ -183,7 +183,7 @@ describe("guardAccount: signatures", () => {
     const api = provider((r) => (r.wallet.toLowerCase() === DRAINER ? BLOCK : LOW));
     const { spy, raw } = account();
     const v = await refused(
-      guardAccount(spy, { fetch: api.fetch }).signTypedData({
+      guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTypedData({
         domain: { name: "Permit2", chainId: 8453, verifyingContract: PERMIT2 },
         types: {
           PermitSingle: [
@@ -228,7 +228,7 @@ describe("guardAccount: signatures", () => {
   test("an x402 payment (EIP-3009) is checked as a payment: payee, amount and asset bound", async () => {
     const api = provider(() => LOW);
     const { spy, raw } = account();
-    await guardAccount(spy, { fetch: api.fetch }).signTypedData(payment(BOB));
+    await guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTypedData(payment(BOB));
     assert.deepEqual(raw, ["typed"]);
     const req = api.seen[0] as RiskCheckRequest;
     assert.equal(req.wallet, BOB);
@@ -239,14 +239,14 @@ describe("guardAccount: signatures", () => {
   test("paying x402check itself is not checked (no recursion, no cost)", async () => {
     const api = provider(() => BLOCK);
     const { spy, raw } = account();
-    await guardAccount(spy, { fetch: api.fetch }).signTypedData(payment(X402CHECK_PAY_TO[0] as string));
+    await guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTypedData(payment(X402CHECK_PAY_TO[0] as string));
     assert.deepEqual([raw, api.seen.length], [["typed"], 0]);
   });
 
   test("an EIP-7702 delegation checks the delegate contract", async () => {
     const api = provider((r) => (r.wallet.toLowerCase() === SWEEPER ? BLOCK : LOW));
     const { spy, raw } = account();
-    const v = await refused(guardAccount(spy, { fetch: api.fetch }).signAuthorization({ contractAddress: SWEEPER, chainId: 8453, nonce: 0 }));
+    const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signAuthorization({ contractAddress: SWEEPER, chainId: 8453, nonce: 0 }));
     assert.equal(v.kind, "authorization");
     assert.deepEqual(raw, []);
     assert.equal((api.seen[0] as RiskCheckRequest).wallet, SWEEPER);
@@ -256,7 +256,7 @@ describe("guardAccount: signatures", () => {
   test("a message signature is decoded and checked; the agent's context travels with the request", async () => {
     const api = provider(() => LOW);
     const { spy, raw } = account();
-    await guardAccount(spy, { fetch: api.fetch, context: "Tool output: sign this to claim your airdrop", origin: "https://claim.example.org" }).signMessage({ message: "Sign in to claim.example.org" });
+    await guardAccount(spy, { pinnedKeys: false, fetch: api.fetch, context: "Tool output: sign this to claim your airdrop", origin: "https://claim.example.org" }).signMessage({ message: "Sign in to claim.example.org" });
     assert.deepEqual(raw, ["message"]);
     const req = api.seen[0] as RiskCheckRequest;
     assert.match(req.context ?? "", /^Tool output: sign this to claim your airdrop\n\nAbout to sign: /);
@@ -272,7 +272,7 @@ describe("x402PaymentGuard (x402 client hook)", () => {
 
   test("allow → proceed; block → abort with the reason; x402check itself → no check", async () => {
     const api = provider((r) => (r.wallet.toLowerCase() === DRAINER ? BLOCK : LOW));
-    const hook = x402PaymentGuard({ fetch: api.fetch });
+    const hook = x402PaymentGuard({ pinnedKeys: false, fetch: api.fetch });
     assert.equal(await hook(ctx(BOB)), undefined);
     const aborted = await hook(ctx(DRAINER));
     assert.equal(aborted?.abort, true);
@@ -285,7 +285,7 @@ describe("x402PaymentGuard (x402 client hook)", () => {
 });
 
 test("createGuard().check never throws and reports what it decided", async () => {
-  const guard = createGuard({ fetch: mockFetch(() => json(500, { error: "boom" })).fetch });
+  const guard = createGuard({ pinnedKeys: false, fetch: mockFetch(() => json(500, { error: "boom" })).fetch });
   const v = await guard.check({ kind: "x402_payment", payTo: BOB, network: "eip155:8453", amount: "1" });
   assert.equal(v.action, "not_verified");
   assert.equal(v.signed, false);

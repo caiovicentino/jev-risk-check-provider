@@ -256,7 +256,7 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const bob = await fresh();
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     const signed = await signTransactionMessageWithSigners(await message(guarded, [ix.transfer(a.base.address, bob, 1_500_000_000n)]));
     const signature = signed.signatures[a.base.address];
     assert.ok(signature, "signed");
@@ -275,7 +275,7 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const [bob, mine, bobs] = [await fresh(), await fresh(), await fresh()];
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     await signTransactionMessageWithSigners(await message(guarded, [ix.createAta(a.base.address, bobs, bob, USDC), ix.transferChecked(mine, USDC, bobs, a.base.address, 2_500_000n)]));
     assert.deepEqual(a.raw, ["tx"]);
     assert.equal(w.seen[0]?.wallet, bob, "the owner, not the token account");
@@ -288,7 +288,7 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const [bob, mine, bobs] = [await fresh(), await fresh(), await fresh()];
     const w = world(() => LOW, new Map([[bobs, tokenAccount(USDC, bob, TOKEN_2022_PROGRAM)]]));
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     await signTransactionMessageWithSigners(await message(guarded, [ix.tokenTransfer(mine, bobs, a.base.address, 42n)]));
     assert.deepEqual(w.rpcCalls, [[bobs]]);
     assert.deepEqual([w.seen[0]?.wallet, w.seen[0]?.payment?.asset, w.seen[0]?.payment?.amount], [bob, USDC, "42"]);
@@ -302,7 +302,7 @@ describe("guardSolanaSigner: transactions", () => {
       const a = await agent();
       const [mine, target] = [await fresh(), await fresh()];
       const w = world(() => LOW, rpc as Rpc, opts);
-      const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+      const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
       const v = await refusal(signTransactionMessageWithSigners(await message(guarded, [ix.tokenTransfer(mine, target, a.base.address, 1n)])));
       assert.equal(v.action, "not_verified");
       assert.match(v.reasons.join(" "), why);
@@ -321,7 +321,7 @@ describe("guardSolanaSigner: transactions", () => {
     for (const [make, why] of cases) {
       const a = await agent();
       const w = world(() => LOW);
-      const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+      const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
       const v = await refusal(signTransactionMessageWithSigners(await message(guarded, [await make(a.base.address)])));
       assert.equal(v.action, "block");
       assert.equal(v.code, "local_danger");
@@ -335,7 +335,7 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const [delegate, mine] = [await fresh(), await fresh()];
     const w = world((r) => (r.interaction?.type === "token_approval" && r.interaction.unlimited ? BLOCK : LOW));
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     const v = await refusal(signTransactionMessageWithSigners(await message(guarded, [ix.approve(mine, delegate, a.base.address, U64_MAX)])));
     assert.equal(v.action, "block");
     assert.equal(w.seen[0]?.wallet, delegate);
@@ -347,7 +347,7 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const [bob, filler, table] = [await fresh(), await fresh(), await fresh()];
     const w = world(() => LOW, new Map([[table, lookupTable([filler, bob])]]));
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     const compressed = compressTransactionMessageUsingAddressLookupTables(await message(guarded, [ix.transfer(a.base.address, bob, 7n)]), { [table]: [filler, bob] });
     const compiled = compileTransaction(compressed);
     assert.equal(decodeSolanaMessage(bytesOf(compiled)).lookups.length, 1, "the recipient is loaded from the table");
@@ -357,7 +357,7 @@ describe("guardSolanaSigner: transactions", () => {
 
     const b = await agent();
     const unresolved = world(() => LOW, new Map([[table, null]]));
-    const again = guardSolanaSigner(b.spy, { fetch: unresolved.fetch, solanaRpcUrl: RPC });
+    const again = guardSolanaSigner(b.spy, { pinnedKeys: false, fetch: unresolved.fetch, solanaRpcUrl: RPC });
     const v = await refusal(signTransactionMessageWithSigners(compressTransactionMessageUsingAddressLookupTables(await message(again, [ix.transfer(b.base.address, bob, 7n)]), { [table]: [filler, bob] })));
     assert.equal(v.action, "not_verified");
     assert.match(v.reasons[0] ?? "", /address lookup tables could not be resolved/);
@@ -367,7 +367,7 @@ describe("guardSolanaSigner: transactions", () => {
   test("a program that receives the signer's authority is checked as a contract call", async () => {
     const a = await agent();
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     await signTransactionMessageWithSigners(await message(guarded, [ix.call(JUPITER, [{ address: a.base.address, role: AccountRole.WRITABLE_SIGNER }, { address: await fresh(), role: AccountRole.WRITABLE }])]));
     assert.deepEqual([w.seen[0]?.wallet, w.seen[0]?.interaction?.type], [JUPITER, "contract_call"]);
   });
@@ -375,7 +375,7 @@ describe("guardSolanaSigner: transactions", () => {
   test("a token instruction the guard cannot read, signed by the signer: not_verified", async () => {
     const a = await agent();
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     const unknown = { programAddress: address(TOKEN_2022_PROGRAM), accounts: [{ address: await fresh(), role: AccountRole.WRITABLE }, { address: a.base.address, role: AccountRole.READONLY_SIGNER }], data: Uint8Array.of(27, 0) };
     const v = await refusal(signTransactionMessageWithSigners(await message(guarded, [unknown])));
     assert.equal(v.action, "not_verified");
@@ -387,13 +387,13 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const [mine, other] = [await fresh(), await fresh()];
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     await signTransactionMessageWithSigners(await message(guarded, [ix.createAta(a.base.address, other, a.base.address, USDC), ix.transferChecked(mine, USDC, other, a.base.address, 9n)]));
     assert.equal(w.seen.length, 0);
 
     const b = await agent();
     const spread = await Promise.all(Array.from({ length: 6 }, fresh));
-    const many = guardSolanaSigner(b.spy, { fetch: world(() => LOW).fetch, solanaRpcUrl: RPC });
+    const many = guardSolanaSigner(b.spy, { pinnedKeys: false, fetch: world(() => LOW).fetch, solanaRpcUrl: RPC });
     const v = await refusal(signTransactionMessageWithSigners(await message(many, spread.map((to) => ix.transfer(b.base.address, to, 1n)))));
     assert.equal(v.action, "not_verified");
     assert.match(v.reasons[0] ?? "", /6 counterparties in one transaction; at most 5 are checked/);
@@ -403,7 +403,7 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const bob = await fresh();
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     const good = compileTransaction(await message(a.base, [ix.transfer(a.base.address, bob, 1n)]));
     const bad = compileTransaction(await message(a.base, [ix.assign(a.base.address, await fresh())]));
     await refusal(guarded.signTransactions(batch(good, bad)));
@@ -414,7 +414,7 @@ describe("guardSolanaSigner: transactions", () => {
     const a = await agent();
     const payer = await generateKeyPairSigner();
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     const hash = blockhash(await fresh());
     const m = pipe(
       createTransactionMessage({ version: 0 }),
@@ -433,7 +433,7 @@ describe("guardSolanaSigner: messages", () => {
   test("a transaction disguised as a message is refused; plain text signs without a check; Sign-In With Solana checks the site", async () => {
     const a = await agent();
     const w = world(() => LOW);
-    const guarded = guardSolanaSigner(a.spy, { fetch: w.fetch, solanaRpcUrl: RPC });
+    const guarded = guardSolanaSigner(a.spy, { pinnedKeys: false, fetch: w.fetch, solanaRpcUrl: RPC });
     const tx = compileTransaction(await message(a.base, [ix.transfer(a.base.address, await fresh(), 10n ** 9n)]));
     const v = await refusal(guarded.signMessages([createSignableMessage(bytesOf(tx))]));
     assert.equal(v.code, "local_danger");

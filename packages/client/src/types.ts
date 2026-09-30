@@ -382,6 +382,8 @@ export interface FetchInitLike {
   headers: Record<string, string>;
   body?: string;
   signal?: AbortSignal;
+  /** "manual" when a redirect must not be followed (e.g. before paying a resource); an implementation must honor it. */
+  redirect?: "follow" | "manual" | "error";
 }
 
 /**

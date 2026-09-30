@@ -43,10 +43,10 @@ test("benign transfer: the real provider's attestation verifies and binds; the k
   const fetch = realProvider((tx, network) => ({ status: "ok", ...(network ? { network } : {}), outflows: [{ standard: "erc20", asset: USDC, amount: "25000000", counterparty: BOB, counterparty_is_contract: false }], inflows: [], approvals: [], findings: [] }));
   const account = privateKeyToAccount(generatePrivateKey());
   const data = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [BOB, parseUnits("25", 6)] });
-  const verdict = await createGuard({ fetch }).check({ kind: "transaction", from: account.address, transaction: base({ data }) });
+  const verdict = await createGuard({ pinnedKeys: false, fetch }).check({ kind: "transaction", from: account.address, transaction: base({ data }) });
   assert.notEqual(verdict.action, "not_verified", `attestation must verify and bind: ${verdict.reasons.join("; ")}`);
   assert.ok(["allow", "warn"].includes(verdict.action));
-  const signed = await guardAccount(account, { fetch, onWarn: () => true }).signTransaction(base({ data }));
+  const signed = await guardAccount(account, { pinnedKeys: false, fetch, onWarn: () => true }).signTransaction(base({ data }));
   assert.match(String(signed), /^0x02/);
 });
 
@@ -56,7 +56,7 @@ test("unlimited approval to a plain wallet: the real provider blocks it and the 
   let raw = 0;
   const spy = { ...account, signTransaction: async (...args: Parameters<typeof account.signTransaction>) => (raw++, account.signTransaction(...args)) };
   const data = encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [DRAINER, maxUint256] });
-  await assert.rejects(guardAccount(spy, { fetch, onWarn: () => true }).signTransaction(base({ data })), (err: unknown) => {
+  await assert.rejects(guardAccount(spy, { pinnedKeys: false, fetch, onWarn: () => true }).signTransaction(base({ data })), (err: unknown) => {
     assert.ok(err instanceof X402CheckBlockedError);
     assert.equal(err.verdict.action, "block", err.verdict.reasons.join("; "));
     return true;
@@ -67,14 +67,14 @@ test("unlimited approval to a plain wallet: the real provider blocks it and the 
 test("drainer contract that forwards the assets to a hidden wallet: blocked by the simulation", async () => {
   const fetch = realProvider((_tx, network) => ({ status: "ok", ...(network ? { network } : {}), outflows: [{ standard: "native", asset: "native", amount: "1000000000000000000", counterparty: HIDDEN, counterparty_is_contract: false }], inflows: [], approvals: [], findings: ["outflow_to_undisclosed_eoa"] }));
   const account = privateKeyToAccount(generatePrivateKey());
-  const verdict = await createGuard({ fetch }).check({ kind: "transaction", from: account.address, transaction: base({ to: DRAINER, data: "0x3ccfd60b", value: 10n ** 18n }) });
+  const verdict = await createGuard({ pinnedKeys: false, fetch }).check({ kind: "transaction", from: account.address, transaction: base({ to: DRAINER, data: "0x3ccfd60b", value: 10n ** 18n }) });
   assert.equal(verdict.action, "block", verdict.reasons.join("; "));
 });
 
 test("x402 payment (EIP-3009): the real provider signs the payment binding the guard requires", async () => {
   const fetch = realProvider(() => ({ status: "ok" }));
   const account = privateKeyToAccount(generatePrivateKey());
-  const verdict = await createGuard({ fetch }).check({
+  const verdict = await createGuard({ pinnedKeys: false, fetch }).check({
     kind: "typed_data",
     from: account.address,
     typedData: {

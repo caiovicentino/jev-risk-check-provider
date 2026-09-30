@@ -19,7 +19,16 @@ export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 export const ASSOCIATED_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 export const ADDRESS_LOOKUP_TABLE_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
+export const STAKE_PROGRAM = "Stake11111111111111111111111111111111111111";
+const VOTE_PROGRAM = "Vote111111111111111111111111111111111111111";
+const BPF_UPGRADEABLE_LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111";
+/** Native programs a seed-derived account may be assigned to without handing it to a third party's code. */
+const NATIVE_OWNERS = new Set([SYSTEM_PROGRAM, STAKE_PROGRAM, VOTE_PROGRAM]);
+/** Base fee per signature, and the compute limits the runtime applies without SetComputeUnitLimit. */
+const LAMPORTS_PER_SIGNATURE = 5000n;
+const DEFAULT_UNITS_PER_INSTRUCTION = 200_000;
+const MAX_COMPUTE_UNITS = 1_400_000;
 const MEMO_PROGRAMS = new Set(["MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"]);
 const U64_MAX = (1n << 64n) - 1n;
 /** Bytes of an address lookup table's header, before its addresses. */
@@ -228,6 +237,10 @@ export type SolanaFinding =
 export interface SolanaAnalysis {
   /** Whether the signer is a required signer: if not, its signature authorizes nothing. */
   required: boolean;
+  /** When the signer pays the fees: the most the transaction can charge it (signatures plus priority fee), in lamports. */
+  maxFeeLamports?: bigint | undefined;
+  /** It uses a durable nonce: once signed, it never expires. */
+  durableNonce: boolean;
   /** Locally proven danger: the account itself, or control of it, changes hands. */
   danger: string[];
   /** Instructions the signer authorizes that this guard does not read. */
@@ -254,12 +267,16 @@ function u64(data: Uint8Array, at: number): bigint {
 export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly string[], signer: string): SolanaAnalysis {
   const out: SolanaAnalysis = {
     required: message.staticAccounts.slice(0, message.header.signatures).includes(signer),
+    durableNonce: false,
     danger: [],
     unreadable: [],
     notes: [],
     findings: [],
     created: new Map(),
   };
+  let unitLimit: number | undefined;
+  let unitPrice = 0n;
+  let computeInstructions = 0;
   message.instructions.forEach((ix, n) => {
     const program = keys[ix.programIndex] as string;
     const d = ix.data;
@@ -274,7 +291,14 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
       if (involves) out.unreadable.push(`${what} (instruction ${n + 1})`);
     };
 
-    if (program === COMPUTE_BUDGET_PROGRAM || MEMO_PROGRAMS.has(program)) return;
+    if (program === COMPUTE_BUDGET_PROGRAM) {
+      computeInstructions++;
+      // SetComputeUnitLimit (2, u32) and SetComputeUnitPrice (3, u64 micro-lamports per unit) set the priority fee.
+      if (d[0] === 2 && d.length === 5) unitLimit = u32(d, 1);
+      else if (d[0] === 3 && d.length === 9) unitPrice = u64(d, 1);
+      return;
+    }
+    if (MEMO_PROGRAMS.has(program)) return;
 
     if (program === SYSTEM_PROGRAM) {
       if (d.length < 4) return unread("a System instruction");
@@ -298,8 +322,12 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           return;
         }
         case 10: {
-          // AssignWithSeed [account, base] base, seed, owner
-          if (account(0) === signer) out.danger.push("System AssignWithSeed hands the signer's own account to another program");
+          // AssignWithSeed [account, base] base, seed, owner: the base signs for the seed-derived account.
+          if (account(0) !== signer && account(1) !== signer) return;
+          const length = d.length >= 44 ? Number(u64(d, 36)) : -1;
+          if (length < 0 || d.length !== 44 + length + 32) return unread("a System AssignWithSeed");
+          const owner = base58Encode(d.subarray(44 + length, 76 + length));
+          if (!NATIVE_OWNERS.has(owner)) out.danger.push(`System AssignWithSeed hands the signer's seed-derived account ${account(0)} to program ${owner}: that program would control everything the account holds`);
           return;
         }
         case 2: {
@@ -318,6 +346,7 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         }
         case 4:
           // AdvanceNonceAccount: a durable nonce, so the transaction never expires.
+          out.durableNonce = true;
           out.notes.push("it uses a durable nonce: once signed, it can be submitted at any later time");
           return;
         case 5: {
@@ -397,6 +426,14 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           if (authorizes(2, 3) && destination && destination !== signer) out.findings.push({ kind: "native_transfer", to: destination, how: "closing a token account sends it the account's lamports" });
           return;
         }
+        case 7:
+        case 14: {
+          // MintTo [mint, destination, authority, ...signers] amount · MintToChecked amount, decimals: the signer's mint authority creates tokens for the destination.
+          if (d.length !== (op === 7 ? 9 : 10)) return unread(`a ${name} MintTo`);
+          const destination = account(1);
+          if (authorizes(2, 3) && destination) out.findings.push({ kind: "token_transfer", account: destination, mint: account(0), amount: u64(d, 1).toString() });
+          return;
+        }
         case 8: // Burn
         case 15: // BurnChecked
           if (involves) out.notes.push(`it burns tokens (instruction ${n + 1})`);
@@ -404,10 +441,8 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         case 0: // InitializeMint
         case 1: // InitializeAccount
         case 5: // Revoke
-        case 7: // MintTo
         case 10: // FreezeAccount
         case 11: // ThawAccount
-        case 14: // MintToChecked
         case 16: // InitializeAccount2
         case 17: // SyncNative
         case 18: // InitializeAccount3
@@ -420,6 +455,70 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         default:
           return unread(`${name} instruction ${op}`);
       }
+    }
+
+    if (program === STAKE_PROGRAM) {
+      if (!involves) return;
+      if (d.length < 4) return unread("a Stake instruction");
+      const op = u32(d, 0);
+      const kinds = ["staker", "withdrawer"];
+      switch (op) {
+        case 1: {
+          // Authorize [stake, clock, authority, (custodian)] new authority, which (u32)
+          if (d.length !== 40) return unread("a Stake Authorize");
+          const next = base58Encode(d.subarray(4, 36));
+          if (account(2) === signer && next !== signer) out.danger.push(`Stake Authorize hands the ${kinds[u32(d, 36)] ?? "stake"} authority of ${account(0)} to ${next}`);
+          return;
+        }
+        case 8: {
+          // AuthorizeWithSeed [stake, base, clock, (custodian)] new authority, which, seed, owner
+          if (d.length < 40) return unread("a Stake AuthorizeWithSeed");
+          const next = base58Encode(d.subarray(4, 36));
+          if (account(1) === signer && next !== signer) out.danger.push(`Stake AuthorizeWithSeed hands the ${kinds[u32(d, 36)] ?? "stake"} authority of ${account(0)} to ${next}`);
+          return;
+        }
+        case 10: {
+          // AuthorizeChecked [stake, clock, current authority, new authority, (custodian)] which
+          const next = account(3);
+          if (account(2) === signer && next && next !== signer) out.danger.push(`Stake AuthorizeChecked hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
+          return;
+        }
+        case 11: {
+          // AuthorizeCheckedWithSeed [stake, base, clock, new authority, (custodian)] which, seed, owner
+          const next = account(3);
+          if (account(1) === signer && next && next !== signer) out.danger.push(`Stake AuthorizeCheckedWithSeed hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
+          return;
+        }
+        case 4: {
+          // Withdraw [stake, recipient, clock, stake history, withdraw authority, (custodian)] lamports
+          if (d.length !== 12) return unread("a Stake Withdraw");
+          const recipient = account(1);
+          if (account(4) === signer && recipient && recipient !== signer) out.findings.push({ kind: "native_transfer", to: recipient, lamports: u64(d, 4).toString(), how: "stake withdrawal" });
+          return;
+        }
+        case 6: // SetLockup
+        case 12: // SetLockupChecked
+          out.danger.push(`Stake SetLockup changes the lockup or custodian of stake account ${account(0)}`);
+          return;
+        case 0: // Initialize
+        case 2: // DelegateStake
+        case 3: // Split
+        case 5: // Deactivate
+        case 7: // Merge
+        case 9: // InitializeChecked
+        case 13: // GetMinimumDelegation
+        case 14: // DeactivateDelinquent
+        case 16: // MoveStake
+        case 17: // MoveLamports
+          return;
+        default:
+          return unread(`Stake instruction ${op}`);
+      }
+    }
+
+    // Native programs whose instructions move lamports or hand over authority from their data.
+    if (program === VOTE_PROGRAM || program === BPF_UPGRADEABLE_LOADER || program === ADDRESS_LOOKUP_TABLE_PROGRAM) {
+      return unread(`a ${program === VOTE_PROGRAM ? "Vote" : program === BPF_UPGRADEABLE_LOADER ? "BPF Upgradeable Loader" : "Address Lookup Table"} instruction`);
     }
 
     if (program === ASSOCIATED_TOKEN_PROGRAM) {
@@ -435,6 +534,11 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
     // Any other program that receives the signer's account can act with the signer's authority.
     if (involves && !out.findings.some((f) => f.kind === "program_call" && f.program === program)) out.findings.push({ kind: "program_call", program });
   });
+  // The fee payer is the first static account: signatures plus the priority fee (price × limit, in micro-lamports).
+  if (message.staticAccounts[0] === signer) {
+    const limit = BigInt(Math.min(unitLimit ?? DEFAULT_UNITS_PER_INSTRUCTION * (message.instructions.length - computeInstructions), MAX_COMPUTE_UNITS));
+    out.maxFeeLamports = LAMPORTS_PER_SIGNATURE * BigInt(message.header.signatures) + (unitPrice * limit + 999_999n) / 1_000_000n;
+  }
   return out;
 }
 

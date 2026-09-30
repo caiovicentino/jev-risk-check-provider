@@ -40,6 +40,8 @@ export type VerificationFailure =
   | "kid_not_in_assertion_method"
   /** The key is not a usable EC P-256 signing key. */
   | "unsupported_key"
+  /** The key is valid in the DID document but is not one of `pinnedKeys`. */
+  | "key_not_pinned"
   /** `crypto.subtle` is not available in this runtime. */
   | "webcrypto_unavailable"
   | "signature_invalid"
@@ -107,6 +109,13 @@ export interface VerifyOptions {
   fetch?: FetchLike | undefined;
   /** DID document fetch timeout. Default 10000 ms. */
   timeoutMs?: number | undefined;
+  /**
+   * RFC 7638 SHA-256 thumbprints (base64url) of the attestation keys you accept, e.g.
+   * `X402CHECK_KEY_THUMBPRINTS`. A key outside the list fails with `key_not_pinned`, even when
+   * the issuer's DID document serves it: whoever controls the issuer's domain or deployment
+   * cannot swap in their own key. Unset: any key the DID document assigns.
+   */
+  pinnedKeys?: readonly string[] | undefined;
 }
 
 interface VerificationCommon {
@@ -239,6 +248,15 @@ export function selectAssertionKey(doc: Record<string, unknown>, did: string, ki
   if (!allowed) return { failure: "kid_not_in_assertion_method" };
   const jwk = usableP256Jwk(allowed.jwk);
   return jwk ? { jwk, id: allowed.id } : { failure: "unsupported_key" };
+}
+
+/** RFC 7638 SHA-256 thumbprint (base64url) of an EC P-256 public JWK. */
+export async function jwkThumbprint(jwk: { crv: string; kty: string; x: string; y: string }): Promise<string> {
+  const canonical = `{"crv":${JSON.stringify(jwk.crv)},"kty":${JSON.stringify(jwk.kty)},"x":${JSON.stringify(jwk.x)},"y":${JSON.stringify(jwk.y)}}`;
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)));
+  let binary = "";
+  for (const b of digest) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 async function verifyEs256(jwk: P256Jwk, signingInput: string, signature: Uint8Array<ArrayBuffer>): Promise<VerificationFailure | null> {
@@ -419,6 +437,7 @@ export async function verifyAttestation(jws: string | null | undefined, options?
         failures.push("did_resolution_failed");
       }
       if (selected && "failure" in selected) failures.push(selected.failure);
+      else if (selected && opts.pinnedKeys && !opts.pinnedKeys.includes(await jwkThumbprint(selected.jwk).catch(() => ""))) failures.push("key_not_pinned");
       else if (selected) {
         const failure = await verifyEs256(selected.jwk, `${h}.${p}`, signature);
         if (failure) failures.push(failure);

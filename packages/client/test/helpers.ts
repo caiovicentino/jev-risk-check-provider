@@ -126,3 +126,51 @@ export function didFetch(doc: unknown, status = 200): { fetch: FetchLike; calls:
     return json(status, doc);
   });
 }
+
+/**
+ * A provider stub that signs, for each request, claims bound exactly as the real provider binds
+ * them (subject, interaction, payment, domain, chain, simulation, request_hash), plus optional
+ * extra routes (e.g. a Solana RPC). `decide` picks the verdict per request.
+ */
+export function boundProvider(
+  decide: (request: import("../src/types.js").RiskCheckRequest) => { tier: "low" | "medium" | "high" | "critical"; score: number; categories: string[] },
+  extra?: (url: string, init: FetchInitLike) => Response | Promise<Response> | undefined,
+) {
+  const signer = providerStyleSigner();
+  const seen: import("../src/types.js").RiskCheckRequest[] = [];
+  const sign = async (request: import("../src/types.js").RiskCheckRequest) => {
+    seen.push(request);
+    const v = decide(request);
+    const { requestHash } = await import("../src/request-hash.js");
+    const { toCaip2, normalizeHost } = await import("../src/normalize.js");
+    const network = request.chain ? toCaip2(request.chain) : undefined;
+    const c = claims({
+      sub: request.wallet,
+      score: v.score,
+      tier: v.tier,
+      categories: v.categories,
+      request_hash: await requestHash(request),
+      checks: {
+        sanctions: { list: "ofac-sdn", as_of: "2026-09-23", status: "not_listed" },
+        ...(network ? { onchain: { status: "ok", network, activity: "some" } } : {}),
+        model: "jev-wallet-risk/v6",
+        ...(request.transaction ? { simulation: { status: "ok", network } } : {}),
+        ...(request.domain ? { domain: { host: normalizeHost(request.domain), registrable: normalizeHost(request.domain), official: false } } : {}),
+      },
+    });
+    if (request.interaction) c.interaction = request.interaction.type;
+    else delete c.interaction;
+    if (request.payment) c.payment = request.payment;
+    return { checked: true, score: v.score, tier: v.tier, categories: v.categories, jws: signer.sign(c), checked_at: new Date().toISOString(), expires_at: new Date((c.exp as number) * 1000).toISOString() };
+  };
+  const { fetch, calls } = mockFetch(async (url, init) => {
+    if (url === DID_URL) return json(200, didDocument(signer.publicJwk));
+    const routed = extra?.(url, init);
+    if (routed) return routed;
+    const body = JSON.parse(String(init.body ?? "{}")) as import("../src/types.js").RiskCheckRequest & { requests?: import("../src/types.js").RiskCheckRequest[] };
+    if (url.endsWith("/v1/risk-check/batch")) return json(200, { results: await Promise.all((body.requests ?? []).map(sign)) });
+    if (url.endsWith("/v1/risk-check")) return json(200, await sign(body));
+    return json(404, { error: "not_found" });
+  });
+  return { fetch, calls, seen, publicJwk: signer.publicJwk };
+}
