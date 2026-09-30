@@ -357,14 +357,19 @@ function attestationLine(result: RiskCheckResult | undefined, v: VerificationRes
 }
 
 type PayerInfo = { address: string; maxPaymentUsd: number; budgetUsd: number; spentUsd: number };
+/** Checks paid from prepaid credits: what this process spent from them, within X402CHECK_BUDGET_USD. */
+type CreditInfo = { spentUsd: number; budgetUsd: number };
 
 const NO_PAYER =
   "Next: every check is paid. Set X402CHECK_CREDIT_TOKEN to a prepaid credit token ($0.001 a check; buy one with POST https://x402check.xyz/v1/credits), or X402CHECK_PAYER_KEY to the private key of a dedicated, low-balance wallet funded with a little USDC on Base (paid per call via x402: $0.0035 on Base, gasless for the payer), then restart this server. Do not proceed without a check.";
 
-function paymentNextStep(refusal: PaymentRefused | undefined, error: unknown, payer: PayerInfo | undefined): string | undefined {
+function paymentNextStep(refusal: PaymentRefused | undefined, error: unknown, payer: PayerInfo | undefined, credits?: CreditInfo | undefined): string | undefined {
   if (refusal) {
     switch (refusal.kind) {
       case "budget_exhausted":
+        if (!payer && credits) {
+          return `Next: this server's budget for prepaid credits is used up (${dollars(credits.spentUsd)} of ${dollars(credits.budgetUsd)} spent from credits by this process; X402CHECK_BUDGET_USD). Ask the operator to raise it or restart the server. Do not proceed without a check.`;
+        }
         return `Next: this server's payment budget is used up (${dollars(payer?.spentUsd ?? 0)} of ${dollars(payer?.budgetUsd ?? 0)}; X402CHECK_BUDGET_USD). Ask the operator to raise it or restart the server. Do not proceed without a check.`;
       case "over_max_payment":
         return `Next: the price exceeds this server's per-payment cap (${dollars(payer?.maxPaymentUsd ?? 0)}; X402CHECK_MAX_PAYMENT_USD). Do not proceed without a check.`;
@@ -415,6 +420,8 @@ export interface CheckRendering {
   verification?: VerificationResult | undefined;
   /** The configured payer (public data only). */
   payer?: PayerInfo | undefined;
+  /** Checks paid from prepaid credits: this process's spend from them and its budget. */
+  credits?: CreditInfo | undefined;
   payment?: PaymentView | undefined;
 }
 
@@ -444,8 +451,11 @@ export function renderCheck(r: CheckRendering): string {
     lines.push(`Payment: ${p.settled === false ? "NOT settled" : "settled"}${where}${p.transaction ? ` · tx ${p.transaction}` : ""}`);
   }
   if (p?.spent_usd !== undefined && p.budget_usd !== undefined) lines.push(`Payer budget: ${dollars(p.spent_usd)} of ${dollars(p.budget_usd)} spent by this server`);
-  if (p?.credits_charged_usd && p.credits_balance_usd) lines.push(`Paid from prepaid credits: ${p.credits_charged_usd} (balance ${p.credits_balance_usd})`);
-  const next = paymentNextStep(r.refusal, r.error, r.payer) ?? nextStep(r.error, r.result);
+  if (p?.credits_charged_usd && p.credits_balance_usd) {
+    const budget = r.credits ? ` · ${dollars(r.credits.spentUsd)} of this server's ${dollars(r.credits.budgetUsd)} credit budget spent` : "";
+    lines.push(`Paid from prepaid credits: ${p.credits_charged_usd} (balance ${p.credits_balance_usd})${budget}`);
+  }
+  const next = paymentNextStep(r.refusal, r.error, r.payer, r.credits) ?? nextStep(r.error, r.result);
   if (next) lines.push(next);
   lines.push(POLICY);
   return lines.join("\n");

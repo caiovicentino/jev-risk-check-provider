@@ -19,9 +19,10 @@ import {
   type VerifyOptions,
 } from "@x402check/client";
 import { z } from "zod";
+import { boundClient, createCreditMeter } from "./credits.js";
 import { METHODOLOGY } from "./methodology.js";
 import { runPay, PAY_DESCRIPTION, PAY_OUTPUT_SCHEMA, payInput, payOutput, type PayArgs, type PayOutcome, type PayStructured } from "./pay.js";
-import { createPayer, PaymentRefused, type Payer } from "./payer.js";
+import { createPayer, DEFAULT_BUDGET_USD, PaymentRefused, usdAmount, type Payer } from "./payer.js";
 import { paymentView, renderCheck, renderVerification, safeClaims, safePaymentRequired, safeResult, sanitizeDeep, type PaymentView } from "./render.js";
 import { VERSION } from "./version.js";
 
@@ -53,14 +54,20 @@ export interface ServerConfig {
   payerKey?: string | undefined;
   /** Per-payment cap in USD. Default 0.05. */
   maxPaymentUsd?: number | undefined;
-  /** Total spend for this server process in USD (checks and x402check_pay payments); further payments are refused. Default 1.00. */
+  /**
+   * Spend cap for this server process in USD, default 1.00. It bounds the payer (checks paid per
+   * call and x402check_pay payments), and, separately, what checks spend from prepaid credits
+   * (tallied from the API's X-Credits-Charged header). Once reached, further checks or payments
+   * are refused without calling the API.
+   */
   budgetUsd?: number | undefined;
   /** A ready payer (instead of `payerKey`), e.g. for embedding or tests. */
   payer?: Payer | undefined;
   /**
    * A prepaid credit token (`x402c_…`): checks are debited from its balance ($0.001 a check)
-   * with no payment round trip. Takes precedence over the payer for checks (x402check_pay still
-   * pays resources with the payer). A bearer secret: it is redacted from every output.
+   * with no payment round trip, up to `budgetUsd` per process. Takes precedence over the payer
+   * for checks (x402check_pay still pays resources with the payer). A bearer secret: it is
+   * redacted from every output.
    */
   creditToken?: string | undefined;
   /**
@@ -326,6 +333,9 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
       : undefined);
   const checkPayer = creditToken !== undefined ? undefined : payer;
   const client = createClient({ baseUrl: config.baseUrl, fetch: checkPayer ? checkPayer.fetch : config.fetch, timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS, creditToken });
+  // Prepaid credits have no cap of their own: X402CHECK_BUDGET_USD bounds what this process spends from them.
+  const credits = creditToken !== undefined ? createCreditMeter(usdAmount("X402CHECK_BUDGET_USD", config.budgetUsd, DEFAULT_BUDGET_USD)) : undefined;
+  const checkClient = boundClient(client, { credits });
   // Only on x402check's own API origin is its pay_to paid without a check (x402check_pay).
   const apiOrigin = new URL(client.baseUrl).origin;
   // Secrets never reach an output: the payer's key (payer.redact) and the credit token.
@@ -347,6 +357,7 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
     return scrub(clean);
   };
   const spend = (): { spent_usd: number; budget_usd: number } | undefined => (checkPayer ? { spent_usd: checkPayer.spentUsd(), budget_usd: checkPayer.budgetUsd } : undefined);
+  const creditInfo = (): { spentUsd: number; budgetUsd: number } | undefined => (credits ? { spentUsd: credits.spentUsd(), budgetUsd: credits.budgetUsd } : undefined);
 
   type ToolResult = { content: Array<{ type: "text"; text: string }>; structuredContent: CheckStructured; isError?: true };
 
@@ -358,7 +369,8 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
   }
 
   async function runCheck(request: RiskCheckRequest, signal?: AbortSignal): Promise<ToolResult> {
-    // Refuse before calling the API once the budget cannot buy another check.
+    // Refuse before calling the API once the budget cannot buy another check. (Checks paid from
+    // prepaid credits are refused by `checkClient`, before anything is sent, the same way.)
     if (checkPayer && !checkPayer.canAfford()) {
       const refusal = new PaymentRefused("budget_exhausted", "the payment budget of this server is exhausted");
       const verdict = refusedVerdict(refusal);
@@ -372,7 +384,7 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
     let error: unknown;
     try {
       // A call the client cancelled is aborted: a check it no longer waits for is not bought.
-      ({ result, info } = await client.checkWithInfo(request, signal ? { signal } : undefined));
+      ({ result, info } = await checkClient.checkWithInfo(request, signal ? { signal } : undefined));
     } catch (err) {
       error = err;
     }
@@ -421,7 +433,7 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
             : undefined,
       result: result ? safeResult(result) : undefined,
     });
-    const rendered = renderCheck({ request, verdict, result, error, refusal, verification, payer: payerInfo(checkPayer), payment: view });
+    const rendered = renderCheck({ request, verdict, result, error, refusal, verification, payer: payerInfo(checkPayer), credits: creditInfo(), payment: view });
 
     // Output that would fail the SDK's outputSchema check would reach the agent as a bare
     // protocol error: validate here and fall back to a STOP verdict instead.
@@ -519,6 +531,7 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
             timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
             apiOrigin,
             signal: extra.signal,
+            credits,
             log,
           }),
         );

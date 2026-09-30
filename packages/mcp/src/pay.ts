@@ -13,7 +13,7 @@ import { isSafeId, type FetchLike, type X402CheckClient } from "@x402check/clien
 import { createGuard, type GuardVerdict } from "@x402check/client/guard";
 import { z } from "zod";
 import { readLimited } from "./body.js";
-import { boundClient } from "./credits.js";
+import { boundClient, CREDIT_BUDGET_EXHAUSTED, type CreditMeter } from "./credits.js";
 import { isPublicAddress } from "./net.js";
 import { PaymentRefused, type Payer, type PaymentRefusalKind, type ResourcePayment, type SignedPayment } from "./payer.js";
 import { clean, paymentView } from "./render.js";
@@ -162,6 +162,8 @@ export interface PayDeps {
   apiOrigin: string;
   /** Cancellation of the call (MCP): nothing is signed once it fires, and requests in flight are aborted. */
   signal?: AbortSignal | undefined;
+  /** The prepaid-credit budget, when checks are paid from credits. */
+  credits?: CreditMeter | undefined;
   /** Operator diagnostics (stderr in the stdio server): never secrets. */
   log?: ((line: string) => void) | undefined;
 }
@@ -344,11 +346,12 @@ export async function runPay(args: PayArgs, deps: PayDeps): Promise<PayOutcome> 
   let verdict: GuardVerdict | undefined;
   let userApproved: boolean | undefined;
   let overLimit = false;
+  let creditsRefused = false;
   let signed: SignedPayment | undefined;
   let sent = false;
   const guard = createGuard({
-    // The check is aborted with the call.
-    client: boundClient(deps.client, { signal }),
+    // The check is aborted with the call, and paid from credits within their budget.
+    client: boundClient(deps.client, { signal, credits: deps.credits, onRefused: () => (creditsRefused = true) }),
     issuer: deps.issuer,
     fetch: deps.fetch,
     // x402check's own pay_to is paid without a check only on x402check's own API origin: a 402
@@ -431,6 +434,10 @@ export async function runPay(args: PayArgs, deps: PayDeps): Promise<PayOutcome> 
     code = "over_max_usd";
     message = `the price (${dollars(offered.usd)}) is above max_usd (${dollars(args.max_usd ?? 0)})`;
     next = "Next: nothing was paid, and nothing was checked. Pay more only if the user agrees to the price.";
+  } else if (creditsRefused && !sent && error instanceof PaymentRefused) {
+    code = "budget_exhausted";
+    message = `${CREDIT_BUDGET_EXHAUSTED}: the payee could not be checked`;
+    next = "Next: nothing was paid. The operator can raise X402CHECK_BUDGET_USD or restart this server; never pay without a verified check.";
   } else if (error instanceof PaymentRefused && error.kind === "cancelled") {
     code = "cancelled";
     message = error.message;
@@ -531,7 +538,7 @@ export async function runPay(args: PayArgs, deps: PayDeps): Promise<PayOutcome> 
   if (view?.settled !== undefined || view?.transaction) lines.push(`Settlement: ${view.settled === false ? "NOT settled" : "settled"}${view.network ? ` on ${view.network}` : ""}${view.transaction ? ` · tx ${view.transaction}` : ""}`);
   if (view?.spent_usd !== undefined && view.budget_usd !== undefined) lines.push(`Payer budget: ${dollars(view.spent_usd)} of ${dollars(view.budget_usd)} spent by this server (checks and payments)`);
   if (message && !verdict) lines.push(`Why: ${clean(message, 600)}`);
-  else if (message && (code === "payment_unconfirmed" || code === "cancelled")) lines.push(`Error: ${clean(message, 600)}`);
+  else if (message && (code === "payment_unconfirmed" || code === "cancelled" || code === "budget_exhausted")) lines.push(`Error: ${clean(message, 600)}`);
   if (res && body) {
     const target3xx = redirect ? ` · redirect to ${location ?? NOT_SHOWN} (not followed)` : "";
     lines.push(`Response: HTTP ${res.status}${contentType ? ` · ${contentType}` : ""} · ${body.bytes} bytes${body.truncated ? " (truncated)" : ""}${target3xx}`);
