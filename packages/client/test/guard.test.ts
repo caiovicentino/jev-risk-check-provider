@@ -265,9 +265,9 @@ describe("guardAccount: signatures", () => {
 });
 
 describe("x402PaymentGuard (x402 client hook)", () => {
-  const ctx = (payTo: string) => ({
+  const ctx = (payTo: string, amount = "10000") => ({
     paymentRequired: { resource: { url: "https://api.example.com/data" } },
-    selectedRequirements: { network: "eip155:8453", payTo, amount: "10000", asset: USDC_BASE },
+    selectedRequirements: { network: "eip155:8453", payTo, amount, asset: USDC_BASE },
   });
 
   test("allow → proceed; block → abort with the reason; x402check itself → no check", async () => {
@@ -279,6 +279,10 @@ describe("x402PaymentGuard (x402 client hook)", () => {
     assert.match(aborted?.reason ?? "", /refused to sign \(blocked, tier critical\)/);
     assert.equal(await hook(ctx(X402CHECK_PAY_TO[0] as string)), undefined);
     assert.equal(api.seen.length, 2);
+    // A credit pack ($5) to x402check is more than checks cost: it is checked like any payment.
+    assert.equal(await hook(ctx(X402CHECK_PAY_TO[0] as string, "5000000")), undefined);
+    assert.equal(api.seen.length, 3);
+    assert.equal(api.seen[2]?.wallet, X402CHECK_PAY_TO[0]);
     assert.deepEqual(api.seen[0]?.payment, { network: "eip155:8453", pay_to: BOB, amount: "10000", asset: USDC_BASE, resource: "https://api.example.com/data" });
     assert.equal(api.seen[0]?.domain, "api.example.com");
   });

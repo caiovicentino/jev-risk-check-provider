@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildHashBlob, normalizeFeedDomain } from "../src/threat-intel.js";
+import { SCAMSNIFFER_KEYS as KV_KEYS } from "../deploy/scamsniffer-refresh.js";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { fetchCodes } from "./code-fetch.js";
 import { creationOf, pool } from "./kit-catalog.js";
@@ -29,7 +30,8 @@ const SS_DOMAINS = `https://raw.githubusercontent.com/${SS_REPO}/main/blacklist/
 const SS_ADDRESSES = `https://raw.githubusercontent.com/${SS_REPO}/main/blacklist/address.json`;
 const DATA = new URL("../src/data/", import.meta.url);
 const CACHE = new URL("../.cache/threat-feeds/", import.meta.url);
-export const KV_KEYS = { domains: "feed:scamsniffer:domains:v1", addresses: "feed:scamsniffer:addresses:v1", code: "feed:scamsniffer:code:v1", meta: "feed:scamsniffer:meta:v1" };
+// One definition of the KV keys, shared with the Worker (loader and cron refresh).
+export { KV_KEYS };
 const FORTA_REPO = "forta-network/labelled-datasets";
 // Bulk eth_getCode endpoints: the default RPCs of Base and Optimism cap batches at 10 calls.
 const BULK_RPC: Record<string, string> = {

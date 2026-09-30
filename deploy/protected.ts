@@ -504,7 +504,13 @@ export function usageFor(path: string): Record<string, unknown> {
     error: "method_not_allowed",
     detail: `POST a JSON body to ${path}. Every check is paid with x402: from prepaid credits (Authorization: Bearer x402c_…) or per call (an unpaid POST returns 402 with the options).`,
     example: path.endsWith("/batch") ? { requests: [REQUEST_EXAMPLE] } : REQUEST_EXAMPLE,
-    pricing: { credits_usd: CREDIT_PRICING.check_usd, per_call_from_usd: plain(networkPrice(BASE_MAINNET)), simulated_usd: plain(SIMULATION_PRICE), buy_credits: 'POST /v1/credits {"amount_usd": 1}' },
+    pricing: {
+      credits_usd: CREDIT_PRICING.check_usd,
+      per_call_from_usd: plain(Math.min(...MAINNET_NETWORKS.map(networkPrice))),
+      per_call_base_usd: plain(networkPrice(BASE_MAINNET)),
+      simulated_usd: plain(SIMULATION_PRICE),
+      buy_credits: 'POST /v1/credits {"amount_usd": 1}',
+    },
     docs: "https://x402check.xyz/#integrate",
     discovery: "https://x402check.xyz/.well-known/risk-check.json",
   };

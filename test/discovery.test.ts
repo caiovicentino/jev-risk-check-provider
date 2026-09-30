@@ -20,7 +20,7 @@ test("the published examples are requests our own API accepts", () => {
     const usage = usageFor(path);
     const example = usage.example as Record<string, unknown>;
     assert.equal((path.endsWith("/batch") ? validateBatch(example) : validateRequest(example)).ok, true, path);
-    assert.deepEqual(usage.pricing, { credits_usd: "0.001", per_call_from_usd: "0.0035", simulated_usd: "0.005", buy_credits: 'POST /v1/credits {"amount_usd": 1}' });
+    assert.deepEqual(usage.pricing, { credits_usd: "0.001", per_call_from_usd: "0.001", per_call_base_usd: "0.0035", simulated_usd: "0.005", buy_credits: 'POST /v1/credits {"amount_usd": 1}' });
   }
   // The schema requires what the validator requires, and names every interaction type it accepts.
   assert.deepEqual(RISK_CHECK_DISCOVERY.bazaar.schema.properties.input.properties.body.required, ["wallet"]);

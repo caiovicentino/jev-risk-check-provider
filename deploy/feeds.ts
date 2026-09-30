@@ -1,10 +1,10 @@
 import { hashSetFromBytes, type LoadedFeed } from "../src/threat-intel.js";
 import type { WorkerEnv } from "./runtime.js";
+import { SCAMSNIFFER_KEYS as KEYS } from "./scamsniffer-refresh.js";
 
 // ScamSniffer data is GPL-3.0: it lives only in the operator's KV and is read at runtime. The
 // cron refreshes domains and addresses twice a day (deploy/scamsniffer-refresh.ts); the code set
 // comes from scripts/update-threat-feeds.ts --scamsniffer --upload.
-const KEYS = { domains: "feed:scamsniffer:domains:v1", addresses: "feed:scamsniffer:addresses:v1", code: "feed:scamsniffer:code:v1", meta: "feed:scamsniffer:meta:v1" };
 const TTL_MS = 60 * 60 * 1000;
 
 type ScamSnifferFeeds = { scamsnifferDomains?: LoadedFeed | null; scamsnifferAddresses?: LoadedFeed | null; scamsnifferCode?: LoadedFeed | null };

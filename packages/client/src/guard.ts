@@ -63,6 +63,8 @@ export { X402CHECK_KEY_THUMBPRINTS } from "./keys.js";
 
 /** x402check's own `pay_to` addresses: paying for a check is never itself checked. */
 export const X402CHECK_PAY_TO: readonly string[] = ["0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178", "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X"];
+/** Payments to a trusted payee up to this many atomic units ($0.25 of USDC) are not checked. */
+export const TRUSTED_PAYEE_MAX_AMOUNT = 250_000n;
 
 /** x402's Permit2 proxies (exact and upto schemes): a PermitWitnessTransferFrom to one of them is an x402 payment to its witness `to`. */
 export const X402_PERMIT2_PROXIES: readonly string[] = ["0x402085c248eea27d92e8b30b2c58ed07f9e20001", "0x4020a4f3b7b90cca423b9fabcc0ce57c6c240002"];
@@ -133,8 +135,14 @@ export interface GuardOptions {
   context?: string | (() => string | undefined) | undefined;
   /** The site or app the agent is dealing with (URL or host). */
   origin?: string | undefined;
-  /** Payees whose x402 / EIP-3009 payments are not checked. Default: x402check's own `pay_to`. */
+  /** Payees whose x402 payments are not checked (up to `trustedPayeeMaxAmount`). Default: x402check's own `pay_to`. */
   trustedPayees?: readonly string[] | undefined;
+  /**
+   * The largest payment to a trusted payee that is not checked, in atomic units (default 250000:
+   * $0.25 of USDC, more than any check). A larger payment (a credit pack) is checked like any
+   * other, so a stale or compromised pay_to can never take more than the price of checks.
+   */
+  trustedPayeeMaxAmount?: bigint | undefined;
   /** `sign({ hash })` and messages of opaque bytes sign anything, unreadable: refused unless true (some smart-account flows need it). */
   allowRawHashSigning?: boolean | undefined;
   /** EIP-7702 authorizations valid on every chain (chainId 0): refused unless true; then the delegate is checked on each chain the kit watch covers. */
@@ -341,7 +349,8 @@ export function createGuard(options: GuardOptions = {}) {
       // x402 v1 network names ("base", "solana", ...) become the CAIP-2 ids the provider accepts.
       const network = toCaip2(request.network) ?? request.network;
       const summary = `x402 payment of ${request.amount ?? "?"} (atomic units) of ${request.asset ?? "?"} on ${network} to ${request.payTo}${request.resource ? ` for ${request.resource}` : ""}`;
-      if (isTrusted(request.payTo)) return verdictOf("x402_payment", summary, "allow", ["payment to x402check itself (trusted payee): not checked"], []);
+      const small = typeof request.amount === "string" && /^\d{1,78}$/.test(request.amount) && BigInt(request.amount) <= (options.trustedPayeeMaxAmount ?? TRUSTED_PAYEE_MAX_AMOUNT);
+      if (isTrusted(request.payTo) && small) return verdictOf("x402_payment", summary, "allow", ["payment to x402check itself for checks (trusted payee, small amount): not checked"], []);
       const payment: PaymentBinding = {
         network,
         pay_to: request.payTo,

@@ -1,6 +1,6 @@
 import { handleProtected, ensureDeps, ensureStack, facilitatorStatus, isProductionHost, jevFor, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
 import { maybeRunModelCanary, MODEL_CANARY_KEY } from "./model-canary.js";
-import { maybeRefreshScamSniffer } from "./scamsniffer-refresh.js";
+import { maybeRefreshScamSniffer, SCAMSNIFFER_KEYS } from "./scamsniffer-refresh.js";
 import { createHandler } from "../src/handler.js";
 import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
 import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
@@ -43,7 +43,7 @@ async function status(env: WorkerEnv): Promise<Response> {
   const ofac = sanctionsListMeta();
   let scamsniffer: Record<string, unknown> = { status: "not_configured" };
   try {
-    const raw = env.RATE ? await env.RATE.get("feed:scamsniffer:meta:v1") : null;
+    const raw = env.RATE ? await env.RATE.get(SCAMSNIFFER_KEYS.meta) : null;
     if (raw) {
       const m = JSON.parse(raw) as { as_of: string; code_as_of?: string; refreshed_at?: string; domains?: number; addresses?: number; code_fingerprints?: number; commit?: string };
       // Stale when our last refresh (not the list's own date) is more than 3 days old.

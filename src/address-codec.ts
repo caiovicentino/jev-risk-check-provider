@@ -7,12 +7,15 @@ import { createHash } from "node:crypto";
 
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const B58_INDEX = new Map([...B58].map((c, i) => [c, i]));
+// The XRP Ledger's base58 alphabet ("r" is its zero digit): classic addresses are Base58Check in it.
+const XRP_B58 = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
+const XRP_INDEX = new Map([...XRP_B58].map((c, i) => [c, i]));
 
-export function base58Decode(input: string): Uint8Array | null {
+export function base58Decode(input: string, alphabet: { index: Map<string, number>; zero: string } = { index: B58_INDEX, zero: "1" }): Uint8Array | null {
   if (input.length === 0 || input.length > 120) return null;
   let value = 0n;
   for (const ch of input) {
-    const digit = B58_INDEX.get(ch);
+    const digit = alphabet.index.get(ch);
     if (digit === undefined) return null;
     value = value * 58n + BigInt(digit);
   }
@@ -22,7 +25,7 @@ export function base58Decode(input: string): Uint8Array | null {
     value >>= 8n;
   }
   for (const ch of input) {
-    if (ch !== "1") break;
+    if (ch !== alphabet.zero) break;
     bytes.unshift(0);
   }
   return Uint8Array.from(bytes);
@@ -40,7 +43,17 @@ export type Base58CheckResult = { checksummed: boolean; valid: boolean; hash20?:
  * carry no checksum and are reported as not checksummed.
  */
 export function base58Check(input: string): Base58CheckResult {
-  const raw = base58Decode(input);
+  const result = checkedDecode(base58Decode(input));
+  // An XRP classic address ("r…", 25 bytes in the XRP alphabet) fails the Bitcoin-alphabet checksum:
+  // it is valid when it verifies in its own alphabet.
+  if (result.checksummed && !result.valid && input.startsWith("r")) {
+    const xrp = checkedDecode(base58Decode(input, { index: XRP_INDEX, zero: "r" }));
+    if (xrp.checksummed && xrp.valid) return xrp;
+  }
+  return result;
+}
+
+function checkedDecode(raw: Uint8Array | null): Base58CheckResult {
   if (!raw) return { checksummed: false, valid: false };
   if (raw.length !== 25 && raw.length !== 26) return { checksummed: false, valid: true };
   const body = raw.subarray(0, raw.length - 4);
