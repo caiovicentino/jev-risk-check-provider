@@ -21,6 +21,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createSimulator, type SimulationEvidence } from "../src/simulation.js";
 import { createContractIntel } from "../src/contract-intel.js";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
+import { redactScamSniffer, scamSnifferOnly } from "./redact.js";
 import { sample, wilson } from "./stats.js";
 
 const BS = "https://eth.blockscout.com/api/v2";
@@ -167,7 +168,8 @@ export async function runSimulationEval(opts: { drainers?: number; perContract?:
 async function main(): Promise<void> {
   const report = await runSimulationEval({ drainers: arg("drainers", 300), perContract: arg("per-contract", 3), legitPerContract: arg("legit-per-contract", 10), seed: arg("seed", 7) });
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
-  writeFileSync(`${EVAL_EVIDENCE_DIR}/simulation-report.json`, JSON.stringify(report, null, 2));
+  // ScamSniffer-only entries (GPL) are written as hashes: the report is committed.
+  writeFileSync(`${EVAL_EVIDENCE_DIR}/simulation-report.json`, JSON.stringify(redactScamSniffer(report, await scamSnifferOnly()), null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
 

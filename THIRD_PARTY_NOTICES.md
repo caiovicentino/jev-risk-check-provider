@@ -19,7 +19,8 @@ x402check is MIT-licensed. It uses the following third-party data. Nothing below
 ## ScamSniffer scam-database — GPL-3.0
 
 - Source: https://github.com/scamsniffer/scam-database (`blacklist/domains.json`, `blacklist/address.json`). The public data is published with a 7-day delay.
-- Use: runtime only. `scripts/update-threat-feeds.ts --scamsniffer --upload` builds hash blobs locally under `.cache/` (git-ignored) and stores them in the operator's Cloudflare KV. The Worker reads them at request time.
+- Use: runtime only. The Worker's cron rebuilds the domain and address hash sets into the operator's Cloudflare KV twice a day (`deploy/scamsniffer-refresh.ts`), and `scripts/update-threat-feeds.ts --scamsniffer --upload` does the same from a workstation (hash blobs under `.cache/`, git-ignored). The Worker reads them at request time.
+- Evidence reports: an address or domain that only ScamSniffer lists appears in a committed report as `ss:<16 hex>` (the first 16 hex digits of the SHA-256 of its lowercase form), never in clear (`eval/redact.ts`; `scripts/redact-evidence.ts --check` verifies). Tests use synthetic entries.
 - Not done: the derived data is **not committed to this repository and not bundled into the distributed Worker code**, so no GPL-covered work is conveyed.
 - Handling: ScamSniffer domain hits cap a score only when x402check's own domain analysis corroborates them, because the list also contains popular shared hosts (URL shorteners, storage platforms). EVM address hits are applied directly.
 - Code fingerprints: the same runtime-only rule applies to the drainer-kit code fingerprints derived from the listed addresses (`feed:scamsniffer:code:v1` in KV, `.cache/threat-feeds/scamsniffer-code.bin` locally). They are never committed or bundled.

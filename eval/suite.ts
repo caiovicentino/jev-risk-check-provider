@@ -3,6 +3,7 @@ import { writeFileSync, rmSync } from "node:fs";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient, QUESTION_SET_VERSION } from "../src/jev.js";
 import { buildProvider, buildProductionLikeProvider, runCases, appendEntries, withLabelDerivedScreening, EVAL_EVIDENCE_DIR, SYNTHETIC_LOG, LIVE_LOG } from "./harness.js";
+import { redactScamSniffer, scamSnifferOnly } from "./redact.js";
 import { syntheticFixturesFor } from "./fixtures.js";
 import { CASES } from "./cases.js";
 import { generateCorpus, sampleForStability, type ScaleOptions } from "./scale-cases.js";
@@ -167,7 +168,8 @@ async function main(): Promise<void> {
   if (!SKIP_GROUNDED) {
     console.log("\n[7/8] grounded (external labels: OFAC, MetaMask, ScamSniffer, known-legit)");
     grounded = await runGrounded(backend);
-    writeFileSync(`${EVAL_EVIDENCE_DIR}/grounded-report.json`, JSON.stringify(grounded, null, 2));
+    // ScamSniffer-only entries (GPL) are written as hashes: the report is committed.
+    writeFileSync(`${EVAL_EVIDENCE_DIR}/grounded-report.json`, JSON.stringify(redactScamSniffer(grounded, await scamSnifferOnly()), null, 2));
   }
 
   if (!SKIP_BENCH) {
@@ -195,7 +197,8 @@ async function main(): Promise<void> {
     grounded: grounded?.layers ?? null,
     gate,
   };
-  writeFileSync(`${EVAL_EVIDENCE_DIR}/consolidated-report.json`, JSON.stringify(report, null, 2));
+  // ScamSniffer-only entries (GPL) are written as hashes: the report is committed.
+  writeFileSync(`${EVAL_EVIDENCE_DIR}/consolidated-report.json`, JSON.stringify(redactScamSniffer(report, await scamSnifferOnly()), null, 2));
 
   console.log("\n== CONSOLIDATED ==");
   console.log(`${"layer".padEnd(34)} ${"n".padStart(5)} ${"unchk".padStart(5)} ${"acc".padStart(7)} ${"95% CI".padStart(13)} ${"FN".padStart(4)} ${"FP".padStart(4)} ${"p50".padStart(6)}`);

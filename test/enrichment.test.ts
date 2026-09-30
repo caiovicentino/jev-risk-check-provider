@@ -56,7 +56,7 @@ test("domain analysis: official subdomains, URL input, impersonation strength", 
     ["coinbsae.com", "strong", "coinbase"],
     ["https://mеtamask.io", "strong", "metamask"], // Cyrillic е
     ["uniswap.org.evil-host.com", "strong", "uniswap"],
-    ["ss:da95cd185433aa86", "strong", "metamask"],
+    ["metamask-verify-demo.vercel.app", "strong", "metamask"],
     ["defi-finance.io", "none", undefined], // "finance" is one edit from "binance" but a dictionary word
   ];
   for (const [input, strength, brand] of cases) {
@@ -81,9 +81,10 @@ test("hash-set feeds: roundtrip, binary search, parent-domain and allowlist sema
     metamaskDomains: { set: hashSetFromBytes(buildHashBlob(["evil.com", "drainer.vercel.app", "coinbase.com"])), as_of: "2026-09-29" },
     metamaskAllow: new Set(["opensea.io"]),
     scamsnifferDomains: { set: hashSetFromBytes(buildHashBlob(["sub.shared.io"])), as_of: "2026-09-22" },
-    scamsnifferAddresses: { set: hashSetFromBytes(buildHashBlob(["ss:65082812d0bf50a2"])), as_of: "2026-09-22" },
+    // Synthetic fixtures: no real ScamSniffer (GPL) entry is committed.
+    scamsnifferAddresses: { set: hashSetFromBytes(buildHashBlob(["0x5eed000000000000000000000000000000c0ffee"])), as_of: "2026-09-22" },
   };
-  const evm = parseSubject("ss:65082812d0bf50a2")!;
+  const evm = parseSubject("0x5EED000000000000000000000000000000C0FFEE")!;
   const dom = (h: string) => { const a = analyzeDomain(h)!; return { host: a.host, registrable: a.registrable }; };
   const status = (r: ReturnType<typeof checkFeeds>, source: string) => r.results.find((x) => x.source === source)?.status;
   // MetaMask entries cover subdomains; the public-suffix boundary protects the platform itself.
@@ -132,5 +133,5 @@ test("look-alike heuristics do not flag popular legit names (regressions from th
   assert.equal(analyzeDomain("slido.com")?.brand, undefined, "short tokens match whole words only");
   assert.equal(analyzeDomain("lido-claim.com")?.impersonation, "strong");
   assert.equal(analyzeDomain("walletconnect-verify.app")?.impersonation, "strong");
-  assert.equal(analyzeDomain("ss:881aaefb55b1714b")?.impersonation, "strong");
+  assert.equal(analyzeDomain("renzoportocol.xyz")?.impersonation, "strong");
 });

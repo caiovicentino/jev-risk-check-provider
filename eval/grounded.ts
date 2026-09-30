@@ -14,6 +14,7 @@
 //   npx tsx eval/grounded.ts [--tranco path/to/top-domains.txt] [--tranco-n 20000]
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
+import { redactScamSniffer, scamSnifferOnly } from "./redact.js";
 import { sample, wilson } from "./stats.js";
 import { Provider } from "../src/provider.js";
 import { generateKeyPair } from "../src/jws.js";
@@ -216,7 +217,8 @@ async function main(): Promise<void> {
   if (!key && !process.env.AI_GATEWAY_API_KEY) throw new Error("requires TYPESAFE_API_KEY or AI_GATEWAY_API_KEY");
   const report = await runGrounded(key ? new JevClient({ apiKey: key }) : new GatewayJevClient());
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
-  writeFileSync(`${EVAL_EVIDENCE_DIR}/grounded-report.json`, JSON.stringify(report, null, 2));
+  // ScamSniffer-only entries (GPL) are written as hashes: the report is committed.
+  writeFileSync(`${EVAL_EVIDENCE_DIR}/grounded-report.json`, JSON.stringify(redactScamSniffer(report, await scamSnifferOnly()), null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
 

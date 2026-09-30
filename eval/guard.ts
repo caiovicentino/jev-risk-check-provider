@@ -31,6 +31,7 @@ import { loadFeedsFromDisk } from "../src/feeds-node.js";
 import type { Answer } from "../src/types.js";
 import { numberFlag } from "./flags.js";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
+import { redactScamSniffer, scamSnifferOnly } from "./redact.js";
 import { wilson } from "./stats.js";
 
 const BS = "https://eth.blockscout.com/api/v2";
@@ -179,7 +180,8 @@ async function main(): Promise<void> {
     rows: rows.map((r) => (r.fetched ? { label: r.label, tx: r.tx, action: r.action, code: r.code, counterparty: r.counterparty, tier: r.tier, score: r.score, categories: r.categories, simulation: r.simulation, findings: r.findings } : { label: r.label, tx: r.tx, fetched: false })),
   };
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
-  writeFileSync(`${EVAL_EVIDENCE_DIR}/guard-report.json`, JSON.stringify(report, null, 2));
+  // ScamSniffer-only entries (GPL) are written as hashes: the report is committed.
+  writeFileSync(`${EVAL_EVIDENCE_DIR}/guard-report.json`, JSON.stringify(redactScamSniffer(report, await scamSnifferOnly()), null, 2));
   console.log(JSON.stringify({ drainer: report.drainer.verdicts, drainer_sim_ok: report.drainer.among_simulated_ok_in_the_simulation_eval, legit: report.legit.verdicts, legit_sim_ok: report.legit.among_simulated_ok_in_the_simulation_eval }, null, 1));
 }
 

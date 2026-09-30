@@ -18,6 +18,7 @@ import { matchCode } from "../src/threat-intel.js";
 import { FORTA_CODE_META } from "../src/data/code-feeds.js";
 import { fetchCodes } from "../scripts/code-fetch.js";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
+import { redactScamSniffer, scamSnifferOnly } from "./redact.js";
 import { wilson } from "./stats.js";
 
 const RPC = "https://ethereum-rpc.publicnode.com";
@@ -155,7 +156,8 @@ export async function runCodeFingerprintEval(opts: { blocks?: number } = {}): Pr
 async function main(): Promise<void> {
   const report = await runCodeFingerprintEval({ blocks: arg("blocks", 300) });
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
-  writeFileSync(`${EVAL_EVIDENCE_DIR}/code-fingerprint-report.json`, JSON.stringify(report, null, 2));
+  // ScamSniffer-only entries (GPL) are written as hashes: the report is committed.
+  writeFileSync(`${EVAL_EVIDENCE_DIR}/code-fingerprint-report.json`, JSON.stringify(redactScamSniffer(report, await scamSnifferOnly()), null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
 
