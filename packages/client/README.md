@@ -16,7 +16,7 @@ Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. Every e
 - **`check` and `checkBatch`** return typed results and throw typed errors (`X402CheckError`).
 - **`verifyAttestation`** checks the signature with the key in the issuer's `did:web` document, never with a URL taken from a response.
 - **`interpret`** applies the **fail-closed** policy that wallets and agents should follow.
-- **`guardAccount`** (`@x402check/client/guard`) puts x402check **between an agent and its key**. A transaction, permit, order, x402 payment or EIP-7702 delegation is signed only after a verified allow; otherwise it throws. See [Signing guard](#signing-guard-block-before-the-key-signs).
+- **`guardAccount`** and **`guardSolanaSigner`** (`@x402check/client/guard`) put x402check **between an agent and its key**, on EVM and on Solana. A transaction, permit, order, x402 payment or EIP-7702 delegation is signed only after a verified allow; otherwise it throws. See [Signing guard](#signing-guard-block-before-the-key-signs).
 
 ```bash
 npm install @x402check/client
@@ -142,10 +142,56 @@ client.register("eip155:*", new ExactEvmScheme(signer));
 client.onBeforePaymentCreation(x402PaymentGuard({ creditToken: process.env.X402CHECK_CREDIT_TOKEN }));
 ```
 
+### Solana signers
+
+`guardSolanaSigner` wraps a [`@solana/kit`](https://github.com/anza-xyz/kit) signer: `signTransactions`, `signMessages`, and their modifying and sending variants.
+
+```ts
+import { guardSolanaSigner } from "@x402check/client/guard";
+import { createKeyPairSignerFromBytes, signTransactionMessageWithSigners } from "@solana/kit";
+
+const signer = guardSolanaSigner(await createKeyPairSignerFromBytes(agentSecret), {
+  creditToken: process.env.X402CHECK_CREDIT_TOKEN,
+  solanaRpcUrl: "https://your-mainnet-rpc.example", // lookup tables and token-account owners; default: the public endpoint
+});
+// Use it as the fee payer or any signer of a message, or in an x402 client: new ExactSvmScheme(signer).
+await signTransactionMessageWithSigners(message); // throws X402CheckBlockedError before signing if refused
+```
+
+**Each transaction of a batch is decoded before anything is signed.** The guard reads the legacy or v0 message, resolving its address lookup tables over RPC, and then what the signer authorizes:
+
+- **SOL leaving the signer:** a System transfer, the funding of a new account, a nonce withdrawal, or the closing of a token account. The recipient is checked.
+- **SPL Token and Token-2022 transfers:** the owner of the receiving token account is checked, not the token account. The owner comes from an Associated Token Account instruction in the same transaction (the ATA program enforces it), or else from the chain. The amount and the mint are bound as `payment`.
+- **Approvals:** the delegate is checked, flagged `unlimited` at `u64::MAX`.
+- **Any other program the signer's account is passed to:** checked as a contract call, because it acts with the signer's authority.
+
+**The Solana decision:**
+
+- **Refused without a check** (`local_danger`):
+  - a System `Assign` of the signer's own account (its owner program would control everything it holds);
+  - an SPL `SetAuthority` handing a token account's owner, close, mint or freeze authority to someone else;
+  - a nonce account's authority handed over;
+  - a "message" whose bytes are a transaction, because its signature would authorize that transaction.
+- **`not_verified`, never a guess:**
+  - an instruction the signer authorizes that the guard cannot read, such as an unknown token instruction;
+  - a lookup table or a receiving token account's owner that cannot be established;
+  - more than 5 counterparties in one transaction.
+- **Nothing to check:**
+  - transfers between the signer's own token accounts;
+  - a transaction the signer does not have to sign;
+  - a plain message with no site.
+- **Sign-In With Solana:** the message's domain is checked.
+
+On real inputs (`eval/solana-guard.ts`), four decisions out of four were right:
+- a real x402 payment, built by the official x402 SVM client for production's 402, was checked (the payee resolved on mainnet) and signed;
+- the owner-change drain was refused locally;
+- an unlimited approval to a fresh wallet was blocked by production;
+- a transfer disguised as a message was refused.
+
 **Limits:**
 - The guard enforces what the checks detect. A plain transfer to a brand-new, unlisted drainer wallet still passes, unless our kit watch has already recorded that wallet.
 - It protects against a misled agent, not against code that reaches the key another way. For that, custody-level enforcement (a co-signer) is planned.
-- EVM only for now. Solana signers are next.
+- On Solana, nothing is simulated: the guard reads the instructions instead. On-chain facts about Solana counterparties come from mainnet.
 
 ## The fail-closed policy (`interpret`)
 

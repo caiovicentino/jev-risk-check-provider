@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-09-30T18:37:48.292Z",
+  "base": "https://x402check.xyz",
+  "solana_rpc": "https://api.mainnet-beta.solana.com",
+  "note": "nothing was sent to the network; the x402 payment was built and signed through the guard, then discarded",
+  "rows": [
+    {
+      "case": "x402 payment to x402check's pay_to on Solana (2000 base units of USDC)",
+      "expected": "allow",
+      "action": "allow",
+      "code": null,
+      "signed": true,
+      "checked": [
+        {
+          "wallet": "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X",
+          "interaction": "token_transfer",
+          "payment": {
+            "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "pay_to": "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X",
+            "amount": "2000",
+            "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+          }
+        }
+      ],
+      "reason": "No check fired: risk tier low, score 95/100 (higher is safer). A clean verdict means none of the checks fired, not that the counterparty is safe",
+      "ms": 1920
+    },
+    {
+      "case": "System Assign of the wallet to an unknown program",
+      "expected": "block (local)",
+      "action": "block",
+      "code": "local_danger",
+      "signed": false,
+      "checked": [],
+      "reason": "System Assign hands the signer's own account to program 8FCkAsyTNjHHiwiEFjcsHKU9wXTdDcJLszsAo9QboBcK: that program would control everything the account holds",
+      "ms": 1
+    },
+    {
+      "case": "unlimited SPL approval to a fresh wallet",
+      "expected": "block",
+      "action": "block",
+      "code": "blocked",
+      "signed": false,
+      "checked": [
+        {
+          "wallet": "BfthYoFHZEopkLkWFBxGEnToHg3rJfanbuh9o9xU2FzS",
+          "interaction": "token_approval",
+          "payment": {
+            "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "pay_to": "BfthYoFHZEopkLkWFBxGEnToHg3rJfanbuh9o9xU2FzS"
+          }
+        }
+      ],
+      "reason": "Drainer pattern: an approval or permit grants a plain wallet (EOA) control over the user's assets: spender is an EOA with no history",
+      "ms": 555
+    },
+    {
+      "case": "a SOL transfer disguised as a message",
+      "expected": "block (local)",
+      "action": "block",
+      "code": "local_danger",
+      "signed": false,
+      "checked": [],
+      "reason": "the message is a serialized Solana transaction: signing it would authorize that transaction",
+      "ms": 1
+    }
+  ],
+  "agreement": "4/4"
+}

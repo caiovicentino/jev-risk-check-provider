@@ -1,7 +1,7 @@
 {
   "name": "@x402check/client",
-  "version": "0.2.0",
-  "description": "Typed client and WebCrypto attestation verifier for x402check pre-payment risk checks (AI agents, wallets, x402).",
+  "version": "0.3.0",
+  "description": "Typed client, WebCrypto attestation verifier and signing guard (EVM and Solana) for x402check pre-payment risk checks: AI agents, wallets, x402.",
   "license": "MIT",
   "author": "Caio Vicentino",
   "homepage": "https://x402check.xyz",
@@ -25,7 +25,8 @@
     "drainer",
     "attestation",
     "jws",
-    "did-web"
+    "did-web",
+    "solana"
   ],
   "type": "module",
   "sideEffects": false,
@@ -60,6 +61,7 @@
     "prepack": "npm run build"
   },
   "devDependencies": {
+    "@solana/kit": "^5.5.1",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
     "typescript": "~5.9.3",

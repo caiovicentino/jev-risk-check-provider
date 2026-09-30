@@ -17,6 +17,13 @@
 // `x402PaymentGuard()` is the same check as an x402 client hook (`onBeforePaymentCreation`):
 // the payment is aborted before anything is signed.
 //
+// `guardSolanaSigner(signer)` does the same for a Solana signer (@solana/kit's
+// `signTransactions` / `signMessages` and their modifying and sending variants): each
+// transaction is decoded (lookup tables and token-account owners resolved over RPC), and its
+// recipients, delegates and called programs are checked. A message that is itself a
+// transaction, or an instruction that hands the account or its token accounts to someone
+// else, is refused without a check.
+//
 // Pay for the checks with prepaid credits (`creditToken`): never with a per-call payer
 // that uses the guarded account itself, or each check would need a guarded signature.
 import { createClient, type X402CheckClient } from "./client.js";
@@ -28,11 +35,26 @@ import { decodeTypedData } from "./decode/typed.js";
 import { decodePersonalSign } from "./decode/personal.js";
 import { buildRiskCheckBodies, type RiskCheckBody } from "./decode/request.js";
 import type { Decoded } from "./decode/util.js";
+import {
+  accountKeys,
+  ADDRESS_LOOKUP_TABLE_PROGRAM,
+  analyzeSolanaMessage,
+  DEFAULT_SOLANA_RPC,
+  decodeSolanaMessage,
+  getSolanaAccounts,
+  isSolanaTransactionMessage,
+  lookupTableAddresses,
+  SOLANA_MAINNET,
+  tokenAccountInfo,
+  type SolanaAnalysis,
+  type SolanaFinding,
+  type SolanaMessage,
+} from "./solana.js";
 
 /** x402check's own `pay_to` addresses: paying for a check is never itself checked. */
 export const X402CHECK_PAY_TO: readonly string[] = ["0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178", "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X"];
 
-export type SigningKind = "transaction" | "typed_data" | "message" | "authorization" | "raw_hash" | "x402_payment";
+export type SigningKind = "transaction" | "typed_data" | "message" | "authorization" | "raw_hash" | "x402_payment" | "solana_transaction" | "solana_message";
 
 export interface GuardCheck {
   request: RiskCheckRequest;
@@ -92,6 +114,10 @@ export interface GuardOptions {
   allowRawHashSigning?: boolean | undefined;
   /** Chain for a message signature (no chain of its own), as a number. */
   chainId?: number | undefined;
+  /** Solana JSON-RPC, to resolve address lookup tables and token-account owners. Default: the public mainnet-beta endpoint. */
+  solanaRpcUrl?: string | undefined;
+  /** CAIP-2 cluster of the Solana transactions signed. Default: mainnet. */
+  solanaNetwork?: string | undefined;
 }
 
 /** What a signature request is, before decoding. */
@@ -100,10 +126,14 @@ export type SigningRequest =
   | { kind: "typed_data"; from: string; typedData: { domain?: Record<string, unknown> | undefined; types?: Record<string, unknown> | undefined; primaryType?: unknown; message?: unknown } }
   | { kind: "message"; from: string; message: unknown }
   | { kind: "authorization"; from: string; contractAddress: string; chainId?: unknown }
-  | { kind: "x402_payment"; payTo: string; network: string; amount?: string | undefined; asset?: string | undefined; resource?: string | undefined };
+  | { kind: "x402_payment"; payTo: string; network: string; amount?: string | undefined; asset?: string | undefined; resource?: string | undefined }
+  | { kind: "solana_transaction"; from: string; messageBytes: Uint8Array }
+  | { kind: "solana_message"; from: string; message: Uint8Array };
 
 const SEVERITY: Record<Action, number> = { allow: 0, warn: 1, block: 2, not_verified: 3 };
 const MAX_CONTEXT = 4096;
+/** Counterparties checked for one Solana transaction (a batch); more is refused, never partly checked. */
+const MAX_SOLANA_CHECKS = 5;
 
 function sameAddress(a: string, b: string): boolean {
   return /^0x/i.test(a) && /^0x/i.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -207,6 +237,8 @@ export function createGuard(options: GuardOptions = {}) {
 
   /** Decodes a signature request and checks it: never throws, even on failure (the verdict says so). */
   async function check(request: SigningRequest): Promise<GuardVerdict> {
+    if (request.kind === "solana_transaction") return checkSolanaTransaction(request.from, request.messageBytes);
+    if (request.kind === "solana_message") return checkSolanaMessage(request.from, request.message);
     if (request.kind === "x402_payment") {
       const summary = `x402 payment of ${request.amount ?? "?"} (atomic units) of ${request.asset ?? "?"} on ${request.network} to ${request.payTo}${request.resource ? ` for ${request.resource}` : ""}`;
       if (isTrusted(request.payTo)) return verdictOf("x402_payment", summary, "allow", ["payment to x402check itself (trusted payee): not checked"], []);
@@ -259,6 +291,137 @@ export function createGuard(options: GuardOptions = {}) {
     const bodies = buildRiskCheckBodies(decoded, options.origin);
     if (bodies.length === 0) return verdictOf(kind, decoded.summary, "allow", [decoded.localNote ?? "nothing to check: no counterparty"], []);
     return evaluate(kind, decoded.summary, bodies.map(withAgentContext));
+  }
+
+  const solanaNetwork = options.solanaNetwork ?? SOLANA_MAINNET;
+  const rpcFetch: FetchLike = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
+  const rpcTimeout = options.timeoutMs ?? 10_000;
+
+  async function checkSolanaTransaction(from: string, messageBytes: Uint8Array): Promise<GuardVerdict> {
+    const kind: SigningKind = "solana_transaction";
+    let message: SolanaMessage;
+    try {
+      message = decodeSolanaMessage(messageBytes);
+    } catch (err) {
+      return verdictOf(kind, "a Solana transaction that could not be decoded", "not_verified", [`the transaction could not be decoded (${(err as Error).message}): nothing unreadable is signed`], [], "undecodable");
+    }
+    let keys: string[];
+    try {
+      const tables = new Map<string, string[]>();
+      const accounts = await getSolanaAccounts(options.solanaRpcUrl ?? DEFAULT_SOLANA_RPC, message.lookups.map((l) => l.table), rpcFetch, rpcTimeout);
+      message.lookups.forEach((l, i) => {
+        const table = accounts[i];
+        if (!table || table.owner !== ADDRESS_LOOKUP_TABLE_PROGRAM) throw new Error(`${l.table} is not an address lookup table`);
+        tables.set(l.table, lookupTableAddresses(table.data));
+      });
+      keys = accountKeys(message, tables);
+    } catch (err) {
+      return verdictOf(kind, "a Solana v0 transaction with address lookup tables", "not_verified", [`its address lookup tables could not be resolved (${String((err as Error).message).slice(0, 160)}), so its accounts are unknown`], [], "not_verified");
+    }
+    const analysis = analyzeSolanaMessage(message, keys, from);
+    const draft = solanaSummary(message, analysis, analysis.findings);
+    if (!analysis.required) return verdictOf(kind, draft, "allow", ["the signer is not a required signer of this transaction: its signature authorizes nothing"], []);
+    if (analysis.danger.length > 0) return verdictOf(kind, draft, "block", analysis.danger, [], "local_danger");
+    if (analysis.unreadable.length > 0) {
+      return verdictOf(kind, draft, "not_verified", [`the signer authorizes instructions this guard cannot read: ${analysis.unreadable.join(", ")}. Nothing unreadable is signed`], [], "unreadable_instruction");
+    }
+
+    // The owner of each receiving token account: the ATA program's create instruction names it; otherwise the chain does.
+    const pending = [...new Set(analysis.findings.flatMap((f) => (f.kind === "token_transfer" && !analysis.created.has(f.account) ? [f.account] : [])))];
+    const owners = new Map<string, { owner: string; mint: string }>(analysis.created);
+    try {
+      const accounts = await getSolanaAccounts(options.solanaRpcUrl ?? DEFAULT_SOLANA_RPC, pending, rpcFetch, rpcTimeout);
+      pending.forEach((address, i) => {
+        const account = accounts[i];
+        const info = account ? tokenAccountInfo(account) : null;
+        if (!info) throw new Error(`${address} ${account ? "is not a token account" : "does not exist, and the transaction does not create it"}`);
+        owners.set(address, info);
+      });
+    } catch (err) {
+      return verdictOf(kind, draft, "not_verified", [`the owner of a receiving token account could not be established (${String((err as Error).message).slice(0, 160)})`], [], "not_verified");
+    }
+    const findings = analysis.findings.flatMap((f): SolanaFinding[] => {
+      if (f.kind !== "token_transfer") return [f];
+      const info = owners.get(f.account);
+      // Between the signer's own token accounts: nothing leaves the signer.
+      return info && info.owner !== from ? [{ ...f, owner: info.owner, mint: f.mint ?? info.mint }] : [];
+    });
+    const summary = solanaSummary(message, analysis, findings);
+    const bodies = solanaBodies(findings, summary);
+    if (bodies.length === 0) return verdictOf(kind, summary, "allow", ["nothing to check: the signer sends nothing, approves no one and calls no program"], []);
+    if (bodies.length > MAX_SOLANA_CHECKS) {
+      return verdictOf(kind, summary, "not_verified", [`${bodies.length} counterparties in one transaction; at most ${MAX_SOLANA_CHECKS} are checked, and none is left unchecked`], [], "not_verified");
+    }
+    return evaluate(kind, summary, bodies.map(withAgentContext));
+  }
+
+  /** One check per counterparty: amounts to the same payee and asset are added up. */
+  function solanaBodies(findings: SolanaFinding[], summary: string): RiskCheckBody[] {
+    const domain = host(options.origin);
+    const merged = new Map<string, RiskCheckBody>();
+    const ordered = [...findings.filter((f) => f.kind !== "program_call"), ...findings.filter((f) => f.kind === "program_call")];
+    for (const f of ordered) {
+      const base = { chain: solanaNetwork, ...(domain ? { domain } : {}), context: summary };
+      let key: string;
+      let body: RiskCheckBody;
+      if (f.kind === "native_transfer") {
+        key = `native|${f.to}`;
+        body = { ...base, wallet: f.to, interaction: { type: "native_transfer" }, payment: { network: solanaNetwork, pay_to: f.to, asset: "native", ...(f.lamports ? { amount: f.lamports } : {}) } };
+      } else if (f.kind === "token_transfer") {
+        const owner = f.owner as string;
+        key = `token|${owner}|${f.mint ?? ""}`;
+        body = { ...base, wallet: owner, interaction: { type: "token_transfer" }, payment: { network: solanaNetwork, pay_to: owner, amount: f.amount, ...(f.mint ? { asset: f.mint } : {}) } };
+      } else if (f.kind === "token_approval") {
+        key = `approval|${f.delegate}|${f.mint ?? ""}`;
+        body = {
+          ...base,
+          wallet: f.delegate,
+          interaction: f.unlimited ? { type: "token_approval", unlimited: true } : { type: "token_approval" },
+          payment: { network: solanaNetwork, pay_to: f.delegate, ...(f.unlimited ? {} : { amount: f.amount }), ...(f.mint ? { asset: f.mint } : {}) },
+        };
+      } else {
+        key = `program|${f.program}`;
+        body = { ...base, wallet: f.program, interaction: { type: "contract_call" } };
+      }
+      const seen = merged.get(key);
+      if (!seen) {
+        merged.set(key, body);
+        continue;
+      }
+      if (body.interaction.unlimited) seen.interaction = body.interaction;
+      if (seen.payment) {
+        const [a, b] = [seen.payment.amount, body.payment?.amount];
+        if (a !== undefined && b !== undefined && !seen.interaction.unlimited) {
+          seen.payment = { ...seen.payment, amount: (BigInt(a) + BigInt(b)).toString() };
+        } else {
+          // An unknown or unlimited part makes the total unknown: bound without an amount.
+          const { amount: _unknown, ...rest } = seen.payment;
+          seen.payment = rest;
+        }
+      }
+    }
+    return [...merged.values()];
+  }
+
+  async function checkSolanaMessage(from: string, message: Uint8Array): Promise<GuardVerdict> {
+    const kind: SigningKind = "solana_message";
+    // A "message" whose bytes are a transaction message: its signature would authorize that transaction.
+    if (isSolanaTransactionMessage(message)) {
+      return verdictOf(kind, "a Solana message whose bytes are a transaction", "block", ["the message is a serialized Solana transaction: signing it would authorize that transaction"], [], "local_danger");
+    }
+    let text: string | undefined;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(message);
+    } catch {
+      text = undefined;
+    }
+    // Sign-In With Solana names the site asking: that domain is checked.
+    const siws = text ? /^([A-Za-z0-9.-]{1,253}(?::\d{1,5})?) wants you to sign in with your Solana account:/.exec(text) : null;
+    const summary = text ? `Solana message signature (${message.length} bytes): ${text.slice(0, 300)}` : `Solana message signature of ${message.length} bytes of binary data`;
+    const domain = siws?.[1] ? host(siws[1]) : host(options.origin);
+    if (!domain) return verdictOf(kind, summary, "allow", ["nothing to check: a message with no counterparty and no site"], []);
+    const body: RiskCheckBody = { wallet: from, chain: solanaNetwork, domain, context: summary, interaction: { type: "message_signature" } };
+    return evaluate(kind, summary, [withAgentContext(body)]);
   }
 
   /** Checks, reports (`onVerdict`), and throws `X402CheckBlockedError` unless the key may sign. */
@@ -341,6 +504,82 @@ export function guardAccount<A extends GuardableAccount>(account: A, options: Gu
     };
   }
   return wrapped;
+}
+
+/** A Solana signer (@solana/kit), structurally: any of its signing methods, each taking a batch. */
+export interface GuardableSolanaSigner {
+  address: string;
+  // Loose on purpose: @solana/kit's types are branded; the wrapper passes arguments through unchanged.
+  signTransactions?: ((transactions: readonly any[], config?: any) => Promise<any>) | undefined;
+  modifyAndSignTransactions?: ((transactions: readonly any[], config?: any) => Promise<any>) | undefined;
+  signAndSendTransactions?: ((transactions: readonly any[], config?: any) => Promise<any>) | undefined;
+  signMessages?: ((messages: readonly any[], config?: any) => Promise<any>) | undefined;
+  modifyAndSignMessages?: ((messages: readonly any[], config?: any) => Promise<any>) | undefined;
+}
+
+/**
+ * The same Solana signer, with x402check between it and every signature. Every transaction of a
+ * batch is decoded and checked first; one refusal refuses the batch, and nothing is signed.
+ * Pass it wherever the agent signs: `signTransactionMessageWithSigners`, an x402 client
+ * (`new ExactSvmScheme(guarded)`), an agent framework.
+ */
+export function guardSolanaSigner<S extends GuardableSolanaSigner>(signer: S, options: GuardOptions = {}): S {
+  const guard = createGuard(options);
+  const from = String(signer.address);
+  const wrapped: S = { ...signer };
+  const transactions = (method: "signTransactions" | "modifyAndSignTransactions" | "signAndSendTransactions") => {
+    const sign = signer[method]?.bind(signer);
+    if (!sign) return;
+    wrapped[method] = async (txs: readonly any[], config?: any) => {
+      for (const tx of txs ?? []) {
+        const bytes = tx?.messageBytes;
+        if (!(bytes instanceof Uint8Array)) {
+          throw new X402CheckBlockedError({ action: "not_verified", signed: false, kind: "solana_transaction", summary: "a Solana transaction without its compiled message", reasons: ["only compiled transactions (messageBytes) can be checked"], code: "undecodable", checks: [] });
+        }
+        await guard.enforce({ kind: "solana_transaction", from, messageBytes: bytes });
+      }
+      return sign(txs, config);
+    };
+  };
+  const messages = (method: "signMessages" | "modifyAndSignMessages") => {
+    const sign = signer[method]?.bind(signer);
+    if (!sign) return;
+    wrapped[method] = async (msgs: readonly any[], config?: any) => {
+      for (const m of msgs ?? []) {
+        const content = m?.content;
+        if (!(content instanceof Uint8Array)) {
+          throw new X402CheckBlockedError({ action: "not_verified", signed: false, kind: "solana_message", summary: "a Solana message without its content", reasons: ["only messages with byte content can be checked"], code: "undecodable", checks: [] });
+        }
+        await guard.enforce({ kind: "solana_message", from, message: content });
+      }
+      return sign(msgs, config);
+    };
+  };
+  transactions("signTransactions");
+  transactions("modifyAndSignTransactions");
+  transactions("signAndSendTransactions");
+  messages("signMessages");
+  messages("modifyAndSignMessages");
+  return wrapped;
+}
+
+/** A Solana transaction, in words: what the signer sends, approves and calls. */
+function solanaSummary(message: SolanaMessage, analysis: SolanaAnalysis, findings: SolanaFinding[]): string {
+  const parts = findings.map((f) => {
+    switch (f.kind) {
+      case "native_transfer":
+        return `sends ${f.lamports ? `${f.lamports} lamports` : "an account's lamports"} to ${f.to} (${f.how})`;
+      case "token_transfer":
+        return `transfers ${f.amount} base units of ${f.mint ? `token ${f.mint}` : "a token"} to ${f.owner ? `${f.owner} (token account ${f.account})` : `token account ${f.account}`}`;
+      case "token_approval":
+        return `approves ${f.delegate} to spend ${f.unlimited ? "an UNLIMITED amount" : `${f.amount} base units`} of ${f.mint ? `token ${f.mint}` : "a token"}`;
+      default:
+        return `calls program ${f.program} with the signer's authority`;
+    }
+  });
+  const what = parts.length > 0 ? parts.join("; ") : "sends nothing, approves no one and calls no program";
+  const notes = [...analysis.danger, ...analysis.notes];
+  return `Solana transaction (${message.version === 0 ? "v0" : "legacy"}, ${message.instructions.length} instructions): the signer ${what}${notes.length ? `. Also: ${notes.join("; ")}` : ""}.`.slice(0, 1200);
 }
 
 /** The x402 client hook's context (`onBeforePaymentCreation`), structurally. */

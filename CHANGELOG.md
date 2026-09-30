@@ -2,6 +2,27 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/client` 0.3.0 — 2026-09-30
+
+- **The signing guard covers Solana:** `guardSolanaSigner(signer)` wraps a `@solana/kit` signer (`signTransactions`, `signMessages`, and their modifying and sending variants).
+  - **What it reads:** each transaction of a batch is decoded without dependencies (`src/solana.ts`): legacy and v0 messages, with address lookup tables resolved over RPC.
+  - **What is checked:**
+    - SOL leaving the signer (transfers, account funding, nonce withdrawals, closed token accounts);
+    - SPL Token and Token-2022 transfers, checking the **owner** of the receiving token account, from an ATA instruction in the transaction or else from the chain;
+    - approvals (the delegate, `unlimited` at `u64::MAX`);
+    - any other program handed the signer's account.
+  - **Refused locally, without a check:**
+    - a System `Assign` of the signer's own account, the owner-change drain;
+    - an SPL `SetAuthority` handing a token account's control to someone else;
+    - a nonce account's authority handed over;
+    - a "message" whose bytes are a transaction.
+  - **`not_verified`, never a guess:** an instruction it cannot read, an unresolved lookup table or token-account owner, or more than 5 counterparties.
+- **Measured on real inputs** (`eval/solana-guard.ts`, 4/4 right, nothing sent):
+  - a real x402 payment, built by the official x402 SVM client for production's 402, was checked with its payee resolved on mainnet, then signed (1.9 s);
+  - the owner-change drain and a transfer disguised as a message were refused locally;
+  - an unlimited SPL approval to a fresh wallet was blocked by production (0.6 s).
+- 15 new tests, with real `@solana/kit` signers and compiled transactions (a dev dependency only: the client still has no runtime dependencies).
+
 ## `@x402check/mcp` 0.2.0 — 2026-09-30
 
 - **`x402check_pay`: the MCP server pays x402 resources, and only after x402check clears the payee.** The agent never holds the key.

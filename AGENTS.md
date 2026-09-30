@@ -74,7 +74,7 @@ One agent may hold several roles in one session. Know which lane you are working
 | `src/` | Provider core: `provider.ts` (evaluation and `PROVIDER_VERSION`), `scoring.ts`, `validate.ts`, `handler.ts` (routes the Worker does not special-case), `landing.ts` (the site and `og.png`), `jws.ts` (attestations, `request_hash`), `simulation.ts`, `kit-watch*.ts`, `sanctions.ts`, `domain-analysis.ts`, `icon.ts`, `data/` (embedded OFAC and MetaMask sets) |
 | `deploy/` | Cloudflare Worker. `worker.ts` (routing, `/status`, cron, HEAD handling), `protected.ts` (paid flow, routing, stack), `pricing.ts`, `credits.ts`, `cdp.ts`, `discovery.ts`, `kit-watch.ts`, `feeds.ts` (GPL blobs from KV), `fresh-feeds.ts`, `wrangler.toml`. Details in `deploy/README.md`. |
 | `packages/client`, `packages/mcp` | npm packages (`@x402check/client`, `@x402check/mcp`). The MCP server depends on the client via `file:../client` in the repo; publishing swaps it for `^version`. |
-| `packages/client/src/guard.ts` | **Signing guard** (`@x402check/client/guard`): `guardAccount`, `x402PaymentGuard`. The key signs only after a verified, bound `allow`. |
+| `packages/client/src/guard.ts`, `packages/client/src/solana.ts` | **Signing guard** (`@x402check/client/guard`): `guardAccount` (EVM), `guardSolanaSigner` (Solana, with a dependency-free message decoder), `x402PaymentGuard`. The key signs only after a verified, bound `allow`. |
 | `packages/mcp/src/pay.ts`, `packages/mcp/src/payer.ts` | **`x402check_pay`**: the MCP server pays an x402 resource only after the guard clears the exact option, inside `onBeforePaymentCreation` (`payer.payResource`). A `warn` goes to the user through MCP elicitation. |
 | `packages/client/src/decode/` | The Snap's decoders, **vendored**: never edit them there. Edit `snap/src`, then run `node scripts/sync-decoders.mjs`. `test/decoders-sync.test.ts` fails on drift. |
 | `snap/` | MetaMask Snap (preview). |
@@ -289,7 +289,8 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
 - **Production:**
   - v0.5.4: credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;
   - Bazaar and x402scan listings, `/openapi.json`.
-- **Packages:** `@x402check/client` 0.2.0 and `@x402check/mcp` 0.2.0 on npm, and the MCP server in the MCP Registry.
+- **Packages:** `@x402check/client` 0.3.0 and `@x402check/mcp` 0.2.0 on npm, and the MCP server in the MCP Registry.
+- **Solana signing guard** (`guardSolanaSigner`, `@x402check/client` 0.3.0): decodes each transaction (lookup tables and token-account owners over RPC), refuses owner-change drains locally, and checks recipients, delegates and called programs. On real inputs, 4/4 right (`eval/solana-guard.ts`).
 - **Guarded x402 payments** (`x402check_pay`, `@x402check/mcp` 0.2.0): the MCP server pays a resource only after x402check clears the exact payee, right before signing. A `warn` goes to the user through elicitation.
   - One real payment through the tool settled on Base (`eval/mcp-pay.ts`).
   - 24/25 real Bazaar payees were allowed (`eval/pay-guard.ts`).
@@ -299,7 +300,6 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
   - Probe credits: `~/.config/paysol/x402check-credit-token` (mode 600; never print it).
 - **Revenue from outside:** $0. Every payment so far has come from our own probe wallets.
 - **Next** (`docs/STRATEGY.md`):
-  - guard phase 2: Solana signers (the MCP payment tool is done);
   - guard phase 3: custody-level enforcement (a co-signer, a smart-account module that checks the attestation on-chain, the Kora fee-payer gate);
   - measure the kit watch's lead time against public lists;
   - follow up with PayAI and CDP;

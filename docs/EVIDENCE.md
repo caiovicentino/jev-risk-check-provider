@@ -49,6 +49,24 @@ Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked 
 - `max_usd`, the cap and the budget refusing before any check is bought;
 - time limits, and URL and header refusals.
 
+## Solana signing guard (`@x402check/client` 0.3.0, new)
+
+`guardSolanaSigner()` wraps a `@solana/kit` signer. Every transaction is decoded, including v0 lookup tables and the owners of receiving token accounts, and its counterparties are checked before the key signs.
+
+**Real inputs** (`eval/solana-guard.ts`, `solana-guard-report.json`). The inputs used the real Solana mainnet RPC and production checks from prepaid credits. Nothing was sent to the network and no funds moved.
+
+| Case | Decision | How |
+|---|---|---|
+| A real x402 payment on Solana: production's 402, built by the official x402 SVM client (`@x402/svm` `ExactSvmScheme`) with the guarded signer | **allow, signed** (1.9 s) | The payee's token account was resolved on mainnet to its owner, x402check's `pay_to`, checked in production as a `token_transfer` with the amount and mint bound, and the attestation was verified. |
+| A System `Assign` of the wallet to an unknown program (the owner-change drain) | **block**, locally | No check was needed. |
+| An unlimited SPL approval to a fresh wallet | **block** (0.6 s) | Production found an approval to a plain wallet with no history. |
+| A SOL transfer disguised as a message to sign | **block**, locally | The bytes are a transaction message. |
+
+**Tests:** `packages/client/test/solana.test.ts`, 15 tests on real `@solana/kit` signers and compiled transactions. They cover:
+- signatures that verify after an allow, and nothing signed after a refusal;
+- ATA-created and on-chain token-account owners, and lookup tables (resolved or not);
+- local drains, unreadable instructions, batches, messages and Sign-In With Solana.
+
 ## Signing guard (`@x402check/client` 0.2.0)
 
 `guardAccount()` wraps the account an agent signs with. A signature request is decoded (the real counterparty inside the calldata or typed data), checked, and its attestation verified and bound to that exact request. Only then does the key sign; otherwise the guard throws.
@@ -437,6 +455,7 @@ npx tsx scripts/payai-shadow.ts --days 7
 PAY_NETWORK=eip155:8453 npm run security:v5    # spends $0.1035: one per-call check and a $0.10 credit pack; reports who settled each
 npx tsx eval/mcp-pay.ts                      # one real payment through x402check_pay, to x402check itself ($0.0035)
 npx tsx eval/pay-guard.ts --n 25 --seed 402  # 25 Bazaar payees checked from prepaid credits ($0.025); nothing paid to them
+npx tsx eval/solana-guard.ts                 # the Solana guard on a real x402 payment and real drain patterns ($0.002 of checks; nothing sent)
 PAY_NETWORK=eip155:8453 npm run security:v4
 PAY_NETWORK=eip155:8453 npm run security:v3 && PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
 # ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.35 in total at v0.5 prices)

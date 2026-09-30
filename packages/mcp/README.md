@@ -256,6 +256,6 @@ npm test            # builds, then runs in-process tests over linked in-memory t
 npm run typecheck   # also builds ../client first (its types come from ../client/dist)
 ```
 
-In this repository, `@x402check/client` is a `file:../client` dependency. The published package depends on the npm release instead, such as `"@x402check/client": "^0.2.0"` (the signing guard, `@x402check/client/guard`, is what `x402check_pay` runs). A `prepublishOnly` guard refuses to publish while any dependency still points at a local path.
+In this repository, `@x402check/client` is a `file:../client` dependency. The published package depends on the npm release instead, such as `"@x402check/client": "^0.3.0"` (the signing guard, `@x402check/client/guard`, is what `x402check_pay` runs). A `prepublishOnly` guard refuses to publish while any dependency still points at a local path.
 
 MIT © Caio Vicentino
