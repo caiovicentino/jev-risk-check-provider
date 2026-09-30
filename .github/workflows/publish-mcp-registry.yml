@@ -2,6 +2,7 @@
 # under io.github.caiovicentino/x402check, authenticated with GitHub OIDC (no stored token).
 # The npm package @x402check/mcp must already be published at server.json's version: the
 # registry checks its package.json `mcpName`. Run it by hand, or push a tag mcp-vX.Y.Z.
+# Either way the commit must be on main with a green `ci` run (job ci-passed waits for it).
 #
 # The publisher binary runs in a job that can mint OIDC tokens for this repository, so it
 # is pinned to one release and its archive must match a SHA-256 committed here before it
@@ -18,7 +19,42 @@ on:
 permissions: {}
 
 jobs:
+  ci-passed:
+    # Publish only a commit that is on main and passed CI: waits for the `ci` push run of
+    # this exact commit and requires success. No OIDC token in this job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: read
+    steps:
+      - name: The ci workflow passed on this commit (on main)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 60); do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push \
+              --commit "$GITHUB_SHA" --limit 1 --json status,conclusion,url \
+              --jq '.[0] | select(. != null) | "\(.status) \(if (.conclusion // "") == "" then "none" else .conclusion end) \(.url)"')
+            if [ -n "$run" ]; then
+              read -r status conclusion url <<< "$run"
+              if [ "$status" = completed ]; then
+                if [ "$conclusion" = success ]; then
+                  echo "CI passed on $GITHUB_SHA: $url"
+                  exit 0
+                fi
+                echo "::error::CI did not pass on $GITHUB_SHA ($conclusion): $url"
+                exit 1
+              fi
+              echo "CI is $status on $GITHUB_SHA: $url"
+            else
+              echo "No ci run on main for $GITHUB_SHA yet"
+            fi
+            sleep 20
+          done
+          echo "::error::No successful ci run on main for $GITHUB_SHA after 20 minutes. Push the commit to main, let CI pass, then publish."
+          exit 1
   publish:
+    needs: ci-passed
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
