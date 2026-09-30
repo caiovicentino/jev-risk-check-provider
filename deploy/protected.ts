@@ -12,6 +12,7 @@ import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice, SIMULATION_PRICE } from "./pricing.js";
 import { allChecked, fetchAdapter, json } from "./http-util.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
+import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
 import type { ThreatIntelFeeds } from "../src/threat-intel.js";
 import { HTTPFacilitatorClient, x402ResourceServer, type FacilitatorClient } from "@x402/core/server";
 import { x402HTTPResourceServer, type HTTPAdapter, type HTTPRequestContext, type HTTPProcessResult, type HTTPResponseInstructions, type PaymentOption } from "@x402/core/http";
@@ -113,20 +114,27 @@ export async function payaiFees(url: string, doFetch: typeof fetch = (input, ini
   return fees;
 }
 
-/** A mainnet facilitator, and what settling one payment through it costs us (null: unknown). */
-export type FacilitatorEntry = { name: string; client: FacilitatorClient; fees?: (() => Promise<Map<string, number>>) | undefined };
+/**
+ * A mainnet facilitator, and what settling one payment through it costs us: a per-network
+ * table (`fees`), or one fee for every network it settles (`flatFee`). Unknown: null.
+ */
+export type FacilitatorEntry = { name: string; client: FacilitatorClient; fees?: (() => Promise<Map<string, number>>) | undefined; flatFee?: number | undefined };
 
 const clientCache = new Map<string, FacilitatorClient>();
-function facilitatorClient(url: string): FacilitatorClient {
-  let client = clientCache.get(url);
+function facilitatorClient(url: string, key = url, auth?: ConstructorParameters<typeof HTTPFacilitatorClient>[0]): FacilitatorClient {
+  let client = clientCache.get(key);
   if (!client) {
-    client = memoSupported(new HTTPFacilitatorClient({ url }));
-    clientCache.set(url, client);
+    client = memoSupported(new HTTPFacilitatorClient({ url, ...auth }));
+    clientCache.set(key, client);
   }
   return client;
 }
 
-/** Mainnet facilitators, in tie-break order: PayAI (fees from its live table), then Dexter (no fee, floors). */
+/**
+ * Mainnet facilitators, in tie-break order: PayAI (fees from its live table), Dexter (no fee,
+ * floors), and Coinbase CDP when its API key is configured ($0.001 a settlement after 1,000
+ * free a month; the key authenticates every call).
+ */
 export function mainnetFacilitators(env: WorkerEnv): FacilitatorEntry[] {
   const payaiUrl = env.X402_FACILITATOR_URL_PAYAI ?? DEFAULT_PAYAI_FACILITATOR;
   let feeCache: { at: number; value: Promise<Map<string, number>> } | null = null;
@@ -138,10 +146,22 @@ export function mainnetFacilitators(env: WorkerEnv): FacilitatorEntry[] {
     }
     return feeCache.value;
   };
-  return [
+  const entries: FacilitatorEntry[] = [
     { name: "payai", client: facilitatorClient(payaiUrl), fees },
-    { name: "dexter", client: facilitatorClient(env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR), fees: async () => new Map() },
+    { name: "dexter", client: facilitatorClient(env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR), flatFee: 0 },
   ];
+  const cdp = cdpClient(env);
+  if (cdp) entries.push({ name: "cdp", client: cdp, flatFee: CDP_FEE_USD });
+  return entries;
+}
+
+/** The CDP facilitator client, when both parts of the API key are set (Worker secrets). */
+function cdpClient(env: WorkerEnv): FacilitatorClient | null {
+  const id = env.CDP_API_KEY_ID?.trim();
+  const secret = env.CDP_API_KEY_SECRET;
+  if (!id || !secret?.trim()) return null;
+  const url = env.X402_FACILITATOR_URL_CDP ?? CDP_FACILITATOR_URL;
+  return facilitatorClient(url, `cdp:${url}:${id}`, { url, createAuthHeaders: cdpAuthHeaders(id, secret) });
 }
 
 export type PaymentRoute = {
@@ -178,7 +198,7 @@ function candidateFor(entry: FacilitatorEntry, index: number, kinds: Kind[], fee
   const method = network.startsWith("eip155:") ? String(extra.assetTransferMethod ?? "eip3009") : "svm";
   const floorRaw = extra.paymentFloorAvailable === true ? Number(extra.minPaymentAmountUsd) : Number.NaN;
   const floor = Number.isFinite(floorRaw) ? floorRaw : null;
-  const fee = fees ? (fees.get(network) ?? (entry.name === "dexter" ? 0 : null)) : null;
+  const fee = fees ? (fees.get(network) ?? entry.flatFee ?? null) : null;
   return { name: entry.name, index, method, floor, fee, usable: floor === null || price >= floor, compatible: method !== "permit2" };
 }
 
@@ -220,21 +240,46 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
 
 /**
  * The resource server's facilitator list: each facilitator scoped to the networks routed
- * to it, first, then the default order (PayAI for EVM, Dexter for the rest), which also
- * covers testnets and a routing table that could not be computed.
+ * to it, first, then the default order (CDP when configured, then PayAI, for EVM; Dexter
+ * for the rest), which also covers testnets and a routing table that could not be computed.
  */
 export function routedFacilitators(entries: FacilitatorEntry[], routes: PaymentRoute[] | null): FacilitatorClient[] {
   const routed = routes ? entries.map((e) => scopedFacilitator(e.client, (n) => routes.some((r) => r.network === n && r.facilitator === e.name))) : [];
   const byName = new Map(entries.map((e) => [e.name, e.client]));
-  const payai = byName.get("payai");
+  const evm = (name: string) => {
+    const client = byName.get(name);
+    return client ? [scopedFacilitator(client, (n) => n.startsWith("eip155:"))] : [];
+  };
   const dexter = byName.get("dexter");
-  return [...routed, ...(payai ? [scopedFacilitator(payai, (n) => n.startsWith("eip155:"))] : []), ...(dexter ? [dexter] : [])];
+  return [...routed, ...evm("cdp"), ...evm("payai"), ...(dexter ? [dexter] : [])];
+}
+
+/**
+ * Each configured mainnet facilitator's reachability and the mainnet networks it offers
+ * (from its /supported, shared with routing for 10 minutes). Errors are reduced to an HTTP
+ * status or "unreachable": an authenticated facilitator's key never reaches /status.
+ */
+export async function facilitatorStatus(env: WorkerEnv, injected?: FacilitatorEntry[]): Promise<Array<{ name: string; ok: boolean; networks: string[]; error?: string }>> {
+  const offered = new Set<string>(MAINNET_NETWORKS);
+  return Promise.all(
+    (injected ?? mainnetFacilitators(env)).map(async (f) => {
+      try {
+        const { kinds } = await f.client.getSupported();
+        const networks = [...new Set(kinds.filter((k) => k.x402Version === 2 && k.scheme === "exact").map((k) => String(k.network)))].filter((n) => offered.has(n));
+        return { name: f.name, ok: true, networks };
+      } catch (err) {
+        const status = /\((\d{3})\)/.exec(String(err))?.[1];
+        return { name: f.name, ok: false, networks: [], error: status ? `HTTP ${status}` : "unreachable" };
+      }
+    }),
+  );
 }
 
 function stackKey(env: WorkerEnv): string {
   return JSON.stringify([
     env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK,
-    env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI,
+    env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI, env.X402_FACILITATOR_URL_CDP,
+    env.CDP_API_KEY_ID ?? null, env.CDP_API_KEY_SECRET ? "cdp-secret" : null,
     env.ENABLE_TESTNETS, env.ONCHAIN, env.RPC_URLS, env.SOL_RPC_URL_MAINNET, env.SIMULATION, env.SIMULATION_RPC_URLS, env.CONTRACT_INTEL,
   ]);
 }

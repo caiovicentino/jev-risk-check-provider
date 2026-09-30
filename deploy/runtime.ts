@@ -42,6 +42,10 @@ export type WorkerEnv = {
   SOL_RPC_URL_MAINNET?: string;
   X402_FACILITATOR_URL_MAINNET?: string;
   X402_FACILITATOR_URL_PAYAI?: string;
+  X402_FACILITATOR_URL_CDP?: string;
+  /** Coinbase CDP Secret API Key (Worker secrets): enables the CDP facilitator. */
+  CDP_API_KEY_ID?: string;
+  CDP_API_KEY_SECRET?: string;
   /** "true" also accepts testnet payments. Never set in production: testnet USDC is free. */
   ENABLE_TESTNETS?: string;
   /** "off" disables provider-side on-chain lookups. */

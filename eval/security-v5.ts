@@ -1,6 +1,7 @@
-// Live probes for v0.5.0: per-network prices, facilitator routing by compatibility and cost
-// (margins in /status), and prepaid credits (buy once via x402, then checks with no
-// payment round trip).
+// Live probes for v0.5: per-network prices, facilitator routing by compatibility and cost
+// (margins in /status), prepaid credits (buy once via x402, then checks with no payment
+// round trip), and (v0.5.1) which facilitator actually settled: each settlement's sender on
+// Base is matched against the facilitators' published signers.
 //
 //   X402CHECK_BASE=https://x402check.xyz PAY_NETWORK=eip155:8453 npx tsx eval/security-v5.ts
 //
@@ -80,13 +81,24 @@ async function main(): Promise<void> {
     `${accepts.length} options; mismatches=${JSON.stringify(wrong)}; Base transfer=${String(base?.extra?.assetTransferMethod ?? "eip3009")} (any wallet can pay); Solana fee payer=${String(sol?.extra?.feePayer ?? "").slice(0, 10)}…`,
   );
 
-  const st = (await call("GET", "/status")).json as { payments?: Array<{ network: string; facilitator: string | null; transfer_method: string | null; fee_usd: number | null; margin_usd: number | null; margin_pct: number | null; below_floor: boolean }> } | null;
-  const routes = st?.payments ?? [];
+  const st = (await call("GET", "/status")).json as {
+    payments?: Array<{ network: string; facilitator: string | null; transfer_method: string | null; fee_usd: number | null; margin_usd: number | null; margin_pct: number | null; below_floor: boolean }>;
+    facilitators?: Array<{ name: string; ok: boolean; networks: string[]; error?: string }>;
+  } | null;
+  const routes = Array.isArray(st?.payments) ? st.payments : [];
   const r = Object.fromEntries(routes.map((x) => [x.network, x]));
+  const baseRoute = r["eip155:8453"]?.facilitator ?? null;
   add(
     "status_routes_and_margins",
-    routes.length === 7 && r["eip155:8453"]?.facilitator === "payai" && r["eip155:8453"]?.transfer_method === "eip3009" && r[SOL]?.facilitator === "dexter" && routes.every((x) => !x.below_floor && (x.margin_usd === null || x.margin_usd > 0)),
+    routes.length === 7 && (baseRoute === "payai" || baseRoute === "cdp") && r["eip155:8453"]?.transfer_method === "eip3009" && r[SOL]?.facilitator === "dexter" && routes.every((x) => !x.below_floor && (x.margin_usd === null || x.margin_usd > 0)),
     routes.map((x) => `${x.network.replace("eip155:", "")}:${x.facilitator}/${x.transfer_method} fee=${x.fee_usd} margin=${x.margin_pct}%`).join(" · "),
+  );
+  const facs = Array.isArray(st?.facilitators) ? st.facilitators : [];
+  const cdp = facs.find((f) => f.name === "cdp");
+  add(
+    "status_facilitators",
+    facs.length >= 2 && facs.every((f) => f.ok) && (!cdp || (cdp.networks.includes("eip155:8453") && baseRoute === "cdp")) && !JSON.stringify(st).includes("-----BEGIN"),
+    facs.map((f) => `${f.name}: ${f.ok ? `ok [${f.networks.map((n) => n.replace("eip155:", "")).join(",")}]` : f.error}`).join(" · ") + (cdp ? "" : " (CDP not configured)"),
   );
 
   const paid = await call("POST", "/v1/risk-check", { wallet: WALLET, chain: "base" }, { paid: true });
@@ -121,6 +133,34 @@ async function main(): Promise<void> {
   const unknown = await call("POST", "/v1/risk-check", { wallet: WALLET }, { headers: { Authorization: `Bearer x402c_${"Z".repeat(43)}` } });
   add("credits_bad_tokens", malformed.status === 401 && unknown.status === 402 && unknown.json?.error === "insufficient_credits", `malformed → ${malformed.status}; unknown token → ${unknown.status} ${String(unknown.json?.error)} (never an unpaid evaluation)`);
 
+  // Who settled: each receipt's transaction sender on Base against the published signers.
+  const signers = async (url: string) => {
+    try {
+      const j = (await (await fetch(`${url}/supported`, { signal: AbortSignal.timeout(10_000) })).json()) as { signers?: Record<string, string[]> };
+      return new Set(Object.values(j.signers ?? {}).flat().map((a) => a.toLowerCase()));
+    } catch {
+      return new Set<string>();
+    }
+  };
+  const [payaiSigners, dexterSigners] = await Promise.all([signers("https://facilitator.payai.network"), signers("https://x402.dexter.cash")]);
+  const settledBy: Array<{ probe: string; transaction: string; from: string | null; facilitator: string }> = [];
+  for (const rc of receipts.filter((x) => x.network === "eip155:8453" && x.transaction)) {
+    let from: string | null = null;
+    try {
+      const res = await fetch("https://mainnet.base.org", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionByHash", params: [rc.transaction] }), signal: AbortSignal.timeout(10_000) });
+      from = ((await res.json()) as { result?: { from?: string } }).result?.from?.toLowerCase() ?? null;
+    } catch {
+      from = null;
+    }
+    const facilitator = !from ? "unknown" : payaiSigners.has(from) ? "payai" : dexterSigners.has(from) ? "dexter" : "other (not PayAI or Dexter)";
+    settledBy.push({ probe: rc.probe, transaction: rc.transaction as string, from, facilitator });
+  }
+  if (settledBy.length === 0) add("settled_by_routed_facilitator", null, "no Base settlement in this run");
+  else {
+    const expected = baseRoute === "cdp" ? "other (not PayAI or Dexter)" : baseRoute;
+    add("settled_by_routed_facilitator", settledBy.every((x) => x.facilitator === expected), settledBy.map((x) => `${x.probe}: ${x.from?.slice(0, 10)}… → ${x.facilitator}`).join(" · ") + ` (Base route: ${baseRoute})`);
+  }
+
   const report = {
     timestamp: new Date().toISOString(),
     base: BASE,
@@ -128,6 +168,7 @@ async function main(): Promise<void> {
     summary: { pass: out.filter((o) => o.status === "PASS").length, fail: out.filter((o) => o.status === "FAIL").length, skip: out.filter((o) => o.status === "SKIP").length },
     outcomes: out,
     settlements: receipts,
+    settled_by: settledBy,
   };
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   writeFileSync(`${EVAL_EVIDENCE_DIR}/security-v5-report.json`, JSON.stringify(report, null, 2));

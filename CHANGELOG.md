@@ -2,6 +2,22 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.5.1 — 2026-09-30
+
+- **Coinbase CDP as a facilitator** (`deploy/cdp.ts`), active once the owner's CDP Secret API Key is set as the Worker secrets `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET`.
+  - **Authentication:** every call carries the JWT that `@coinbase/x402` would build: ES256 or EdDSA, bound to the endpoint, valid 120 s, with a fresh nonce. It is made with WebCrypto, so the Worker needs no SDK.
+  - **Key formats:** the portal's Ed25519 keys, and EC keys in PKCS#8 or SEC1 PEM.
+  - **Routing:** CDP costs $0.001 per settlement after 1,000 free a month, against PayAI's gas + 30%. It takes the networks where it is cheapest: Base, Polygon and Arbitrum. On Base, the margin at $0.0035 rises from 32% to 69%.
+  - **Fallback:** a key CDP rejects drops it from routing, and PayAI takes those networks back.
+  - **`/status` → `facilitators`:** whether each configured facilitator answers, and the mainnets it offers. Only an HTTP status is shown, never a key.
+- **Site:**
+  - the hero states the kit watch and the prices, and the attestation card matches the current claims;
+  - a "what's new" strip;
+  - a **live kit-watch counter** built from `/status` aggregates. The watchlist stays private;
+  - the integration example buys credits and then checks with the token;
+  - a new social preview (`og.png?v=0.5`) with the kit watch and the current prices;
+  - the top bar no longer overflows on phones.
+
 ## v0.5.0 — 2026-09-30
 
 - **Prepaid credits:**

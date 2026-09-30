@@ -205,6 +205,7 @@ Every evaluation is paid; there is no free tier.
 - A batch is billed per item.
 - **Why the prices differ:** every x402 payment is an on-chain settlement, and its cost is ours. PayAI settles EVM payments with EIP-3009, which any wallet can pay gaslessly, and bills us the network's gas + 30% per settlement (about $0.0023 on Base). Dexter bills nothing, but on EVM networks it settles only through Permit2, which most payers' wallets cannot use without an on-chain approval.
 - **Routing:** each network settles through the facilitator any payer can pay through, and among those the cheapest to us: PayAI for EVM, Dexter for Solana and Monad. [`/status`](https://x402check.xyz/status) → `payments` shows each network's facilitator, transfer method, fee and margin, live.
+- **Coinbase CDP** is supported as a third facilitator. It charges $0.001 per settlement after 1,000 free a month, and it takes the networks where it is cheapest once its API key is configured.
 - **Settlement:** USDC via x402 v2 (`PAYMENT-SIGNATURE`), **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The x402 "exact" scheme is gasless for the payer, so USDC alone is enough.
 - **An unpaid request** gets `402` with the accepted options in `PAYMENT-REQUIRED`. Any x402 client pays and retries.
 - **Invalid input** is rejected (`422`/`413`) before anything is priced.

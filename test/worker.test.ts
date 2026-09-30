@@ -130,7 +130,7 @@ test("payment routing: a facilitator every payer can pay through, then the cheap
   const dexterKinds = (solFloor: number) => [kind("eip155:8453", floor(0.0015, "permit2")), kind("eip155:137", floor(0.0036, "permit2")), kind("eip155:42161", floor(0.0061, "permit2")), kind("eip155:43114", floor(0.004, "permit2")), kind("eip155:143", floor(0.0003, "permit2")), kind(SOL, floor(solFloor))];
   const entries = (solFloor = 0.0013, fees: (() => Promise<Map<string, number>>) | undefined = async () => payaiFees) => [
     { name: "payai", client: payai, fees },
-    { name: "dexter", client: client(dexterKinds(solFloor)), fees: async () => new Map<string, number>() },
+    { name: "dexter", client: client(dexterKinds(solFloor)), flatFee: 0 },
   ];
   const by = async (e: ReturnType<typeof entries>) => Object.fromEntries((await paymentRouting({}, e)).map((r) => [r.network, r]));
 

@@ -31,10 +31,17 @@
    - **Paid request:** verify → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed` and no attestation is returned.
 3. **Facilitator routing** (`paymentRouting` in `protected.ts`, recomputed every 10 minutes). For each network the router picks, in order:
    1. a facilitator that accepts our price (Dexter refuses payments below its floor);
-   2. one every payer can pay through: PayAI's EIP-3009 over Dexter's EVM Permit2, which needs an on-chain allowance most wallets lack;
-   3. the one cheapest to us: PayAI's live fee table (gas + 30% per settlement) against Dexter's zero.
+   2. one every payer can pay through: EIP-3009 (PayAI, Coinbase CDP) over Dexter's EVM Permit2, which needs an on-chain allowance most wallets lack;
+   3. the one cheapest to us. PayAI charges from its live fee table (gas + 30% per settlement). Dexter charges nothing. Coinbase CDP charges $0.001 per settlement after 1,000 free a month, and routing always uses the paid rate.
 
-   The resource server gets each facilitator scoped to its networks, first. `/status` → `payments` shows the facilitator, transfer method, fee, floor and margin of every route.
+   The resource server gets each facilitator scoped to its networks, first. `/status` shows two things:
+   - `payments`: the facilitator, transfer method, fee, floor and margin of every route;
+   - `facilitators`: whether each configured facilitator answers, and the mainnets it offers. Only an HTTP status is shown, never a key.
+
+   **Coinbase CDP** is used only when both `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are set (see below).
+   - Every call carries a JWT signed with that key (`deploy/cdp.ts`, WebCrypto, 120 s).
+   - CDP settles Base, Polygon, Arbitrum and Solana.
+   - A key CDP rejects drops it from routing, and PayAI takes those networks back.
 4. **Pricing** (`deploy/pricing.ts`, in micro-dollars):
    - per network: Base $0.0035, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009;
    - an item whose `transaction` will be simulated costs $0.005, or the network's price if higher. That applies on a supported simulation chain, with `SIMULATION` not off;
@@ -53,6 +60,9 @@ cd deploy
 wrangler secret put AI_GATEWAY_API_KEY          # or TYPESAFE_API_KEY
 wrangler secret put JEV_ATTEST_PRIVATE_KEY      # PEM: SEC1 "EC PRIVATE KEY" or PKCS#8 — keep it stable
 wrangler secret put JEV_ATTEST_PUBLIC_JWK       # the matching public JWK (kty/crv/x/y/kid/alg/use)
+# optional: settle through Coinbase CDP (portal.cdp.coinbase.com → API Keys → Secret API key, Ed25519, no IP allowlist)
+wrangler secret put CDP_API_KEY_ID              # the key's id
+wrangler secret put CDP_API_KEY_SECRET          # its secret: base64 Ed25519, or an EC key in PEM
 ```
 
 The public JWK must be derived from the private PEM:

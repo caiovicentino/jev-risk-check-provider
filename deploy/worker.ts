@@ -1,4 +1,4 @@
-import { handleProtected, ensureStack, json, paymentRouting, PROTECTED } from "./protected.js";
+import { handleProtected, ensureStack, facilitatorStatus, json, paymentRouting, PROTECTED } from "./protected.js";
 import { createHandler } from "../src/handler.js";
 import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
 import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
@@ -64,11 +64,10 @@ async function status(env: WorkerEnv): Promise<Response> {
   } catch {
     kitWatch = { status: "unavailable" };
   }
-  // Which facilitator settles each network, and whether our price clears its published floor.
-  const payments = await Promise.race([
-    paymentRouting(env).catch(() => null),
-    new Promise<null>((r) => setTimeout(() => r(null), 3000)),
-  ]);
+  // Which facilitator settles each network, and whether our price clears its published floor;
+  // and whether each configured facilitator answers (an authenticated one's key stays private).
+  const within = <T>(p: Promise<T>): Promise<T | null> => Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 3000))]);
+  const [payments, facilitators] = await Promise.all([within(paymentRouting(env)), within(facilitatorStatus(env))]);
   return json(200, {
     version: PROVIDER_VERSION,
     time: new Date().toISOString(),
@@ -82,6 +81,7 @@ async function status(env: WorkerEnv): Promise<Response> {
     refresh: { source: env.FEEDS_URL === "off" ? "off" : (env.FEEDS_URL ?? DEFAULT_FEEDS_URL), checked_at: fresh.checked_at ?? null, published_at: fresh.generated_at ?? null, error: fresh.error ?? null },
     checks: { onchain: env.ONCHAIN === "off" ? "off" : "on", simulation: env.SIMULATION === "off" ? "off" : "on", contract_verification: env.CONTRACT_INTEL === "off" ? "off" : "on" },
     payments: payments ?? { status: "unavailable" },
+    facilitators: facilitators ?? { status: "unavailable" },
     credits: env.CREDITS ? { status: "on", ...CREDIT_PRICING } : { status: "off" },
   }, { "Cache-Control": "public, max-age=60" });
 }
