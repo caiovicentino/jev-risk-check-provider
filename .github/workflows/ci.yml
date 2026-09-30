@@ -1,16 +1,25 @@
 name: ci
+# Supply chain: every action is pinned to a full commit SHA (the comment names its release;
+# Dependabot proposes bumps, see .github/dependabot.yml). The token has no permissions by
+# default: each job asks only for contents: read, and no checkout keeps the token on disk.
+# No run script interpolates event data (PR titles, branch names): `${{ }}` appears only in
+# `with:`/`working-directory:` values that come from this file.
 on:
   push:
     branches: [main]
   pull_request:
-permissions:
-  contents: read
+permissions: {}
 jobs:
   provider:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -21,12 +30,17 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
   snap:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: snap
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -36,6 +50,9 @@ jobs:
       - run: npm test
   packages:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     strategy:
       matrix:
         pkg: [client, mcp]
@@ -43,8 +60,10 @@ jobs:
       run:
         working-directory: packages/${{ matrix.pkg }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm

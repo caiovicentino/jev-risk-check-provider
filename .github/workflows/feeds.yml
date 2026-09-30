@@ -7,6 +7,10 @@ name: feeds
 # publish: sign the manifest (Ed25519; the Worker pins the public key) and push it as
 #          the single commit of the `feeds` branch. Runs no dependency code at all.
 # `main` is never modified. ScamSniffer (GPL) is never published here.
+#
+# Supply chain: every action is pinned to a full commit SHA (the comment names its
+# release; Dependabot proposes bumps). This matters most in `publish`, the only job that
+# receives FEEDS_SIGNING_KEY and a token that can push.
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -22,10 +26,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -37,7 +41,7 @@ jobs:
       - name: The refreshed data must pass the test suite
         run: npm test
       - run: npx tsx scripts/publish-feeds.ts feeds-out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: feeds
           path: feeds-out
@@ -49,7 +53,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: feeds
           path: feeds-out
