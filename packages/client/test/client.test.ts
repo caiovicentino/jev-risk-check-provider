@@ -76,8 +76,8 @@ describe("createClient: requests", () => {
 
   test("baseUrl is normalized and validated", async () => {
     const { fetch, calls } = mockFetch(() => json(200, RESULT));
-    await createClient({ fetch, baseUrl: "http://localhost:8787///" }).check({ wallet: EVM });
-    assert.equal(calls[0]!.url, "http://localhost:8787/v1/risk-check");
+    await createClient({ fetch, baseUrl: "http://localhost:8799///" }).check({ wallet: EVM });
+    assert.equal(calls[0]!.url, "http://localhost:8799/v1/risk-check");
     assert.equal(createClient({ fetch }).baseUrl, "https://x402check.xyz");
     assert.throws(() => createClient({ baseUrl: "ftp://x402check.xyz" }), TypeError);
     assert.throws(() => createClient({ baseUrl: "http://x402check.xyz" }), /https/, "plain http only for localhost");

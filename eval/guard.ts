@@ -29,11 +29,12 @@ import { createContractIntel } from "../src/contract-intel.js";
 import { createOnchainLookup } from "../src/onchain.js";
 import { loadFeedsFromDisk } from "../src/feeds-node.js";
 import type { Answer } from "../src/types.js";
+import { numberFlag } from "./flags.js";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { wilson } from "./stats.js";
 
 const BS = "https://eth.blockscout.com/api/v2";
-const CONCURRENCY = Number(process.argv[process.argv.indexOf("--concurrency") + 1] || 4);
+const CONCURRENCY = numberFlag("concurrency", 4);
 const NEUTRAL: Record<string, Answer> = {
   known_threat: { type: "noul", noul: 0.02 },
   sanctions_concern: { type: "noul", noul: 0.02 },

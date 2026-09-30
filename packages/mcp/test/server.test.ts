@@ -615,7 +615,7 @@ describe("configuration", () => {
     const key = `0x${"1".repeat(64)}`;
     assert.deepEqual(
       configFromEnv({
-        X402CHECK_BASE_URL: " http://localhost:8787 ",
+        X402CHECK_BASE_URL: " http://localhost:8799 ",
         X402CHECK_ISSUER: "",
         X402CHECK_TIMEOUT_MS: "2500",
         X402CHECK_PAYER_KEY: ` ${key} `,
@@ -623,7 +623,7 @@ describe("configuration", () => {
         X402CHECK_BUDGET_USD: "2.5",
         X402CHECK_CLIENT_ID: "ignored",
       }),
-      { baseUrl: "http://localhost:8787", issuer: undefined, timeoutMs: 2500, creditToken: undefined, payerKey: key, maxPaymentUsd: 0.01, budgetUsd: 2.5 },
+      { baseUrl: "http://localhost:8799", issuer: undefined, timeoutMs: 2500, creditToken: undefined, payerKey: key, maxPaymentUsd: 0.01, budgetUsd: 2.5 },
     );
     assert.deepEqual(configFromEnv({}), { baseUrl: undefined, issuer: undefined, timeoutMs: undefined, creditToken: undefined, payerKey: undefined, maxPaymentUsd: undefined, budgetUsd: undefined });
     assert.equal(configFromEnv({ X402CHECK_CREDIT_TOKEN: ` x402c_${"A".repeat(43)} ` }).creditToken, `x402c_${"A".repeat(43)}`);
@@ -631,10 +631,10 @@ describe("configuration", () => {
 
   test("the base URL from the environment is used", async () => {
     const { fetch, calls } = router(issuer, () => json(200, { checked: false }));
-    const session = await connect({ ...configFromEnv({ X402CHECK_BASE_URL: "http://localhost:8787/" }), fetch });
+    const session = await connect({ ...configFromEnv({ X402CHECK_BASE_URL: "http://localhost:8799/" }), fetch });
     try {
       await callTool(session.client, "x402check_check", { wallet: SPENDER });
-      assert.equal(calls[0]?.url, "http://localhost:8787/v1/risk-check");
+      assert.equal(calls[0]?.url, "http://localhost:8799/v1/risk-check");
     } finally {
       await session.close();
     }

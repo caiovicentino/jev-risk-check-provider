@@ -3,8 +3,9 @@ import { genPayerKey } from "./voucher.js";
 import type { AgentKey, AgentScenario } from "./agent.js";
 
 // DEMO_PORT_BASE moves the three demo services (provider, facilitator, resource server)
-// off the default 8787-8789 when those ports are taken by something else.
-const BASE = Number(process.env.DEMO_PORT_BASE ?? 8787);
+// off the default 8800-8802 when those ports are taken by something else. (8787-8789 belong
+// to other local apps: never use them.)
+const BASE = Number(process.env.DEMO_PORT_BASE ?? 8800);
 const PORTS = { provider: BASE, facilitator: BASE + 1, resource: BASE + 2 };
 const PROVIDER = `http://localhost:${PORTS.provider}`;
 process.env.PROVIDER_CHECK_URL = `${PROVIDER}/v1/risk-check`;

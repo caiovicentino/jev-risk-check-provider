@@ -9,6 +9,8 @@
 // eval/paid-fetch.ts. Without a funded payer the paid probes are SKIP, never PASS. The credit
 // token is a secret: the report carries only a SHA-256 prefix of it.
 import { createHash } from "node:crypto";
+import { NETWORK_PRICES, SIMULATION_PRICE } from "../deploy/pricing.js";
+import { CREDIT_CHECK_PRICE } from "../deploy/credits.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { buildPayFetch, settlementReceipt, type PayFetch, type SettlementReceipt } from "./paid-fetch.js";
@@ -18,7 +20,9 @@ const WALLET = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 const USER = "0x1111111111111111111111111111111111111111";
 const SOL = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 /** The published price table (deploy/pricing.ts). */
-const EXPECTED: Record<string, string> = { "eip155:8453": "0.0035", "eip155:137": "0.007", "eip155:42161": "0.009", "eip155:43114": "0.001", "eip155:143": "0.001", "eip155:1329": "0.002", [SOL]: "0.002" };
+// Expected prices come from the Worker's own table, so the suite follows a price change.
+const EXPECTED: Record<string, string> = Object.fromEntries(Object.entries(NETWORK_PRICES).map(([network, usd]) => [network, String(usd)]));
+const sorted = (o: Record<string, string>) => JSON.stringify(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
 
 const receipts: Array<SettlementReceipt & { probe: string }> = [];
 type Res = { status: number; headers: Headers; json: Record<string, unknown> | null; ms: number };
@@ -66,7 +70,7 @@ async function main(): Promise<void> {
   const table = disc?.pricing?.amounts_by_network ?? {};
   add(
     "discovery_prices_and_credits",
-    String(disc?.version).startsWith("0.5.") && JSON.stringify(table) === JSON.stringify(EXPECTED) && disc?.pricing?.amount === "0.0035" && disc?.pricing?.credits?.check_usd === "0.001" && disc?.pricing?.credits?.simulated_check_usd === "0.005",
+    /^(0\.([5-9]|\d{2,})|[1-9]\d*)\./.test(String(disc?.version)) && sorted(table) === sorted(EXPECTED) && disc?.pricing?.amount === String(NETWORK_PRICES["eip155:8453"]) && disc?.pricing?.credits?.check_usd === String(CREDIT_CHECK_PRICE) && disc?.pricing?.credits?.simulated_check_usd === String(SIMULATION_PRICE),
     `version=${disc?.version} amount=${disc?.pricing?.amount} by_network=${JSON.stringify(table)} credits=${JSON.stringify(disc?.pricing?.credits)}`,
   );
 
@@ -77,7 +81,8 @@ async function main(): Promise<void> {
   const sol = accepts.find((a) => a.network === SOL);
   add(
     "challenge_per_network_prices",
-    unpaid.status === 402 && accepts.length === 7 && wrong.length === 0 && base?.extra?.assetTransferMethod !== "permit2" && String(sol?.extra?.feePayer ?? "").startsWith("DeXter"),
+    // Networks whose facilitator is down leave the challenge (v0.6), so not every network need be offered.
+    unpaid.status === 402 && accepts.length >= 1 && accepts.some((a) => a.network === "eip155:8453") && wrong.length === 0 && base?.extra?.assetTransferMethod !== "permit2" && String(sol?.extra?.feePayer ?? "").startsWith("DeXter"),
     `${accepts.length} options; mismatches=${JSON.stringify(wrong)}; Base transfer=${String(base?.extra?.assetTransferMethod ?? "eip3009")} (any wallet can pay); Solana fee payer=${String(sol?.extra?.feePayer ?? "").slice(0, 10)}…`,
   );
 

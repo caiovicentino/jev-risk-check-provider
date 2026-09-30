@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 import { verifyVoucher, type Voucher } from "./voucher.js";
 
-const PORT = Number(process.env.FACILITATOR_PORT ?? 8788);
-const PROVIDER_CHECK_URL = process.env.PROVIDER_CHECK_URL ?? "http://localhost:8787/v1/risk-check";
+const PORT = Number(process.env.FACILITATOR_PORT ?? 8801);
+const PROVIDER_CHECK_URL = process.env.PROVIDER_CHECK_URL ?? "http://localhost:8800/v1/risk-check";
 const MIN_SCORE = 65;
 
 type VerifyRequest = {

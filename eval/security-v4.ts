@@ -95,6 +95,12 @@ async function main(): Promise<void> {
 
   const disc = await call("GET", "/.well-known/risk-check.json");
   const signals = (disc.json?.signals as string[] | undefined) ?? [];
+  // A historical suite: against another version it would pay for probes, fail on version-specific
+  // expectations and overwrite the committed report. It stops before paying anything.
+  if (!String(disc.json?.version ?? "").startsWith("0.4.")) {
+    console.log(`historical suite for v0.4: the endpoint runs ${String(disc.json?.version)}; nothing was paid and the committed report is unchanged (run the current suite instead)`);
+    return;
+  }
   add("discovery_v04", String(disc.json?.version ?? "").startsWith("0.4.") && signals.includes("kit_watch"), `version=${String(disc.json?.version)} kit_watch=${signals.includes("kit_watch")}`);
 
   const st = await call("GET", "/status");

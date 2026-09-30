@@ -4,7 +4,7 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>x402check — pre-payment risk checks for x402 agents and wallets</title>
-<meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, our own kit watch of drainer infrastructure on Ethereum and Base, transaction simulation, drainer-kit code and injected-instruction analysis — as signed, verifiable attestations. $0.001 a check with prepaid credits, or per call with x402 from $0.0035.">
+<meta name="description" content="Pre-payment risk checks for x402 agents and wallets: OFAC SDN screening, curated phishing and drainer feeds, our own kit watch of drainer infrastructure on Ethereum and Base, transaction simulation, drainer-kit code and injected-instruction analysis — as signed, verifiable attestations. $0.001 a check with prepaid credits, or per call with x402 from $0.001 ($0.0035 on Base).">
 <link rel="canonical" href="https://x402check.xyz/">
 <meta name="theme-color" content="#fcfcfa">
 <link rel="icon" href="/favicon.ico" sizes="any">
@@ -169,7 +169,7 @@ const PAGE = `<!doctype html>
       <div class="kicker">x402 trust-provider &middot; risk-check extension &middot; reference implementation</div>
       <h1>Check the counterparty before an agent or a wallet pays.</h1>
       <p class="lede">x402check screens the address against the <b>OFAC SDN list</b>, curated <b>phishing / drainer feeds</b> and our own <b>kit watch</b>, which reads every Ethereum and Base block for drainer infrastructure as it is set up. It <b>simulates the transaction</b> to see where the assets actually go, recognizes <b>drainer-kit code</b>, flags look-alike domains and approvals granted to plain wallets, and reads the content the agent acted on for <b>injected instructions</b>. Every verdict is a <b>signed attestation</b> that states which checks actually ran.</p>
-      <div class="price-line"><span><b>$0.001</b> a check with prepaid credits<i>&middot;</i><b>$0.005</b> with simulation</span><span>per call via x402 from <b>$0.0035</b><i>&middot;</i>fail-closed</span></div>
+      <div class="price-line"><span><b>$0.001</b> a check with prepaid credits<i>&middot;</i><b>$0.005</b> with simulation</span><span>per call via x402 from <b>$0.001</b> ($0.0035 on Base)<i>&middot;</i>fail-closed</span></div>
       <div class="cta-row">
         <a class="cta solid" href="#integrate">Integrate in 5 minutes</a>
         <a class="cta line" href="https://github.com/caiovicentino/jev-risk-check-provider/blob/main/docs/EVIDENCE.md">Read the evidence</a>

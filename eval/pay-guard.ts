@@ -17,11 +17,12 @@ import { createClient } from "../packages/client/src/client.js";
 import { createGuard, X402CHECK_PAY_TO } from "../packages/client/src/guard.js";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { wilson } from "./stats.js";
+import { numberFlag } from "./flags.js";
 
 const BASE = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
 const DISCOVERY = "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources";
 const USDC_BASE = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
-const arg = (name: string, fallback: number) => Number(process.argv[process.argv.indexOf(`--${name}`) + 1] || fallback);
+const arg = (name: string, fallback: number) => numberFlag(name, fallback);
 const N = arg("n", 25);
 const SEED = arg("seed", 402);
 

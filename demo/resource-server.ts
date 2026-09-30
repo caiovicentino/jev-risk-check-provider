@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 import type { RiskCheckExtensionInfo } from "../src/types.js";
 
-const PORT = Number(process.env.RESOURCE_PORT ?? 8789);
-const PROVIDER_DISCOVERY = process.env.PROVIDER_DISCOVERY ?? "http://localhost:8787/.well-known/risk-check.json";
+const PORT = Number(process.env.RESOURCE_PORT ?? 8802);
+const PROVIDER_DISCOVERY = process.env.PROVIDER_DISCOVERY ?? "http://localhost:8800/.well-known/risk-check.json";
 const MERCHANT_ACCOUNT = "MerchLab5xPVWDwpRAnN9rPLxnRD8UsG3TDtKtPoi3oiS";
 
 const extension: { "risk-check": { info: RiskCheckExtensionInfo } } = {

@@ -1,9 +1,9 @@
 import { verifyJws } from "../src/jws.js";
 import type { Jwk } from "../src/jws.js";
 
-const RESOURCE = process.env.RESOURCE_URL ?? "http://localhost:8789/data";
-const FACILITATOR = process.env.FACILITATOR_URL ?? "http://localhost:8788/verify";
-const PROVIDER_CHECK = process.env.PROVIDER_CHECK_URL ?? "http://localhost:8787/v1/risk-check";
+const RESOURCE = process.env.RESOURCE_URL ?? "http://localhost:8802/data";
+const FACILITATOR = process.env.FACILITATOR_URL ?? "http://localhost:8801/verify";
+const PROVIDER_CHECK = process.env.PROVIDER_CHECK_URL ?? "http://localhost:8800/v1/risk-check";
 // Trust anchor pinned to the provider the agent chose — never the jwks_url a facilitator
 // (or any other intermediary) hands back alongside the attestation.
 const PINNED_JWKS = process.env.PROVIDER_JWKS_URL ?? new URL("/.well-known/jwks.json", PROVIDER_CHECK).toString();

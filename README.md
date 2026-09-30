@@ -295,8 +295,8 @@ Full methodology, confidence intervals and what each number does *not* show: [do
 npm install
 npm test                           # provider unit tests
 npm run typecheck                  # root + deploy + scripts + snap
-AI_GATEWAY_API_KEY=... npm start   # :8787 local dev server, no paywall (or TYPESAFE_API_KEY=...)
-curl localhost:8787/.well-known/risk-check.json
+AI_GATEWAY_API_KEY=... npm start   # :8799 local dev server, no paywall (or TYPESAFE_API_KEY=...)
+curl localhost:8799/.well-known/risk-check.json
 npm run eval:suite -- --seed 200   # full evaluation (~$0.15 of model calls)
 ```
 

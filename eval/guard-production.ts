@@ -14,11 +14,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { createClient } from "../packages/client/src/client.js";
 import { createGuard } from "../packages/client/src/guard.js";
+import { numberFlag } from "./flags.js";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { buildPayFetch } from "./paid-fetch.js";
 
 const BASE = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
-const EACH = Number(process.argv[process.argv.indexOf("--each") + 1] || 2);
+const EACH = numberFlag("each", 2);
 const TOKEN_FILE = `${homedir()}/.config/paysol/x402check-credit-token`;
 const BS = "https://eth.blockscout.com/api/v2";
 
