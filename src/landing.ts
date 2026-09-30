@@ -189,6 +189,7 @@ const PAGE = `<!doctype html>
   </div>
 
   <div class="news">
+    <div class="news-row"><span class="v">v0.5.1 &middot; 2026-09-30</span><span><b>Coinbase CDP settlement:</b> Base, Polygon and Arbitrum payments now settle through Coinbase CDP. Every facilitator&rsquo;s health and published signers are in <a href="/status">/status</a>, so anyone can check on-chain who settled a payment. <a href="https://github.com/caiovicentino/jev-risk-check-provider/releases/tag/v0.5.1">Release notes</a></span></div>
     <div class="news-row"><span class="v">v0.5 &middot; 2026-09-30</span><span><b>Prepaid credits:</b> $0.001 a check, answered in about 0.7&nbsp;s with no payment round trip. Per-call prices by payment network, each settled through a facilitator every wallet can pay through. <a href="https://github.com/caiovicentino/jev-risk-check-provider/releases/tag/v0.5.0">Release notes</a></span></div>
     <div class="news-row"><span class="v">v0.4 &middot; 2026-09-29</span><span><b>Kit watch:</b> 6,831 addresses flagged on Ethereum in its first 24&nbsp;h, none of them on ScamSniffer&rsquo;s public list. <a href="https://github.com/caiovicentino/jev-risk-check-provider/releases/tag/v0.4.0">Release notes</a></span></div>
   </div>
@@ -328,9 +329,9 @@ curl -X POST https://x402check.xyz/v1/risk-check \\
     <div class="sec-head"><span class="sec-no">06</span><h2>Pricing &amp; identity</h2></div>
     <table>
       <tr><th></th><th></th></tr>
-      <tr><td>Prepaid credits</td><td><b>$0.001 per evaluation</b>, or $0.005 when a transaction is simulated. One x402 payment buys a balance ($0.10&ndash;$100). Each check is then debited with no payment round trip: about 0.7&nbsp;s in production, against 2.7&nbsp;s paying per call. A check that produces no verdict is refunded.</td></tr>
+      <tr><td>Prepaid credits</td><td><b>$0.001 per evaluation</b>, or $0.005 when a transaction is simulated. One x402 payment buys a balance ($0.10&ndash;$100). Each check is then debited with no payment round trip: 0.5&ndash;0.8&nbsp;s in production, against about 3&nbsp;s paying per call. A check that produces no verdict is refunded.</td></tr>
       <tr><td>Per call</td><td>By payment network, in USDC via x402: <b>$0.0035 on Base</b>, $0.002 on Solana and Sei, $0.001 on Avalanche and Monad, $0.007 on Polygon, $0.009 on Arbitrum. $0.005 when a transaction is simulated; batches are billed per item. A per-call attestation is released only after settlement.</td></tr>
-      <tr><td>Settlement</td><td>Each network settles through a facilitator every wallet can pay through, then the one cheapest to us. Live routes, fees and margins are in <a href="/status">/status</a>. Mainnet only; every evaluation is paid.</td></tr>
+      <tr><td>Settlement</td><td>Each network settles through a facilitator every wallet can pay through, then the one cheapest to us: Coinbase CDP for Base, Polygon and Arbitrum, PayAI for Avalanche and Sei, and Dexter for Solana and Monad. Live routes, fees, margins and each facilitator&rsquo;s published signers are in <a href="/status">/status</a>. Mainnet only; every evaluation is paid.</td></tr>
       <tr><td>Identity</td><td><span class="mono" style="font-size:13.5px">did:web:x402check.xyz</span> &mdash; <a href="/.well-known/did.json">DID document</a> &middot; <a href="/.well-known/jwks.json">public JWKS</a></td></tr>
       <tr><td>Data</td><td>OFAC SDN (U.S. Treasury) and MetaMask eth-phishing-detect, refreshed daily; ScamSniffer (runtime); Forta labelled datasets; Blockscout; public JSON-RPC &mdash; see THIRD_PARTY_NOTICES.md and the live <a href="/status">data status</a></td></tr>
       <tr><td>Engine</td><td>Deterministic checks and scoring in open-source code (MIT); TypeSafe Jev System One for content intent</td></tr>

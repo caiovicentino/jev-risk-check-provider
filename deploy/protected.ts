@@ -255,18 +255,21 @@ export function routedFacilitators(entries: FacilitatorEntry[], routes: PaymentR
 }
 
 /**
- * Each configured mainnet facilitator's reachability and the mainnet networks it offers
- * (from its /supported, shared with routing for 10 minutes). Errors are reduced to an HTTP
- * status or "unreachable": an authenticated facilitator's key never reaches /status.
+ * Each configured mainnet facilitator's reachability, the mainnet networks it offers and
+ * the settlement signers it publishes (from its /supported, shared with routing for 10
+ * minutes), so anyone can tell on-chain which facilitator settled a payment. Errors are
+ * reduced to an HTTP status or "unreachable": an authenticated facilitator's key never
+ * reaches /status.
  */
-export async function facilitatorStatus(env: WorkerEnv, injected?: FacilitatorEntry[]): Promise<Array<{ name: string; ok: boolean; networks: string[]; error?: string }>> {
+export async function facilitatorStatus(env: WorkerEnv, injected?: FacilitatorEntry[]): Promise<Array<{ name: string; ok: boolean; networks: string[]; signers?: string[]; error?: string }>> {
   const offered = new Set<string>(MAINNET_NETWORKS);
   return Promise.all(
     (injected ?? mainnetFacilitators(env)).map(async (f) => {
       try {
-        const { kinds } = await f.client.getSupported();
+        const { kinds, signers } = await f.client.getSupported();
         const networks = [...new Set(kinds.filter((k) => k.x402Version === 2 && k.scheme === "exact").map((k) => String(k.network)))].filter((n) => offered.has(n));
-        return { name: f.name, ok: true, networks };
+        const published = [...new Set(Object.values(signers ?? {}).flat().filter((a) => typeof a === "string" && /^[0-9A-Za-z]{32,44}$|^0x[0-9a-fA-F]{40}$/.test(a)))].slice(0, 100);
+        return { name: f.name, ok: true, networks, ...(published.length ? { signers: published } : {}) };
       } catch (err) {
         const status = /\((\d{3})\)/.exec(String(err))?.[1];
         return { name: f.name, ok: false, networks: [], error: status ? `HTTP ${status}` : "unreachable" };

@@ -2,6 +2,18 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.5.2 — 2026-09-30
+
+- **Coinbase CDP is active in production.**
+  - Base, Polygon and Arbitrum now settle through CDP. On Base, the per-call margin went from 32% to **69%**.
+  - PayAI keeps Avalanche and Sei, and stays the fallback for every EVM network.
+- **`/status` → `facilitators` lists the settlement signers each facilitator publishes.** CDP's list needs our key to read, so `/status` is where anyone can check on-chain which facilitator settled a payment.
+- **Measured in production** (Worker `08c5a2f6`, `docs/EVIDENCE.md` §7):
+  - `security:v5` passed **11/11**;
+  - the per-call check and the $0.10 credit pack were both settled by CDP signers, matched against CDP's published list;
+  - `eval/security-v5.ts` attributes each settlement through `/status`.
+- **Site:** a "v0.5.1" news row; the settlement row names each network's facilitator.
+
 ## v0.5.1 — 2026-09-30
 
 - **Coinbase CDP as a facilitator** (`deploy/cdp.ts`), active once the owner's CDP Secret API Key is set as the Worker secrets `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET`.

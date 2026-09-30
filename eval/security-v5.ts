@@ -133,16 +133,10 @@ async function main(): Promise<void> {
   const unknown = await call("POST", "/v1/risk-check", { wallet: WALLET }, { headers: { Authorization: `Bearer x402c_${"Z".repeat(43)}` } });
   add("credits_bad_tokens", malformed.status === 401 && unknown.status === 402 && unknown.json?.error === "insufficient_credits", `malformed → ${malformed.status}; unknown token → ${unknown.status} ${String(unknown.json?.error)} (never an unpaid evaluation)`);
 
-  // Who settled: each receipt's transaction sender on Base against the published signers.
-  const signers = async (url: string) => {
-    try {
-      const j = (await (await fetch(`${url}/supported`, { signal: AbortSignal.timeout(10_000) })).json()) as { signers?: Record<string, string[]> };
-      return new Set(Object.values(j.signers ?? {}).flat().map((a) => a.toLowerCase()));
-    } catch {
-      return new Set<string>();
-    }
-  };
-  const [payaiSigners, dexterSigners] = await Promise.all([signers("https://facilitator.payai.network"), signers("https://x402.dexter.cash")]);
+  // Who settled: each receipt's transaction sender on Base against the signers each
+  // facilitator publishes (listed in /status: CDP's /supported needs our key).
+  const owners = new Map<string, string>();
+  for (const f of facs) for (const a of (f as { signers?: string[] }).signers ?? []) owners.set(a.toLowerCase(), f.name);
   const settledBy: Array<{ probe: string; transaction: string; from: string | null; facilitator: string }> = [];
   for (const rc of receipts.filter((x) => x.network === "eip155:8453" && x.transaction)) {
     let from: string | null = null;
@@ -152,13 +146,12 @@ async function main(): Promise<void> {
     } catch {
       from = null;
     }
-    const facilitator = !from ? "unknown" : payaiSigners.has(from) ? "payai" : dexterSigners.has(from) ? "dexter" : "other (not PayAI or Dexter)";
+    const facilitator = !from ? "unknown" : (owners.get(from) ?? "unlisted signer");
     settledBy.push({ probe: rc.probe, transaction: rc.transaction as string, from, facilitator });
   }
   if (settledBy.length === 0) add("settled_by_routed_facilitator", null, "no Base settlement in this run");
   else {
-    const expected = baseRoute === "cdp" ? "other (not PayAI or Dexter)" : baseRoute;
-    add("settled_by_routed_facilitator", settledBy.every((x) => x.facilitator === expected), settledBy.map((x) => `${x.probe}: ${x.from?.slice(0, 10)}… → ${x.facilitator}`).join(" · ") + ` (Base route: ${baseRoute})`);
+    add("settled_by_routed_facilitator", settledBy.every((x) => x.facilitator === baseRoute), settledBy.map((x) => `${x.probe}: ${x.from?.slice(0, 10)}… → ${x.facilitator}`).join(" · ") + ` (Base route: ${baseRoute})`);
   }
 
   const report = {

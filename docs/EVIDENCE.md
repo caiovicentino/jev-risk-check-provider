@@ -1,6 +1,6 @@
 # Evidence — x402check v0.5 (v0.3.0–v0.5.0)
 
-**v0.5** changes how checks are paid, not how they are made. It adds per-network prices, facilitator routing by compatibility and cost, and prepaid credits. It was measured in production on 2026-09-30 (UTC) by `eval/security-v5.ts`, with `eval/security-v2.ts` re-run (§7).
+**v0.5** changes how checks are paid, not how they are made. It adds per-network prices, facilitator routing by compatibility and cost, and prepaid credits. **v0.5.1** adds Coinbase CDP as a facilitator. Both were measured in production on 2026-09-30 (UTC) by `eval/security-v5.ts`, with `eval/security-v2.ts` re-run (§7).
 
 All other numbers were measured on 2026-09-29. **v0.4** adds the kit watch and the first shadow of a facilitator's real traffic (§0); it was measured on the v0.4.0 code without model calls:
 
@@ -231,6 +231,9 @@ Reading: the model detects risk that is **present in the content it is given**. 
 - `prod` ran on Worker `d230e4a5`: the paid-only v0.3 code with EVM settlement through PayAI.
 - `security:v2` and `security:v3` ran on v0.3.2 (`3045ce10`), which adds simulation pricing.
 - `security:v5` ran on v0.5.0 (`d9030314`): per-network prices, routing and prepaid credits. `security:v2` was re-run there: 12/12 PASS, with its 6 evaluations settled at the v0.5 prices.
+- `security:v5` ran again on v0.5.1 (`08c5a2f6`), with Coinbase CDP configured. It adds two probes:
+  - the facilitators' health, from `/status`;
+  - which facilitator settled each payment, found by matching the transaction's sender on Base against the signers each facilitator publishes.
 
 | Suite | Result | Paid evaluations |
 |---|---|---|
@@ -238,7 +241,8 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run security:v2`: v0.2 fixes, "no free evaluations", simulation pricing (v0.3.2) | **12/12 PASS** | 6 |
 | `npm run security:v3`: v0.3 features (v0.3.2: two simulated evaluations settled at $0.005) | **8/8 PASS** | 3 |
 | `npm run security:v4`: v0.4 kit watch and collision gate (Worker `5f8e17f0`) | **7/7 PASS** | 5 |
-| `npm run security:v5`: v0.5 prices, routing and prepaid credits (Worker `d9030314`) | **9/9 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack (one settlement) |
+| `npm run security:v5`: v0.5 prices, routing and prepaid credits (Worker `d9030314`, `security-v5-v0.5.0-report.json`) | **9/9 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack (one settlement) |
+| `npm run security:v5` on v0.5.1, settling through Coinbase CDP (Worker `08c5a2f6`) | **11/11 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack. Both settlements were sent by CDP signers |
 
 The `security:v5` probes cover:
 - **the price table:** the discovery document and the 402 carry the seven per-network prices, and none mismatches. Base is offered through EIP-3009, so any wallet can pay it gaslessly;
@@ -252,18 +256,25 @@ The `security:v5` probes cover:
 
 The token appears in the report only as a SHA-256 prefix.
 
-Routes and margins in production (from `/status`, fees from PayAI's live `/pricing`; the margin also deducts the model's ~$0.00007):
+**v0.5.1: Coinbase CDP settles Base, Polygon and Arbitrum.**
+- **Settlements:** the per-call check and the credit pack were settled by CDP signers `0xa32ccda9…` and `0x59b7ebc6…`, both published in CDP's `/supported`. They moved 0.0035 and 0.10 USDC from the probe payer to our `pay_to` (transactions in `security-v5-report.json`).
+- **Speed:**
+  - The per-call check took **3,713 ms** end to end, against 2,709 ms through PayAI in the v0.5.0 run. That is one sample each, not a benchmark.
+  - The two checks from credits took 716 ms and 513 ms.
+- **Margin:** CDP costs $0.001 per settlement after 1,000 free a month. Base's per-call margin rises from 32% to **69%**. Polygon's rises to 85% and Arbitrum's to 88%.
+
+Routes and margins in production on v0.5.1. They come from `/status`, with PayAI's fees read from its live `/pricing`. Every margin also deducts the model's ~$0.00007.
 
 | Network | Price per call | Facilitator (transfer) | Settlement fee to us | Margin |
 |---|---|---|---|---|
-| Base | $0.0035 | PayAI (EIP-3009) | $0.00231 | $0.00112 (32%) |
-| Polygon | $0.007 | PayAI (EIP-3009) | $0.00489 | $0.00204 (29%) |
-| Arbitrum | $0.009 | PayAI (EIP-3009) | $0.00663 | $0.00230 (26%) |
+| Base | $0.0035 | Coinbase CDP (EIP-3009) | $0.001 (first 1,000 a month free) | $0.00243 (69%); 32% through PayAI in v0.5.0 |
+| Polygon | $0.007 | Coinbase CDP (EIP-3009) | $0.001 | $0.00593 (85%) |
+| Arbitrum | $0.009 | Coinbase CDP (EIP-3009) | $0.001 | $0.00793 (88%) |
 | Avalanche | $0.001 | PayAI (EIP-3009) | $0.0001 | $0.00083 (83%) |
 | Sei | $0.002 | PayAI (EIP-3009) | $0.00077 | $0.00116 (58%) |
 | Monad | $0.001 | Dexter (Permit2), the only one offering it | $0 (floor $0.00027) | $0.00093 (93%) |
 | Solana | $0.002 | Dexter | $0 (floor $0.0013) | $0.00193 (96.5%) |
-| **Prepaid credits** | **$0.001 per check** | one settlement per pack | one fee per pack ($0.00231 on Base) | 91% on a $0.10 pack, 93% from $1 |
+| **Prepaid credits** | **$0.001 per check** | one settlement per pack | one fee per pack ($0.001 on Base via CDP) | 92% on a $0.10 pack, 93% from $1 |
 
 **Found and corrected in v0.5, by reading the facilitators' terms and paying for real:**
 - **The v0.4 unit economics were wrong.**
@@ -347,7 +358,7 @@ npx tsx scripts/kit-catalog.ts && npx tsx scripts/legit-corpus.ts && npx tsx scr
 npx tsx scripts/hunt-kits.ts --chain eip155:1 --hours 24 && npx tsx scripts/hunt-kits.ts --chain eip155:8453 --hours 6
 npm run eval:kit-watch -- --sample 40 && npm run eval:kit-watch -- --second-holdout
 npx tsx scripts/payai-shadow.ts --days 7
-PAY_NETWORK=eip155:8453 npm run security:v5    # spends $0.1035: one per-call check and a $0.10 credit pack
+PAY_NETWORK=eip155:8453 npm run security:v5    # spends $0.1035: one per-call check and a $0.10 credit pack; reports who settled each
 PAY_NETWORK=eip155:8453 npm run security:v4
 PAY_NETWORK=eip155:8453 npm run security:v3 && PAY_NETWORK=eip155:8453 npm run security:v2 && PAY_NETWORK=eip155:8453 npm run prod
 # ↑ against production: every evaluation is paid (funded payer key in ~/.config/paysol; about $0.35 in total at v0.5 prices)

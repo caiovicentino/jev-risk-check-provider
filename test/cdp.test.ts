@@ -125,6 +125,11 @@ test("CDP is configured only with both parts of the key; routing then prefers it
   assert.deepEqual(status.map((f) => [f.name, f.ok, f.error ?? null]), [["payai", true, null], ["dexter", true, null], ["cdp", false, "HTTP 401"]]);
   const healthy = await facilitatorStatus({}, entries(client(cdpKinds)));
   assert.deepEqual(healthy[2]?.networks, ["eip155:8453", "eip155:137", "eip155:42161", SOL], "World is not a network x402check offers");
+  // Published settlement signers pass through (public addresses), so a settlement can be attributed on-chain.
+  const signer = "0x68A96F41ff1e9F2E7b591A931A4AD224e7C07863";
+  const withSigners = { verify: async () => ({ isValid: true }), settle: async () => ({ success: true }), getSupported: async () => ({ kinds: cdpKinds, signers: { "eip155:*": [signer, signer, "not an address"] } }) } as never;
+  const listed = await facilitatorStatus({}, [{ name: "cdp", client: withSigners, flatFee: 0.001 }]);
+  assert.deepEqual(listed[0]?.signers, [signer]);
 
   // The resource server's list: routed facilitators first, then CDP, PayAI (EVM) and Dexter as the default order.
   const list = routedFacilitators(entries(client(cdpKinds)), await paymentRouting({}, entries(client(cdpKinds))));

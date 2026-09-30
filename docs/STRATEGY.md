@@ -42,22 +42,25 @@ Every answer comes back as a signed attestation that a merchant, a facilitator, 
 Every evaluation is paid; there is no free tier. The unit economics are set by what settling a payment costs, not by the model.
 
 - **Prepaid credits (the product we steer to):** one x402 payment buys a balance ($0.10–$100). Each check then costs **$0.001**, or $0.005 when a transaction is simulated, with no payment round trip.
-  - Our cost per check is one model call, about $0.00007, plus a share of one settlement: on a $1 pack, about $0.0000023 per check.
+  - Our cost per check is one model call, about $0.00007, plus a share of one settlement: on a $1 pack settled through CDP, about $0.000001 per check.
   - Margin: **about 93%**.
 - **Per call:** x402 exact, priced by payment network so that each price clears the cost of its route. Margins are measured live (`/status` → `payments`):
-  - **Base: $0.0035, 32%.** PayAI bills gas + 30%, about $0.0023 per settlement.
+  - **Base: $0.0035, 69%** through Coinbase CDP ($0.001 per settlement after 1,000 free a month). Through PayAI, which bills gas + 30% (about $0.0023), it was 32%.
   - Solana: $0.002, 96%. Dexter sponsors the gas.
   - Avalanche: $0.001, 83%.
   - Sei: $0.002, 58%.
-  - Polygon: $0.007, 29%.
-  - Arbitrum: $0.009, 26%.
+  - Polygon: $0.007, 85% (CDP).
+  - Arbitrum: $0.009, 88% (CDP).
   - Monad: $0.001, 93%.
 - **Why settlement dominates:** every x402 exact payment is an on-chain transaction.
   - PayAI's EIP-3009 route, which any wallet can pay without gas, costs us gas + 30% per settlement (since 2026-09-21).
   - Dexter's route is free to us, but on EVM networks it settles only through Permit2, which most payers cannot use without an on-chain approval. Routing therefore prefers what every payer can pay, then what is cheapest.
   - A single price of $0.001 per call would lose about $0.0014 per check on Base. The earlier "~93% margin" counted only the model cost; this corrects it.
 - **The price is also the anti-abuse control:** nothing is evaluated without payment. A per-call attestation is released only after the payment settles. A check paid from credits is refunded when no verdict is produced.
-- **Operational risk:** facilitators change fees and floors. PayAI switched to cost-plus on 2026-09-21. The router reads PayAI's live fee table and Dexter's floors every 10 minutes and re-routes, and `/status` shows every route's margin, so a change is visible the day it happens.
+- **Operational risk:** facilitators change fees and floors. PayAI switched to cost-plus on 2026-09-21. The router re-routes every 10 minutes from PayAI's live fee table, Dexter's floors and CDP's reachability. `/status` shows every route's margin and whether each facilitator answers, so a change is visible the day it happens.
+- **Three facilitators, no single point of failure.** CDP (Base, Polygon, Arbitrum), PayAI (Avalanche, Sei, and a fallback for every EVM network) and Dexter (Solana, Monad).
+  - If CDP rejects our key or goes down, PayAI takes its networks back, at a lower margin.
+  - PayAI's lifetime free allowance (1,000 credits per receiving wallet) now covers only its small Avalanche and Sei fees.
 
 ## Distribution
 
