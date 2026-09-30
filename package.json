@@ -31,7 +31,7 @@
     "security:v2": "tsx eval/security-v2.ts",
     "feeds:update": "tsx scripts/update-threat-feeds.ts",
     "ofac:update": "tsx scripts/update-ofac.ts",
-    "dev:worker": "cd deploy && wrangler dev --local",
+    "dev:worker": "cd deploy && wrangler dev --local --port 8799",
     "security:v3": "tsx eval/security-v3.ts",
     "security:v4": "tsx eval/security-v4.ts",
     "eval:kit-watch": "tsx eval/kit-watch.ts",
