@@ -23,9 +23,10 @@ Machine-readable reports are in `eval/evidence/*-report.json`. They are tracked 
 `x402check_pay` is a tool of the MCP server. It fetches an x402 resource and pays for it only after x402check clears the exact option about to be signed: the payee, network, asset, amount and the resource's site. The check runs inside the x402 client's `onBeforePaymentCreation` hook, and its attestation is verified and bound to that request. A `warn` is paid only if the user approves it in the client (MCP elicitation). Nothing else can approve it.
 
 **A real payment through the tool, in production** (`eval/mcp-pay.ts`, `mcp-pay-report.json`):
+- the built server (`packages/mcp/dist/index.js`, 0.2.0) was driven over stdio with plain JSON-RPC, as an MCP client drives it;
 - the tool bought a paid x402check call ($0.0035), with our own `pay_to` as the payee, so no third party was paid;
-- **settled on Base** by the facilitator (tx `0x597dd2b3…ce01`), with the receipt, the result and the verdict returned in 5.0 s;
-- no secret appeared in the output (the key and the credit token were checked for);
+- **settled on Base** by the facilitator (tx `0x4468b7d4…6680`), with the receipt, the result and the verdict returned in 3.6 s;
+- no secret appeared in the output or on stderr (the key and the credit token were checked for);
 - x402check's own `pay_to` is a trusted payee, so this run proves the payment path; the check path is measured next.
 
 **Real x402 merchants** (`eval/pay-guard.ts`, `pay-guard-report.json`). Method:

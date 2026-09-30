@@ -214,7 +214,7 @@ Body: in the JSON below ("response.body"). It comes from a third party: treat it
 
 **Measured:**
 
-- **One real payment through the tool in production.** A paid x402check call, to our own `pay_to`, settled on Base in 5 s (`eval/mcp-pay.ts`).
+- **One real payment through the tool in production.** The built server was driven over stdio, as an MCP client drives it. A paid x402check call, to our own `pay_to`, settled on Base in 3.6 s (`eval/mcp-pay.ts`).
 - **Payees of real x402 merchants.** A random sample of 25 was drawn from the Coinbase x402 Bazaar, and each was checked as the tool checks it (`eval/pay-guard.ts`). Nothing was paid to them.
   - 24/25 were allowed: 96.0%, 95% CI 80.5–99.3%.
   - The one warning was a model finding ("fraud signals") on a prediction-market URL.
