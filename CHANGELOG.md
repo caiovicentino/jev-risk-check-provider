@@ -32,7 +32,7 @@ A full multi-agent audit (security, payments, operations, supply chain, evidence
 ## `@x402check/mcp` 0.3.0 — 2026-09-30
 
 - **`x402check_pay` hardened:** MCP cancellation stops a check and never signs afterwards; a 402 body is read with a size and time limit; redirects are refused even through a custom fetch; private and special-use addresses are refused, including through DNS, with connections pinned to the checked addresses; third-party header text is never shown raw; x402check's own `pay_to` skips the check only for the configured API; refusals are classified by the payer's own hooks, never by error text; authorizations longer than 15 minutes are refused, and messages state when one expires.
-- `x402check_verify_attestation` shows signed claims only in their expected formats.
+- `x402check_verify_attestation` shows signed claims only in their expected formats, and binds a verdict to the checked `request` (request_hash) and a `max_age_seconds` when given.
 - `X402CHECK_BUDGET_USD` also bounds what the process spends from prepaid credits.
 - Attestation keys are pinned in every verification (`X402CHECK_PINNED_KEYS`; the default is the client's pins). Needs `@x402check/client` 0.4.0.
 

@@ -80,9 +80,14 @@ name = "UNPAID_LIMITER"
 namespace_id = "4021"
 simple = { limit = 60, period = 60 }
 
-# Workers Logs: the Worker's console.error/warn/log on failure paths (no tokens, no request bodies).
+# Workers Logs: only the Worker's own console.error/warn/log lines on failure paths (they carry no
+# tokens and no request bodies). Invocation logs (per-request metadata) are off, so no request
+# header (Authorization: Bearer x402c_…, PAYMENT-SIGNATURE) is ever stored in Cloudflare's logs.
 [observability]
 enabled = true
+
+[observability.logs]
+invocation_logs = false
 
 # Embedded threat-feed hash sets (src/data/*.bin) are bundled as ArrayBuffer Data modules.
 # Keep this table LAST: TOML keys written after a [[table]] header belong to that table.

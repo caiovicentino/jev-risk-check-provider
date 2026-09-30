@@ -13,7 +13,7 @@ Each check screens the counterparty against the OFAC SDN list, phishing and drai
 |---|---|
 | `x402check_check` | Risk-checks a counterparty, paying $0.001 from credits (or the network's price per call), or $0.005 when a transaction is simulated. It returns an action (`allow`, `warn`, `block` or `not_verified`), the findings, the evidence, the attestation `jti`, the settlement receipt and the full structured result. |
 | `x402check_pay` | Fetches an x402 resource (an API that answers `402 Payment Required`) and pays for it **only if x402check clears the exact payee, right before the payment is signed**. A `warn` is paid only if the user approves it in the client. `block` and `not_verified` sign nothing. It needs `X402CHECK_PAYER_KEY`; see [Paying x402 resources](#paying-x402-resources-x402check_pay). |
-| `x402check_verify_attestation` | Verifies an x402check attestation (`{ jws, aud?, sub? }`) before relying on it. It makes no payment. |
+| `x402check_verify_attestation` | Verifies an x402check attestation (`{ jws, aud?, sub?, request?, max_age_seconds? }`) before relying on it. Pass `request`, the exact body that was checked: it binds the verdict to that request (`request_mismatch` otherwise). It makes no payment. |
 | `x402check_methodology` | Explains what is checked, the price, and the published, measured limits. It makes no payment. |
 
 ## Install

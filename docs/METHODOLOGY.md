@@ -119,7 +119,8 @@ Each verdict is an ES256 JWS (`typ: risk-check+jwt`, with the `kid` the DID docu
 
 Anyone can verify it with the published JWKS. **A verdict does not apply to a different request, payment or transaction only when the verifier compares `request_hash`.** These do:
 - the SDK's `verifyAttestation(jws, { request })` (`@x402check/client`), and `interpret` on its result;
-- the signing guard (`@x402check/client/guard`), and the MCP server's `x402check_check` and `x402check_pay`, on every check they make (`x402check_verify_attestation`, which is handed a JWS alone, binds only `aud` and `sub`);
+- the signing guard (`@x402check/client/guard`), and the MCP server's `x402check_check` and `x402check_pay`, on every check they make;
+- the MCP server's `x402check_verify_attestation` when it is given the checked `request` (since `@x402check/mcp` 0.3.0; it also takes `max_age_seconds`); handed a JWS alone, it binds only `aud` and `sub`;
 - `scripts/verify-attest.ts --request '<body>'`, the reference CLI (it adds `--max-age` and payment bindings).
 
 A verifier that checks only the signature accepts a genuine verdict issued for something else, for its full hour.

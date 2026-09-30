@@ -107,7 +107,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 
 | System | Detail |
 |---|---|
-| Cloudflare | Worker `x402check`, deployed with `scripts/deploy.sh` (§3.2), using the wrangler pinned exactly in the root `devDependencies`. Workers Logs (`[observability]`) keep the Worker's own error lines. The zone is on the Free plan and Workers is on the **Paid** plan, which the cron needs (~250 ms of CPU per run, `cpu_ms = 30000`). |
+| Cloudflare | Worker `x402check`, deployed with `scripts/deploy.sh` (§3.2), using the wrangler pinned exactly in the root `devDependencies`. Workers Logs (`[observability]`) keep only the Worker's own error lines: invocation logs are off, so no request header (bearer token, `PAYMENT-SIGNATURE`) is stored. The zone is on the Free plan and Workers is on the **Paid** plan, which the cron needs (~250 ms of CPU per run, `cpu_ms = 30000`). |
 | KV `RATE` | Kit watch (`kw:a:*`, `kw:delegates:*`, `kw:registry`, `kw:learned`, `kw:stats`, `kw:lease`, `kw:cursor:*`), the ScamSniffer blobs (GPL, runtime only), settlement records (`st:<network>:<tx>`, kept 400 days, for reconciling against the chain), and credits queued after a ledger failure (`pc:<settlement>`, applied by the cron; they hold the token's SHA-256, never the token). |
 | Durable Object `CREDITS` | `CreditLedger`: one per credit token, named by the token's SHA-256. |
 | Durable Object `PAYMENT_CLAIMS` | `PaymentClaim` (migration `v4`): one per x402 payment payload, named by its SHA-256. It makes each payment single-use and is kept 24 h. |

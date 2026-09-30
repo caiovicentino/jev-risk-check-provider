@@ -285,6 +285,11 @@ const verifyInput = {
   jws: z.string().min(1).max(16384).describe("The attestation: the compact JWS from a check result's `jws`."),
   aud: z.string().min(1).max(256).optional().describe("Require this audience."),
   sub: z.string().min(1).max(160).optional().describe("Require this subject (the counterparty address you are about to pay or approve)."),
+  request: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("The exact request that was checked (the body sent to x402check). Binds the verdict to it: one issued for any other request (another payee, amount, chain, site or context) fails with request_mismatch."),
+  max_age_seconds: z.number().int().min(1).max(3600).optional().describe("Refuse a verdict issued longer ago than this, plus 300 s of clock-skew allowance (attestations are otherwise valid for an hour)."),
 };
 
 const verifyOutput = {
@@ -589,13 +594,13 @@ export function createX402CheckServer(config: ServerConfig = {}): McpServer {
     {
       title: "x402check: verify an attestation",
       description:
-        "Verify an x402check attestation (the compact JWS from a check result) before relying on it: ES256 signature with the key from the issuer's did:web document (never a key or URL carried by the token or a response), issuer, expiry, and optionally audience and subject (EVM compared case-insensitively, base58 case-sensitively). An invalid attestation must not be relied on. Free: no payment is made.",
+        "Verify an x402check attestation (the compact JWS from a check result) before relying on it: ES256 signature with the key from the issuer's did:web document (never a key or URL carried by the token or a response), pinned attestation keys, issuer, expiry, and optionally audience, subject (EVM compared case-insensitively, base58 case-sensitively), the exact request it answers (`request`, which binds request_hash) and a maximum age. Pass `request` whenever you know what was checked: without it, a verdict issued for another payment can still verify. An invalid attestation must not be relied on. Free: no payment is made.",
       inputSchema: verifyInput,
       outputSchema: verifyOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ jws, aud, sub }) => {
-      const v = await verify(jws, { aud, sub });
+    async ({ jws, aud, sub, request, max_age_seconds }) => {
+      const v = await verify(jws, { aud, sub, ...(request ? { request: request as unknown as RiskCheckRequest } : {}), ...(max_age_seconds !== undefined ? { maxAgeSeconds: max_age_seconds } : {}) });
       const structured = redact(
         compact({
           valid: v.valid,

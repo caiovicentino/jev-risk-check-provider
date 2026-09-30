@@ -68,7 +68,7 @@ describe("tool listing", () => {
     const { tools } = await session.client.listTools();
     const verify = tools.find((t) => t.name === "x402check_verify_attestation")!.inputSchema as JsonSchema;
     assert.deepEqual(verify.required, ["jws"]);
-    assert.deepEqual(Object.keys(verify.properties ?? {}).sort(), ["aud", "jws", "sub"]);
+    assert.deepEqual(Object.keys(verify.properties ?? {}).sort(), ["aud", "jws", "max_age_seconds", "request", "sub"]);
     assert.ok(!("issuer" in (verify.properties ?? {})), "the trust anchor is operator configuration, not a tool argument");
     const methodology = tools.find((t) => t.name === "x402check_methodology")!.inputSchema as JsonSchema;
     assert.deepEqual(methodology.required ?? [], []);

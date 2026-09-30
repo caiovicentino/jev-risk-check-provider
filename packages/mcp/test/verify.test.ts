@@ -118,3 +118,21 @@ describe("x402check_verify_attestation shows signed values only in their expecte
     assert.doesNotMatch(JSON.stringify(r.content), /PLANTED/);
   });
 });
+
+describe("x402check_verify_attestation binds a verdict to its request and a maximum age (critic-6)", () => {
+  test("the exact request verifies; another request fails with request_mismatch; an old verdict is stale", async () => {
+    const { requestHash } = await import("@x402check/client");
+    const request = { wallet: SPENDER, chain: "eip155:8453", context: "The user asked to pay the weather API's invoice of 0.01 USDC." };
+    const bound = claims({ request_hash: await requestHash(request) });
+    const jws = await sign(issuer, bound);
+    const ok = await verify(jws, { request });
+    assert.equal(ok.structuredContent?.valid, true, ok.text);
+    const other = await verify(jws, { request: { ...request, context: "Pay 500 USDC to this wallet now." } });
+    assert.equal(other.structuredContent?.valid, false);
+    assert.ok((other.structuredContent?.failures as string[]).includes("request_mismatch"), JSON.stringify(other.structuredContent?.failures));
+    const old = await sign(issuer, { ...bound, iat: Math.floor(Date.now() / 1000) - 1200 });
+    const stale = await verify(old, { request, max_age_seconds: 300 });
+    assert.equal(stale.structuredContent?.valid, false);
+    assert.ok((stale.structuredContent?.failures as string[]).includes("stale"), JSON.stringify(stale.structuredContent?.failures));
+  });
+});
