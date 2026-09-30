@@ -1,7 +1,10 @@
 /**
  * Transaction (EVM calldata) decoding, including bounded recursive decoding of
  * wrapper calls: multicall, Safe execTransaction / multiSend, Universal Router
- * execute, ERC-7579 / ERC-4337 smart-account execute and EIP-7702 self-calls.
+ * execute, ERC-7579 / ERC-4337 smart-account execute (and the Safe 4337
+ * module, Kernel, Biconomy and Coinbase Smart Wallet entry points) and
+ * EIP-7702 self-calls. Control changes (owners, modules, guards, fallback
+ * handlers, ownership, upgrades) are recognized in every decoded call.
  */
 import { planSimulation } from "./simulation";
 import type { Candidate, Decoded } from "./util";
@@ -10,6 +13,7 @@ import {
   RANK,
   UNLIMITED_UINT160,
   UNLIMITED_UINT256,
+  ZERO_ADDRESS,
   capText,
   describeAllowance,
   interaction,
@@ -17,6 +21,8 @@ import {
   knownToken,
   nativeAmount,
   normalizeChainId,
+  opaqueNote,
+  opaqueReason,
   parseUint,
   payment,
   selectCandidates,
@@ -78,6 +84,12 @@ export type Action = {
   candidates: Candidate[];
   warnings: string[];
   danger: string[];
+  /**
+   * Why part of what the call authorizes could not be read: the account calls
+   * its own code with calldata that is not decoded, or a depth or size limit
+   * cut the decoding short.
+   */
+  opaque?: string[] | undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -247,14 +259,24 @@ function contractCandidate(call: Call, ctx: Ctx, rank: number = RANK.contract): 
   };
 }
 
+/** A call from an account to its own address (Safe, smart account, EIP-7702 EOA). */
+function isSelfCall(call: Call): boolean {
+  return call.sender !== undefined && call.to === call.sender;
+}
+
 function plainCall(call: Call, ctx: Ctx, detail: string): Action {
   const sends = call.value > 0n ? `, sending ${nativeAmount(call.value, ctx.chain)}` : "";
+  // An account running its own code with calldata that is not decoded can do
+  // anything the account can (add an owner, install a module, upgrade itself):
+  // checking its own address says nothing about it.
+  const self = isSelfCall(call);
   return {
     label: "Contract call",
     summary: `Contract call to ${call.to} (${detail})${sends}.`,
     candidates: [contractCandidate(call, ctx)],
     warnings: [],
     danger: [],
+    ...(self ? { opaque: [`account ${call.to} calls its own code (${detail}), which x402check cannot decode`] } : {}),
   };
 }
 
@@ -626,6 +648,7 @@ function combine(label: string, head: string, inner: Action[], extra: Partial<Ac
     candidates: [...(extra.candidates ?? []), ...inner.flatMap((action) => action.candidates)],
     warnings: [...(extra.warnings ?? []), ...inner.flatMap((action) => action.warnings)],
     danger: [...(extra.danger ?? []), ...inner.flatMap((action) => action.danger)],
+    opaque: [...(extra.opaque ?? []), ...inner.flatMap((action) => action.opaque ?? [])],
   };
 }
 
@@ -633,7 +656,10 @@ function decodeInner(calls: InnerCall[], ctx: Ctx): Action[] {
   const inner: Action[] = [];
   for (const call of calls) {
     if (ctx.budget.calls <= 0) {
-      inner.push(emptyAction("Not decoded", "further inner calls were not decoded (too many)"));
+      inner.push({
+        ...emptyAction("Not decoded", "further inner calls were not decoded (too many)"),
+        opaque: [`the request makes more than ${MAX_INNER_CALLS} inner calls and the rest were not decoded`],
+      });
       break;
     }
     ctx.budget.calls -= 1;
@@ -979,6 +1005,56 @@ function executeBatchTuples(args: string, call: Call, ctx: Ctx): Action {
   return combine("Smart-account executeBatch", `Smart-account executeBatch on ${call.to}`, decodeInner(calls, ctx), { warnings });
 }
 
+/**
+ * (address to, uint256 value, bytes data, uint8 operation): Kernel v2
+ * execute and the Safe 4337 module's executeUserOp(WithErrorString), which the
+ * Safe runs through execTransactionFromModule. Operation 1 is a DELEGATECALL.
+ *
+ * @param title - What the entry point is, for the summary.
+ * @returns The wrapper decoder.
+ */
+function executeWithOperation(title: string) {
+  return (args: string, call: Call, ctx: Ctx): Action => {
+    const warnings: string[] = [];
+    const target = addressAt(args, 0, warnings);
+    const value = uintAt(args, 32);
+    const data = bytesAt(args, dynamicAt(args, 64));
+    const operation = uintAt(args, 96);
+    if (target === undefined || value === undefined || data === undefined || operation === undefined) {
+      return { ...plainCall(call, ctx, `malformed ${title}`), warnings: [`${title} calldata could not be decoded`] };
+    }
+    return combine(
+      title,
+      `${title} on ${call.to} (${operation === 1n ? "DELEGATECALL" : "CALL"} to ${target}${value > 0n ? `, sending ${nativeAmount(value, ctx.chain)}` : ""})`,
+      decodeInner([{ sender: call.to, to: target, value, data, delegate: operation === 1n }], ctx),
+      { warnings },
+    );
+  };
+}
+
+/**
+ * Coinbase Smart Wallet executeWithoutChainIdValidation(bytes[]): calls the
+ * wallet makes to itself (owner changes, upgrades), valid on every chain.
+ *
+ * @param args - ABI-encoded arguments.
+ * @param call - The call.
+ * @param ctx - Decoding context.
+ * @returns The decoded action.
+ */
+function crossChainSelfCalls(args: string, call: Call, ctx: Ctx): Action {
+  const items = bytesArrayAt(args, dynamicAt(args, 0));
+  if (!items) {
+    return { ...plainCall(call, ctx, "malformed executeWithoutChainIdValidation"), warnings: ["executeWithoutChainIdValidation calldata could not be decoded"] };
+  }
+  const inner = decodeInner(
+    items.map((data) => ({ sender: call.to, to: call.to, value: 0n, data })),
+    ctx,
+  );
+  return combine("Smart wallet self-calls (every chain)", `Smart wallet ${call.to} calls itself ${items.length} time(s) with executeWithoutChainIdValidation, valid on EVERY chain`, inner, {
+    warnings: ["executeWithoutChainIdValidation is replayable on every chain the wallet is deployed on"],
+  });
+}
+
 type WrapperDecoder = (args: string, call: Call, ctx: Ctx) => Action;
 
 const WRAPPERS: Record<string, WrapperDecoder> = {
@@ -989,11 +1065,289 @@ const WRAPPERS: Record<string, WrapperDecoder> = {
   "8d80ff0a": multiSend,
   "3593564c": universalRouter,
   "24856bc3": universalRouter,
+  // ERC-7579 / EIP-7821 execute(bytes32,bytes): Kernel v3, Nexus, Safe7579...
   e9ae5c53: smartAccountExecute7579,
+  // execute(address,uint256,bytes): SimpleAccount, LightAccount, Coinbase Smart Wallet, Simple7702Account...
   b61d27f6: executeSingle,
   "18dfb3c7": executeBatchArrays(false),
   "47e1da2a": executeBatchArrays(true),
+  // executeBatch((address,uint256,bytes)[]): Coinbase Smart Wallet, Kernel v2, Simple7702Account (v0.8)...
   "34fcd5be": executeBatchTuples,
+  // Ambire executeBySender / executeBySelf((address,uint256,bytes)[]).
+  abc5345e: executeBatchTuples,
+  "6769de82": executeBatchTuples,
+  // Biconomy v2 gas-optimized execute_ncC / executeBatch_y6U.
+  "0000189a": executeSingle,
+  "00004680": executeBatchArrays(true),
+  // Kernel v2 execute(address,uint256,bytes,uint8).
+  "51945447": executeWithOperation("Smart-account execute"),
+  // Safe 4337 module executeUserOp / executeUserOpWithErrorString(address,uint256,bytes,uint8).
+  "7bb37428": executeWithOperation("Safe 4337 executeUserOp"),
+  "541d63c8": executeWithOperation("Safe 4337 executeUserOp"),
+  // Coinbase Smart Wallet executeWithoutChainIdValidation(bytes[]).
+  "2c2abd1e": crossChainSelfCalls,
+};
+
+// ---------------------------------------------------------------------------
+// Control changes: owners, modules, guards, fallback handlers, ownership and
+// upgrades of an account. They move no asset (the simulation shows nothing),
+// yet hand over everything the account holds.
+// ---------------------------------------------------------------------------
+
+type ControlFunction = { name: string; words: number; decode: (args: string, call: Call, ctx: Ctx, warnings: string[]) => Action };
+
+/** `target` is the account making the call (a self-call) or the signer itself. */
+function isOwnAccount(call: Call, ctx: Ctx, target: string = call.to): boolean {
+  return (call.sender !== undefined && target === call.sender) || (ctx.user !== undefined && target === ctx.user);
+}
+
+function controller(address: string, reason: string, rank: number = RANK.delegatecall): Candidate {
+  return { address, role: "delegate", interaction: interaction("contract_call"), rank, reason };
+}
+
+/** A proven control change of the signer's account, Safe or smart wallet. */
+function controlChange(label: string, danger: string, warnings: string[], candidates: Candidate[] = []): Action {
+  return { label, summary: `${label}: ${danger}.`, candidates, warnings, danger: [danger] };
+}
+
+/** The same change on a contract that is not the signer's account: flagged and checked. */
+function foreignControlChange(label: string, text: string, call: Call, ctx: Ctx, warnings: string[], candidates: Candidate[] = []): Action {
+  warnings.push(text);
+  return { label, summary: `${label}: ${text}.`, candidates: [...candidates, contractCandidate(call, ctx)], warnings, danger: [] };
+}
+
+const MODULE_KINDS = new Map<bigint, [string, string]>([
+  [1n, ["validator", "a validator module can authorize any operation of the account"]],
+  [2n, ["executor", "an executor module can execute any transaction from the account"]],
+  [3n, ["fallback", "a fallback module answers every call the account does not implement itself"]],
+  [4n, ["hook", "a hook module runs before and after every execution of the account"]],
+]);
+
+function moduleKind(typeId: bigint): [string, string] {
+  return MODULE_KINDS.get(typeId) ?? [`type-${typeId.toString()}`, "a module changes what the account can do"];
+}
+
+const argAddress = (args: string, index: number, warnings: string[]) => wordAddress(paddedWord(args, index * 32), warnings);
+const argUint = (args: string, index: number) => BigInt(`0x${paddedWord(args, index * 32)}`);
+
+/** Transfers of ownership: proven danger on the signer's own account, a flagged change elsewhere. */
+function ownershipTo(label: string, verb: string) {
+  return (args: string, call: Call, ctx: Ctx, warnings: string[]): Action => {
+    const owner = argAddress(args, 0, warnings);
+    if (isOwnAccount(call, ctx)) {
+      return controlChange(label, `${verb} your account ${call.to} to ${owner}: the new owner takes control of it`, warnings, [
+        controller(owner, `becomes the owner of your account ${call.to}`),
+      ]);
+    }
+    return foreignControlChange(label, `${verb} contract ${call.to} to ${owner}`, call, ctx, warnings, [
+      controller(owner, `becomes the owner of contract ${call.to}`, RANK.approval),
+    ]);
+  };
+}
+
+/** Code upgrades: `proxyIndex` is the argument naming the proxy (ProxyAdmin), else the called contract. */
+function upgrade(label: string, proxyIndex: number | undefined, withCall: boolean) {
+  return (args: string, call: Call, ctx: Ctx, warnings: string[]): Action => {
+    const proxy = proxyIndex === undefined ? call.to : argAddress(args, proxyIndex, warnings);
+    const implementation = argAddress(args, proxyIndex === undefined ? 0 : proxyIndex + 1, warnings);
+    const andCall = withCall ? " and runs a setup call with it" : "";
+    if (isOwnAccount(call, ctx, proxy)) {
+      return controlChange(label, `upgrades your account ${proxy} to new code at ${implementation}${andCall}: that code controls everything the account holds`, warnings, [
+        controller(implementation, `becomes the code of your account ${proxy}`),
+      ]);
+    }
+    return foreignControlChange(label, `upgrades proxy ${proxy} to the implementation ${implementation}${andCall}`, call, ctx, warnings, [
+      controller(implementation, `becomes the code of proxy ${proxy}`, RANK.approval),
+    ]);
+  };
+}
+
+/** Proxy admin changes: whoever holds the admin can upgrade the proxy to any code. */
+function adminChange(label: string, proxyIndex: number | undefined) {
+  return (args: string, call: Call, ctx: Ctx, warnings: string[]): Action => {
+    const proxy = proxyIndex === undefined ? call.to : argAddress(args, proxyIndex, warnings);
+    const admin = argAddress(args, proxyIndex === undefined ? 0 : proxyIndex + 1, warnings);
+    if (isOwnAccount(call, ctx, proxy)) {
+      return controlChange(label, `hands the upgrade rights of your account ${proxy} to ${admin}`, warnings, [controller(admin, `becomes the admin of your account ${proxy}`)]);
+    }
+    return foreignControlChange(label, `makes ${admin} the admin of proxy ${proxy} (it can upgrade the proxy to any code)`, call, ctx, warnings, [
+      controller(admin, `becomes the admin of proxy ${proxy}`, RANK.approval),
+    ]);
+  };
+}
+
+const CONTROL_FUNCTIONS: Record<string, ControlFunction> = {
+  // Safe OwnerManager / ModuleManager / GuardManager / FallbackManager: only
+  // the Safe itself can call them (through execTransaction, a SafeTx, a module
+  // or a multiSend), so each one changes who controls a Safe.
+  "0d582f13": {
+    name: "addOwnerWithThreshold(address,uint256)",
+    words: 2,
+    decode: (args, call, _ctx, warnings) => {
+      const owner = argAddress(args, 0, warnings);
+      return controlChange("Safe owner added", `adds ${owner} as an owner of Safe ${call.to} and sets its threshold to ${argUint(args, 1).toString()}`, warnings, [
+        controller(owner, `becomes an owner of Safe ${call.to}`),
+      ]);
+    },
+  },
+  f8dc5dd9: {
+    name: "removeOwner(address,address,uint256)",
+    words: 3,
+    decode: (args, call, _ctx, warnings) =>
+      controlChange("Safe owner removed", `removes owner ${argAddress(args, 1, warnings)} from Safe ${call.to} and sets its threshold to ${argUint(args, 2).toString()}`, warnings),
+  },
+  e318b52b: {
+    name: "swapOwner(address,address,address)",
+    words: 3,
+    decode: (args, call, _ctx, warnings) => {
+      const replaced = argAddress(args, 1, warnings);
+      const owner = argAddress(args, 2, warnings);
+      return controlChange("Safe owner replaced", `replaces owner ${replaced} of Safe ${call.to} with ${owner}`, warnings, [
+        controller(owner, `becomes an owner of Safe ${call.to}`),
+      ]);
+    },
+  },
+  "694e80c3": {
+    name: "changeThreshold(uint256)",
+    words: 1,
+    decode: (args, call, _ctx, warnings) =>
+      controlChange("Safe threshold changed", `changes the signature threshold of Safe ${call.to} to ${argUint(args, 0).toString()}`, warnings),
+  },
+  "610b5925": {
+    name: "enableModule(address)",
+    words: 1,
+    decode: (args, call, _ctx, warnings) => {
+      const module = argAddress(args, 0, warnings);
+      return controlChange(
+        "Safe module enabled",
+        `enables module ${module} on Safe ${call.to}: a Safe module can execute any transaction from the Safe without the owners' signatures`,
+        warnings,
+        [controller(module, `becomes a module of Safe ${call.to}`)],
+      );
+    },
+  },
+  e009cfde: {
+    name: "disableModule(address,address)",
+    words: 2,
+    decode: (args, call, _ctx, warnings) => controlChange("Safe module disabled", `disables module ${argAddress(args, 1, warnings)} of Safe ${call.to}`, warnings),
+  },
+  e19a9dd9: {
+    name: "setGuard(address)",
+    words: 1,
+    decode: (args, call, _ctx, warnings) => {
+      const guard = argAddress(args, 0, warnings);
+      if (guard === ZERO_ADDRESS) return controlChange("Safe guard removed", `removes the transaction guard of Safe ${call.to}`, warnings);
+      return controlChange("Safe guard set", `sets the transaction guard of Safe ${call.to} to ${guard}: a guard can inspect and block every Safe transaction`, warnings, [
+        controller(guard, `becomes the transaction guard of Safe ${call.to}`),
+      ]);
+    },
+  },
+  e068df37: {
+    name: "setModuleGuard(address)",
+    words: 1,
+    decode: (args, call, _ctx, warnings) => {
+      const guard = argAddress(args, 0, warnings);
+      if (guard === ZERO_ADDRESS) return controlChange("Safe module guard removed", `removes the module guard of Safe ${call.to}`, warnings);
+      return controlChange("Safe module guard set", `sets the module guard of Safe ${call.to} to ${guard}: it can inspect and block every module transaction`, warnings, [
+        controller(guard, `becomes the module guard of Safe ${call.to}`),
+      ]);
+    },
+  },
+  f08a0323: {
+    name: "setFallbackHandler(address)",
+    words: 1,
+    decode: (args, call, _ctx, warnings) => {
+      const handler = argAddress(args, 0, warnings);
+      if (handler === ZERO_ADDRESS) return controlChange("Safe fallback handler removed", `removes the fallback handler of Safe ${call.to}`, warnings);
+      return controlChange(
+        "Safe fallback handler set",
+        `sets the fallback handler of Safe ${call.to} to ${handler}: the handler answers every call the Safe does not implement, including signature checks (EIP-1271)`,
+        warnings,
+        [controller(handler, `becomes the fallback handler of Safe ${call.to}`)],
+      );
+    },
+  },
+  // ERC-7579 modular accounts (Kernel v3, Nexus, Safe7579...): only the
+  // account itself (or its EntryPoint) can call them.
+  "9517e29f": {
+    name: "installModule(uint256,address,bytes)",
+    words: 3,
+    decode: (args, call, _ctx, warnings) => {
+      const [kind, effect] = moduleKind(argUint(args, 0));
+      const module = argAddress(args, 1, warnings);
+      return controlChange("Module installed", `installs ${kind} module ${module} on account ${call.to}: ${effect}`, warnings, [
+        controller(module, `becomes a ${kind} module of account ${call.to}`),
+      ]);
+    },
+  },
+  a71763a8: {
+    name: "uninstallModule(uint256,address,bytes)",
+    words: 3,
+    decode: (args, call, _ctx, warnings) => {
+      const [kind] = moduleKind(argUint(args, 0));
+      return controlChange("Module uninstalled", `uninstalls ${kind} module ${argAddress(args, 1, warnings)} from account ${call.to}`, warnings);
+    },
+  },
+  // Coinbase Smart Wallet (MultiOwnable): only an owner or the wallet itself.
+  "0f0f3f24": {
+    name: "addOwnerAddress(address)",
+    words: 1,
+    decode: (args, call, _ctx, warnings) => {
+      const owner = argAddress(args, 0, warnings);
+      return controlChange("Smart wallet owner added", `adds ${owner} as an owner of smart wallet ${call.to}`, warnings, [
+        controller(owner, `becomes an owner of smart wallet ${call.to}`),
+      ]);
+    },
+  },
+  "29565e3b": {
+    name: "addOwnerPublicKey(bytes32,bytes32)",
+    words: 2,
+    decode: (args, call, _ctx, warnings) =>
+      controlChange("Smart wallet owner added", `adds a passkey (public key x = 0x${paddedWord(args, 0).slice(0, 16)}…) as an owner of smart wallet ${call.to}`, warnings),
+  },
+  "89625b57": {
+    name: "removeOwnerAtIndex(uint256,bytes)",
+    words: 2,
+    decode: (args, call, _ctx, warnings) => controlChange("Smart wallet owner removed", `removes owner #${argUint(args, 0).toString()} of smart wallet ${call.to}`, warnings),
+  },
+  b8197367: {
+    name: "removeLastOwner(uint256,bytes)",
+    words: 2,
+    decode: (args, call, _ctx, warnings) =>
+      controlChange("Smart wallet owner removed", `removes the last owner (#${argUint(args, 0).toString()}) of smart wallet ${call.to}: nobody can use it afterwards`, warnings),
+  },
+  // Ownable / Ownable2Step / Solady Ownable.
+  f2fde38b: { name: "transferOwnership(address)", words: 1, decode: ownershipTo("Ownership transfer", "transfers ownership of") },
+  f04e283e: { name: "completeOwnershipHandover(address)", words: 1, decode: ownershipTo("Ownership handover", "hands ownership of") },
+  "79ba5097": {
+    name: "acceptOwnership()",
+    words: 0,
+    decode: (_args, call, ctx, warnings) => {
+      if (isOwnAccount(call, ctx)) {
+        return controlChange(
+          "Ownership accepted",
+          `completes a pending two-step ownership transfer of your account ${call.to} (acceptOwnership): its new owner is not shown in this call`,
+          warnings,
+        );
+      }
+      return { label: "Ownership accepted", summary: `acceptOwnership on contract ${call.to}: the calling account becomes its owner.`, candidates: [contractCandidate(call, ctx)], warnings, danger: [] };
+    },
+  },
+  "715018a6": {
+    name: "renounceOwnership()",
+    words: 0,
+    decode: (_args, call, ctx, warnings) =>
+      isOwnAccount(call, ctx)
+        ? controlChange("Ownership renounced", `renounces ownership of your account ${call.to}: nobody can manage it afterwards`, warnings)
+        : foreignControlChange("Ownership renounced", `renounces ownership of contract ${call.to}`, call, ctx, warnings),
+  },
+  // UUPS (ERC-1822 / ERC-1967) and transparent proxies, OpenZeppelin ProxyAdmin.
+  "3659cfe6": { name: "upgradeTo(address)", words: 1, decode: upgrade("Code upgrade", undefined, false) },
+  "4f1ef286": { name: "upgradeToAndCall(address,bytes)", words: 2, decode: upgrade("Code upgrade", undefined, true) },
+  "99a88ec4": { name: "upgrade(address,address)", words: 2, decode: upgrade("Proxy upgrade", 0, false) },
+  "9623609d": { name: "upgradeAndCall(address,address,bytes)", words: 3, decode: upgrade("Proxy upgrade", 0, true) },
+  "8f283970": { name: "changeAdmin(address)", words: 1, decode: adminChange("Proxy admin change", undefined) },
+  "7eff275e": { name: "changeProxyAdmin(address,address)", words: 2, decode: adminChange("Proxy admin change", 0) },
 };
 
 /**
@@ -1044,10 +1398,27 @@ function decodeCall(call: InnerCall, ctx: Ctx): Action {
     }
     return action;
   }
+  const control = CONTROL_FUNCTIONS[selector] as ControlFunction | undefined;
+  if (control) {
+    const warnings: string[] = [];
+    if (args.length < control.words * 64) {
+      warnings.push(`calldata is ${control.words * 32 - args.length / 2} byte(s) shorter than ${control.name} expects`);
+    }
+    const action = control.decode(args, call, ctx, warnings);
+    if (call.value > 0n) {
+      action.warnings.push(`sends ${nativeAmount(call.value, ctx.chain)} to ${call.to} while calling ${control.name}`);
+      action.candidates.push({ ...contractCandidate(call, ctx), rank: RANK.transfer, reason: "receives the ETH sent with the call" });
+    }
+    return action;
+  }
   const wrapper = WRAPPERS[selector] as WrapperDecoder | undefined;
   if (wrapper && ctx.depth <= MAX_DEPTH) return wrapper(args, call, ctx);
   if (wrapper) {
-    return { ...plainCall(call, ctx, `wrapper 0x${selector}`), warnings: ["nested wrapper calls exceed the decoding depth"] };
+    return {
+      ...plainCall(call, ctx, `wrapper 0x${selector}`),
+      warnings: ["nested wrapper calls exceed the decoding depth"],
+      opaque: [`wrapper calls nested more than ${MAX_DEPTH} levels deep were not decoded`],
+    };
   }
   return plainCall(call, ctx, `function selector 0x${selector}, ${call.data.length / 2} bytes of calldata`);
 }
@@ -1072,16 +1443,22 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
   const valueText = value > 0n ? nativeAmount(value, chain) : undefined;
 
   if (isMissing(tx.to)) {
+    // A deployment moves nothing of the sender's but its value: with value,
+    // the init code (unreadable here) decides where that value goes.
+    const opaque = valueText
+      ? `the deployment sends ${valueText} to a new contract whose init code decides what happens to it, and x402check cannot read init code`
+      : undefined;
     return withCandidates(
       {
         action: "Contract deployment",
         chain,
         amountLabel: valueText,
         summary: `Contract deployment (no recipient address)${valueText ? `, sending ${valueText}` : ""}.`,
-        warnings,
+        warnings: opaque ? [opaqueNote(opaque), ...warnings] : warnings,
         danger,
         localNote:
           "This transaction deploys a new contract, so there is no counterparty address to check. Nothing was sent to x402check.",
+        ...(opaque ? { opaque } : {}),
       },
       [],
     );
@@ -1160,6 +1537,8 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
     );
   }
   const primary = selected[0];
+  const opaqueReasons = dedupe(action.opaque ?? []);
+  const opaque = opaqueReason(opaqueReasons);
   return withCandidates(
     {
       action: action.label,
@@ -1167,8 +1546,9 @@ export function decodeTransaction(tx: TransactionLike, chainId?: unknown): Decod
       unlimited: primary?.unlimited,
       amountLabel: primary?.amountLabel,
       summary,
-      warnings: dedupe([...warnings, ...action.warnings]),
+      warnings: dedupe([...opaqueReasons.map(opaqueNote), ...warnings, ...action.warnings]),
       danger: dedupe([...danger, ...action.danger]),
+      ...(opaque ? { opaque } : {}),
       ...("transaction" in plan ? { transaction: plan.transaction } : { simulationSkipped: plan.skipped }),
       ...(selected.length === 0
         ? {

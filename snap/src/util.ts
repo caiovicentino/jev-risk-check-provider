@@ -97,6 +97,14 @@ export type Decoded = {
   transaction?: SimulationTransaction | undefined;
   /** Why the transaction is not simulated, when it is not. */
   simulationSkipped?: string | undefined;
+  /**
+   * Set when the request authorizes something the decoder cannot read: the
+   * reason (a hash or calldata it cannot decode, a call to the account's own
+   * unknown code, an order whose price is set by unseen code). Neither a clean
+   * check of the addresses it names nor "nothing to check" makes it safe: a
+   * signer must treat it as not verified. The reason is also the first warning.
+   */
+  opaque?: string | undefined;
 };
 
 export const ZERO_ADDRESS = `0x${"0".repeat(40)}`;
@@ -152,6 +160,22 @@ export function normalizeAddress(value: unknown): string | undefined {
 
 export function interaction(type: InteractionType, unlimited = false): Interaction {
   return unlimited ? { type, unlimited: true } : { type };
+}
+
+/** The warning shown (first) for an opaque request. */
+export function opaqueNote(reason: string): string {
+  return `x402check cannot read what this authorizes: ${reason}`;
+}
+
+/**
+ * The `opaque` value of a Decoded: its distinct reasons, joined.
+ *
+ * @param reasons - Why parts of the request could not be read.
+ * @returns The reason, or undefined when everything was read.
+ */
+export function opaqueReason(reasons: string[]): string | undefined {
+  const distinct = [...new Set(reasons)];
+  return distinct.length > 0 ? capText(distinct.slice(0, 3).join("; "), 600) : undefined;
 }
 
 // ---------------------------------------------------------------------------
