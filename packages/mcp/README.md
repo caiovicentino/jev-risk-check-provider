@@ -193,8 +193,8 @@ A failed call (402, 422, 413, 503, network error or timeout) also sets `isError:
    - redirects are not followed; a response that shows one was followed is refused, and its body is not shown;
    - payment headers cannot be passed in;
    - a request times out after `X402CHECK_TIMEOUT_MS`, and so does reading its body. A 402's body is read at most 64 KiB, within the same time limit; a larger or slower one is refused (`challenge_too_large`, `challenge_timeout`), since x402 version 2 challenges travel in the `PAYMENT-REQUIRED` header;
-   - the body is capped at 16 KiB of text and stripped of control, format and line-separator characters, and a binary body is not shown.
-   - The response's `Location` is shown only as the origin and path of an http(s) URL, and its `Content-Type` only as a media type such as `application/json`. Any other value is not shown.
+   - the body is capped at 16 KiB of text and stripped of control, format and line-separator characters, and a binary body is not shown;
+   - the response's `Location` is shown only as the origin and path of an http(s) URL, and its `Content-Type` only as a media type such as `application/json`. Any other value is not shown.
 
 Arguments: `url`, `method` (`GET` by default), `body`, `headers`, `max_usd`, `context`. The result's `outcome` is one of these:
 
@@ -279,6 +279,6 @@ npm test            # builds, then runs in-process tests over linked in-memory t
 npm run typecheck   # also builds ../client first (its types come from ../client/dist)
 ```
 
-In this repository, `@x402check/client` is a `file:../client` dependency. The published package depends on the npm release instead, such as `"@x402check/client": "^0.3.0"` (the signing guard, `@x402check/client/guard`, is what `x402check_pay` runs). A `prepublishOnly` guard refuses to publish while any dependency still points at a local path.
+In this repository, `@x402check/client` is a `file:../client` dependency. The published package depends on the npm release instead, `"@x402check/client": "^<version>"` (the signing guard, `@x402check/client/guard`, is what `x402check_pay` runs). This release needs a client with the pinned attestation keys (`X402CHECK_KEY_THUMBPRINTS`, the guard's `pinnedKeys`); 0.3.0 predates them. A `prepublishOnly` guard refuses to publish while any dependency still points at a local path.
 
 MIT © Caio Vicentino

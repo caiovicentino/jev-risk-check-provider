@@ -9,13 +9,13 @@
     "source": "github",
     "subfolder": "packages/mcp"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@x402check/mcp",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
@@ -36,10 +36,16 @@
         },
         {
           "name": "X402CHECK_BUDGET_USD",
-          "description": "Total spend of the payer for this server process (checks and resources)",
+          "description": "Spend cap for this server process: the payer's spend (checks and resources), and separately what checks spend from prepaid credits",
           "isRequired": false,
           "format": "string",
           "default": "1.00"
+        },
+        {
+          "name": "X402CHECK_PINNED_KEYS",
+          "description": "Comma-separated RFC 7638 thumbprints of the attestation keys accepted (default: x402check's own keys, for its own issuer)",
+          "isRequired": false,
+          "format": "string"
         },
         {
           "name": "X402CHECK_MAX_PAYMENT_USD",
