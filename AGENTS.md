@@ -321,7 +321,7 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
   - credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;
   - Bazaar and x402scan listings, `/openapi.json`.
 - **Audit (2026-09-30):** no critical findings, 11 high. Every finding code can fix is fixed. What remains needs the owner: repository settings, DNS, the git history rewrite, npm names.
-- **Packages:** `@x402check/client` 0.4.0 and `@x402check/mcp` 0.3.0 are being published (the owner's passkey); 0.3.0 and 0.2.0 are the current npm versions. The MCP server is in the MCP Registry.
+- **Packages:** `@x402check/client` 0.4.0 and `@x402check/mcp` 0.3.0 on npm (2026-09-30, tags `client-v0.4.0`, `mcp-v0.3.0`); the MCP Registry lists 0.3.0 as latest, published by the CI-gated workflow.
 - **Solana signing guard** (`guardSolanaSigner`, since `@x402check/client` 0.3.0): decodes each transaction (lookup tables and token-account owners over RPC), refuses owner-change drains locally, and checks recipients, delegates and called programs. 4/4 on 1 real x402 payment and 3 constructed cases (`eval/solana-guard.ts`).
 - **Guarded x402 payments** (`x402check_pay`, since `@x402check/mcp` 0.2.0): the MCP server pays a resource only after x402check clears the exact payee, right before signing. A `warn` goes to the user through elicitation.
   - One real payment through the tool settled on Base (`eval/mcp-pay.ts`), to x402check's own `pay_to`, a trusted payee that is not checked.
