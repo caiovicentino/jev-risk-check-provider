@@ -30,7 +30,13 @@ PAY_TO_SOL = "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X"
 
 # Secrets to set before deploy (do NOT commit):
 #   wrangler secret put AI_GATEWAY_API_KEY      (or TYPESAFE_API_KEY)
-#   wrangler secret put JEV_ATTEST_PRIVATE_KEY  (PEM, sec1 EC P-256 — keep the JWKS stable)
+#   wrangler secret put JEV_ATTEST_PRIVATE_KEY  (PEM, EC P-256)
+#   wrangler secret put JEV_ATTEST_PUBLIC_JWK   (its public JWK with a kid; both are required:
+#                                                on x402check.xyz a missing or mismatched pair
+#                                                refuses paid work, see /healthz)
+#   wrangler secret put JEV_ATTEST_NEXT_PUBLIC_JWK (optional: the next key, published in
+#                                                jwks.json and did.json ahead of a rotation)
+#   wrangler secret put CDP_API_KEY_ID / CDP_API_KEY_SECRET (Coinbase CDP facilitator)
 #
 # did:web identity path:
 #   1. deploy with PROVIDER_HOST = <your-domain>
@@ -43,6 +49,11 @@ PAY_TO_SOL = "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X"
 [[durable_objects.bindings]]
 name = "CREDITS"
 class_name = "CreditLedger"
+
+# Single use of a payment (deploy/payment-claims.ts): one Durable Object per payment payload.
+[[durable_objects.bindings]]
+name = "PAYMENT_CLAIMS"
+class_name = "PaymentClaim"
 
 # v1 created the free-tier quota counter; v2 deletes it (v0.3 removed the free tier);
 # v3 adds the prepaid credit ledger.
@@ -57,6 +68,21 @@ deleted_classes = ["RateCounter"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["CreditLedger"]
+
+# v4 adds the payment claims (single use of each x402 payment).
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["PaymentClaim"]
+
+# Unpaid requests to paid routes and /status: at most 60 a minute per IP (Workers Rate Limiting).
+[[ratelimits]]
+name = "UNPAID_LIMITER"
+namespace_id = "4021"
+simple = { limit = 60, period = 60 }
+
+# Workers Logs: the Worker's console.error/warn/log on failure paths (no tokens, no request bodies).
+[observability]
+enabled = true
 
 # Embedded threat-feed hash sets (src/data/*.bin) are bundled as ArrayBuffer Data modules.
 # Keep this table LAST: TOML keys written after a [[table]] header belong to that table.

@@ -15,6 +15,9 @@ import type { JevLike } from "../src/jev.js";
 import type { Answer, RiskCheckRequest } from "../src/types.js";
 import { handleProtected, type Stack } from "../deploy/protected.js";
 import type { WorkerEnv } from "../deploy/runtime.js";
+/** A PAYMENT-SIGNATURE shaped like x402 v2 (the stack only accepts v2 payments). */
+const PAID_V2 = btoa(JSON.stringify({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: { from: "0x1111111111111111111111111111111111111111", nonce: "0x01" } } }));
+
 
 const LAZARUS = "0x098B716B8Aaf21512996dC57EB0615e2383E2f96";
 const WALLET = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -134,10 +137,10 @@ test("R7 a paid request is not settled when the evaluation could not be produced
   const env: WorkerEnv = {};
   const settles = { n: 0 };
   const failing: JevLike = { systemOne: async () => { throw new Error("model down"); } };
-  const res = await run(env, stack(failing, settles), post("/v1/risk-check/batch", JSON.stringify({ requests: [{ wallet: WALLET }, { wallet: WALLET }] }), { "PAYMENT-SIGNATURE": "sig" }));
+  const res = await run(env, stack(failing, settles), post("/v1/risk-check/batch", JSON.stringify({ requests: [{ wallet: WALLET }, { wallet: WALLET }] }), { "PAYMENT-SIGNATURE": PAID_V2 }));
   assert.equal(res.status, 503);
   assert.equal(settles.n, 0);
-  const ok = await run(env, stack(jev(), settles), post("/v1/risk-check", JSON.stringify({ wallet: WALLET }), { "PAYMENT-SIGNATURE": "sig" }));
+  const ok = await run(env, stack(jev(), settles), post("/v1/risk-check", JSON.stringify({ wallet: WALLET }), { "PAYMENT-SIGNATURE": PAID_V2 }));
   assert.equal(ok.status, 200);
   assert.equal(settles.n, 1);
 });

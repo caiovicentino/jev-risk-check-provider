@@ -177,8 +177,11 @@ export class JevClient {
   }
   async systemOne(state: object, questions: JevQuestions): Promise<{ answers: JevAnswers; usage: Usage }> {
     let lastError: JevUnavailableError | null = null;
+    // One budget for every attempt (retries included): a late verdict is worth nothing to the caller.
+    const deadline = AbortSignal.timeout(8000);
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await sleep(500 * 2 ** (attempt - 1));
+      if (deadline.aborted) break;
       let res: Response;
       try {
         res = await this.fetchImpl(`${this.baseUrl}/v1/systemone`, {
@@ -188,6 +191,7 @@ export class JevClient {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ state, model: this.model, questions }),
+          signal: deadline,
         });
       } catch (err) {
         lastError = new JevUnavailableError(`network error: ${String(err)}`);
@@ -207,7 +211,7 @@ export class JevClient {
       const detail = await res.text().catch(() => "");
       throw new JevUnavailableError(`typesafe api error ${res.status}: ${detail.slice(0, 200)}`, res.status);
     }
-    throw lastError ?? new JevUnavailableError("unreachable");
+    throw lastError ?? new JevUnavailableError(deadline.aborted ? "model deadline exceeded" : "unreachable");
   }
 }
 

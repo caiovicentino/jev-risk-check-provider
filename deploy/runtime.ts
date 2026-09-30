@@ -5,6 +5,8 @@ export interface KVNamespace {
   get(key: string, opts: { type: "text"; cacheTtl?: number }): Promise<string | null>;
   get(key: string, opts: { type: "arrayBuffer"; cacheTtl?: number }): Promise<ArrayBuffer | null>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
+  delete?(key: string): Promise<void>;
+  list?(opts: { prefix: string; limit?: number; cursor?: string }): Promise<{ keys: Array<{ name: string }>; list_complete: boolean; cursor?: string }>;
 }
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -19,7 +21,14 @@ export interface DurableObjectState {
     get<T = unknown>(key: string): Promise<T | undefined>;
     put(key: string, value: unknown): Promise<void>;
     put(entries: Record<string, unknown>): Promise<void>;
+    delete(key: string): Promise<boolean>;
+    deleteAll(): Promise<void>;
+    setAlarm(scheduledTime: number): Promise<void>;
   };
+}
+/** Workers Rate Limiting binding ([[ratelimits]] in wrangler.toml). */
+export interface RateLimit {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
 }
 export interface DurableObjectId {
   toString(): string;
@@ -31,6 +40,14 @@ export interface DurableObjectNamespace {
 
 export type WorkerEnv = {
   PROVIDER_HOST?: string;
+  /** The deployed commit (scripts/deploy.sh passes --var GIT_COMMIT:<sha>), shown by /healthz. */
+  GIT_COMMIT?: string;
+  /** A second public key published ahead of a rotation (JWK JSON, its own kid). */
+  JEV_ATTEST_NEXT_PUBLIC_JWK?: string;
+  /** One Durable Object per payment: single use (deploy/payment-claims.ts). */
+  PAYMENT_CLAIMS?: DurableObjectNamespace;
+  /** Per-IP limit on unpaid requests to paid routes and on /status. */
+  UNPAID_LIMITER?: RateLimit;
   TYPESAFE_API_KEY?: string;
   AI_GATEWAY_API_KEY?: string;
   JEV_ATTEST_PRIVATE_KEY?: string;

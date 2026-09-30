@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { discoveryDocument, Provider, type PricingInfo } from "./provider.js";
 import { jwksDocument } from "./jws.js";
 import { landingPage, OG_PNG_B64 } from "./landing.js";
@@ -7,7 +8,44 @@ import { validateBatch, validateRequest } from "./validate.js";
 export type HandlerDeps = {
   provider: Provider;
   pricing?: PricingInfo | undefined;
+  /** A next attestation key published ahead of a rotation: listed in jwks.json and did.json (its own kid). */
+  nextPublicJwk?: Record<string, unknown> | undefined;
 };
+
+/** How to report a vulnerability (RFC 9116). */
+export const SECURITY_TXT = [
+  "Contact: https://github.com/caiovicentino/jev-risk-check-provider/security/advisories/new",
+  "Expires: 2027-09-30T00:00:00.000Z",
+  "Policy: https://github.com/caiovicentino/jev-risk-check-provider/blob/main/SECURITY.md",
+  "Canonical: https://x402check.xyz/.well-known/security.txt",
+  "Preferred-Languages: en, pt",
+  "",
+].join("\n");
+
+let landingCache: { html: string; csp: string } | null = null;
+/**
+ * The site and its Content-Security-Policy: its one inline script is allowed by hash, styles and
+ * fonts from Google Fonts, the video from youtube-nocookie, and nothing may frame the page.
+ */
+function landing(): { html: string; csp: string } {
+  if (landingCache) return landingCache;
+  const html = landingPage();
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => `'sha256-${createHash("sha256").update(m[1] as string).digest("base64")}'`);
+  const csp = [
+    "default-src 'none'",
+    `script-src ${scripts.join(" ") || "'none'"}`,
+    "style-src 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "frame-src https://www.youtube-nocookie.com",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+  landingCache = { html, csp };
+  return landingCache;
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -21,22 +59,17 @@ async function readJson(req: Request): Promise<unknown> {
   }
 }
 
-function didDocument(host: string, publicJwk: Record<string, unknown>): Record<string, unknown> {
+function didDocument(host: string, publicJwk: Record<string, unknown>, nextPublicJwk?: Record<string, unknown>): Record<string, unknown> {
   const did = `did:web:${host}`;
-  const keyId = `${did}#${publicJwk.kid ?? "jev-attest-v1"}`;
+  const keys = [publicJwk, ...(nextPublicJwk && nextPublicJwk.kid !== publicJwk.kid ? [nextPublicJwk] : [])];
+  const ids = keys.map((k) => `${did}#${k.kid ?? "jev-attest-v1"}`);
   return {
     "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/jws-2020/v1"],
     id: did,
-    verificationMethod: [
-      {
-        id: keyId,
-        type: "JsonWebKey2020",
-        controller: did,
-        publicKeyJwk: publicJwk,
-      },
-    ],
-    assertionMethod: [keyId],
-    authentication: [keyId],
+    verificationMethod: keys.map((k, i) => ({ id: ids[i], type: "JsonWebKey2020", controller: did, publicKeyJwk: k })),
+    // A next key is published ahead of a rotation: verifiers accept it the moment it starts signing.
+    assertionMethod: ids,
+    authentication: ids,
     service: [
       {
         id: `${did}#risk-check`,
@@ -63,13 +96,18 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     const path = url.pathname;
 
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/risk-check.json") {
-      return json(200, discoveryDocument(deps.provider.host, deps.pricing));
+      return json(200, discoveryDocument(deps.provider.host, deps.pricing, deps.provider.keyPair.publicJwk.kid));
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/jwks.json") {
-      return json(200, jwksDocument(deps.provider.keyPair.publicJwk.kid, deps.provider.keyPair.publicJwk));
+      const current = jwksDocument(deps.provider.keyPair.publicJwk.kid, deps.provider.keyPair.publicJwk);
+      const next = deps.nextPublicJwk && deps.nextPublicJwk.kid !== deps.provider.keyPair.publicJwk.kid ? [deps.nextPublicJwk] : [];
+      return json(200, { keys: [...current.keys, ...next] });
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/did.json") {
-      return json(200, didDocument(deps.provider.host, deps.provider.keyPair.publicJwk as unknown as Record<string, unknown>));
+      return json(200, didDocument(deps.provider.host, deps.provider.keyPair.publicJwk as unknown as Record<string, unknown>, deps.nextPublicJwk));
+    }
+    if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/security.txt") {
+      return new Response(SECURITY_TXT, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" } });
     }
     if (req.method === "POST" && path === "/v1/risk-check") {
       const v = validateRequest(await readJson(req));
@@ -86,9 +124,18 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     if ((req.method === "GET" || req.method === "HEAD") && path === "/" ) {
       const accept = req.headers.get("accept") ?? "";
       if (accept.includes("text/html")) {
-        return new Response(landingPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+        const page = landing();
+        return new Response(page.html, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": page.csp,
+            "X-Frame-Options": "DENY",
+            "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+          },
+        });
       }
-      return json(200, discoveryDocument(deps.provider.host, deps.pricing));
+      return json(200, discoveryDocument(deps.provider.host, deps.pricing, deps.provider.keyPair.publicJwk.kid));
     }
     if (req.method === "GET" && path === "/favicon.ico") {
       return new Response(Uint8Array.from(atob(FAVICON_ICO_B64), (ch) => ch.charCodeAt(0)), {

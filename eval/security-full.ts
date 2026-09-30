@@ -598,8 +598,10 @@ const probes: Probe[] = [
       const alg = header.alg;
       const kid = header.kid;
       if (alg !== "ES256") return { status: "FAIL", detail: `jws header alg=${String(alg)} — expected ES256; weak-alg downgrade would enable forgery` };
-      if (kid !== "jev-attest-v1") return { status: "FAIL", detail: `jws header kid=${String(kid)} — expected jev-attest-v1` };
-      return { status: "PASS", detail: `jws header alg=ES256 kid=jev-attest-v1 (parsed locally from a live evaluation)` };
+      const jwks = await fetchWellKnown("/.well-known/jwks.json");
+      const kids = ((jwks?.json as { keys?: Array<{ kid?: unknown }> } | null)?.keys ?? []).map((k) => k.kid);
+      if (typeof kid !== "string" || !kids.includes(kid)) return { status: "FAIL", detail: `jws header kid=${String(kid)} — not published in jwks.json (${kids.join(", ") || "none"})` };
+      return { status: "PASS", detail: `jws header alg=ES256 kid=${kid}, published in jwks.json (parsed locally from a live evaluation)` };
     },
   },
   {
@@ -659,15 +661,18 @@ const probes: Probe[] = [
       const jwksObj = jwks.json as Record<string, unknown>;
       const didObj = did.json as Record<string, unknown>;
       const keys = jwksObj.keys;
-      if (!Array.isArray(keys) || keys.length !== 1) return { status: "FAIL", detail: `jwks keys=${Array.isArray(keys) ? keys.length : "not-array"} — expected exactly 1 key (key confusion surface)` };
+      // One key, or two while a rotation is announced (the next key is published before it signs).
+      if (!Array.isArray(keys) || keys.length < 1 || keys.length > 2) return { status: "FAIL", detail: `jwks keys=${Array.isArray(keys) ? keys.length : "not-array"} — expected 1 key, or 2 during a rotation (key confusion surface)` };
+      const kidsSeen = new Set(keys.map((k) => (k as { kid?: unknown }).kid));
+      if (kidsSeen.size !== keys.length) return { status: "FAIL", detail: "jwks has two keys with the same kid" };
       const key = keys[0];
       if (typeof key !== "object" || key === null) return { status: "FAIL", detail: "jwks key[0] not an object" };
       const jwk = key as Record<string, unknown>;
       if (jwk.kty !== "EC" || jwk.crv !== "P-256") return { status: "FAIL", detail: `jwks kty=${String(jwk.kty)} crv=${String(jwk.crv)} — expected EC/P-256` };
-      if (jwk.kid !== "jev-attest-v1") return { status: "FAIL", detail: `jwks kid=${String(jwk.kid)} — expected jev-attest-v1` };
+      if (typeof jwk.kid !== "string" || !jwk.kid) return { status: "FAIL", detail: "jwks key[0] has no kid" };
       if (didObj.id !== `did:web:${HOST}`) return { status: "FAIL", detail: `did.json id=${String(didObj.id)} — mismatch with did:web:${HOST}` };
       const vm = didObj.verificationMethod;
-      if (!Array.isArray(vm) || vm.length !== 1) return { status: "FAIL", detail: `did.json verificationMethod=${Array.isArray(vm) ? vm.length : "not-array"} — expected exactly 1 method` };
+      if (!Array.isArray(vm) || vm.length !== keys.length) return { status: "FAIL", detail: `did.json verificationMethod=${Array.isArray(vm) ? vm.length : "not-array"} — expected ${keys.length} (one per jwks key)` };
       const method = vm[0];
       if (typeof method !== "object" || method === null) return { status: "FAIL", detail: "verificationMethod[0] not an object" };
       const mObj = method as Record<string, unknown>;
@@ -677,7 +682,7 @@ const probes: Probe[] = [
       const pkObj = pk as Record<string, unknown>;
       if (pkObj.x !== jwk.x || pkObj.y !== jwk.y) return { status: "FAIL", detail: `did.json publicKeyJwk x/y do not match jwks.json — trust-chain split: verifiers could anchor on two different keys` };
       if (pkObj.kid !== jwk.kid) return { status: "FAIL", detail: `did.json kid=${String(pkObj.kid)} vs jwks kid=${String(jwk.kid)}` };
-      return { status: "PASS", detail: `1 EC/P-256 key, kid=jev-attest-v1; did:web:${HOST} verificationMethod x/y/kid match jwks.json exactly` };
+      return { status: "PASS", detail: `${keys.length} EC/P-256 key(s), kid=${String(jwk.kid)}; did:web:${HOST} verificationMethod x/y/kid match jwks.json exactly` };
     },
   },
   {

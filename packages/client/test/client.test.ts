@@ -80,6 +80,8 @@ describe("createClient: requests", () => {
     assert.equal(calls[0]!.url, "http://localhost:8787/v1/risk-check");
     assert.equal(createClient({ fetch }).baseUrl, "https://x402check.xyz");
     assert.throws(() => createClient({ baseUrl: "ftp://x402check.xyz" }), TypeError);
+    assert.throws(() => createClient({ baseUrl: "http://x402check.xyz" }), /https/, "plain http only for localhost");
+    assert.equal(createClient({ baseUrl: "http://127.0.0.1:8799" }).baseUrl, "http://127.0.0.1:8799");
     assert.throws(() => createClient({ baseUrl: "not a url" }), TypeError);
     assert.throws(() => createClient({ timeoutMs: 0 }), TypeError);
     assert.throws(() => createClient({ timeoutMs: 2 ** 31 }), TypeError, "setTimeout would clamp it to 1 ms");

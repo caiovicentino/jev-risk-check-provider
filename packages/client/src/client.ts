@@ -84,6 +84,9 @@ function normalizeBaseUrl(raw: string): string {
     throw new TypeError(`invalid baseUrl: ${raw}`);
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new TypeError(`baseUrl must be http(s): ${raw}`);
+  // Plain HTTP only to this machine: elsewhere it would expose the credit token and let a network attacker answer.
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname.endsWith(".localhost");
+  if (url.protocol === "http:" && !local) throw new TypeError(`baseUrl must be https:// (plain http only for localhost): ${raw}`);
   if (raw.includes("?") || raw.includes("#")) throw new TypeError(`baseUrl must not carry a query or fragment: ${raw}`);
   if (url.username || url.password) throw new TypeError("baseUrl must not carry credentials");
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;

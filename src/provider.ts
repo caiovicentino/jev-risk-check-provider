@@ -109,7 +109,7 @@ export type PricingInfo = {
   credits?: { check_usd: string; simulated_check_usd: string; pack_min_usd: string; pack_max_usd: string; endpoint: string };
 };
 
-export function discoveryDocument(host: string, pricing?: PricingInfo): RiskCheckDiscovery {
+export function discoveryDocument(host: string, pricing?: PricingInfo, kid = "jev-attest-v1"): RiskCheckDiscovery {
   return {
     name: "x402check",
     version: PROVIDER_VERSION,
@@ -144,7 +144,7 @@ export function discoveryDocument(host: string, pricing?: PricingInfo): RiskChec
     attestation: {
       jwks_url: `${schemeForHost(host)}://${host}/.well-known/jwks.json`,
       algorithm: "ES256",
-      kid: "jev-attest-v1",
+      kid,
       ttl: "1h",
       issuer: `${PROVIDER_DID_PREFIX}${host}`,
       claims: ["iss", "sub", "score", "tier", "iat", "exp", "jti", "categories", "input_hash", "request_hash", "checks", "asserted", "aud", "payment", "interaction"],

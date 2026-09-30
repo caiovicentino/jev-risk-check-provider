@@ -1,4 +1,4 @@
-import { handleProtected, ensureStack, facilitatorStatus, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
+import { handleProtected, ensureDeps, ensureStack, facilitatorStatus, isProductionHost, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
 import { createHandler } from "../src/handler.js";
 import { hashSetFromBytes, type ThreatIntelFeeds } from "../src/threat-intel.js";
 import { METAMASK_ALLOWLIST, METAMASK_FEED_META } from "../src/data/threat-feeds.js";
@@ -12,7 +12,7 @@ import { KW, runKitWatch, type KitWatchStats } from "./kit-watch.js";
 
 /** Seconds after which /status reports the kit watch as stale (the cron runs every minute). */
 const KIT_WATCH_STALE_S = 180;
-import { CREDIT_PRICING, handleCredits } from "./credits.js";
+import { CREDIT_PRICING, handleCredits, retryPendingCredits } from "./credits.js";
 import type { ExecutionContext, ScheduledController, WorkerEnv } from "./runtime.js";
 // Bundled as a Wrangler Data module (see [[rules]] in wrangler.toml).
 import metamaskPhishing from "../src/data/metamask-phishing.bin";
@@ -104,7 +104,19 @@ async function status(env: WorkerEnv): Promise<Response> {
     payments: payments ?? { status: "unavailable" },
     facilitators: facilitators ?? { status: "unavailable" },
     credits: env.CREDITS ? { status: "on", ...CREDIT_PRICING } : { status: "off" },
+    attestation: attestationStatus(env),
+    ...(env.ENABLE_TESTNETS === "true" ? { testnets: isProductionHost(env) ? "requested but ignored on a production host" : "on" } : {}),
   }, { "Cache-Control": "public, max-age=60" });
+}
+
+/** The attestation key's health, public data only: its kid, its RFC 7638 thumbprint, and the self-check. */
+function attestationStatus(env: WorkerEnv): Record<string, unknown> {
+  try {
+    const { keyStatus } = ensureDeps(env, feedsFor(env));
+    return { ok: keyStatus.ok, kid: keyStatus.kid, thumbprint: keyStatus.thumbprint, ...(keyStatus.reason ? { reason: keyStatus.reason } : {}) };
+  } catch {
+    return { ok: false, reason: "the key could not be checked" };
+  }
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -116,42 +128,78 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 // Public liveness probe; no state is touched.
-function healthz(): Response {
-  return json(200, { ok: true, version: PROVIDER_VERSION }, { "Cache-Control": "public, max-age=60" });
+function healthz(env: WorkerEnv): Response {
+  const attestation = attestationStatus(env);
+  // 503 while the key cannot sign verifiable attestations: paid routes refuse all work then.
+  return json(
+    attestation.ok === true ? 200 : 503,
+    { ok: attestation.ok === true, version: PROVIDER_VERSION, commit: env.GIT_COMMIT ?? null, attestation_key: attestation.ok === true ? "ok" : "misconfigured" },
+    { "Cache-Control": "public, max-age=60" },
+  );
 }
+
+/** Headers every response carries: no MIME sniffing, no referrer leakage, HTTPS pinned on the production host. */
+function securityHeaders(env: WorkerEnv, local: boolean): Record<string, string> {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    ...(local || !isProductionHost(env) ? {} : { "Strict-Transport-Security": "max-age=31536000; includeSubDomains" }),
+  };
+}
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /** The request router; `fetch` wraps it, so that nothing escapes as an HTML error page. */
 async function handle(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
+  const url = new URL(incoming.url);
+  // Local development: a local host, or a loopback client (wrangler dev rewrites the URL to the
+  // route's host over http). Cloudflare sets CF-Connecting-IP itself, so a remote client cannot claim loopback.
+  const client = incoming.headers.get("CF-Connecting-IP") ?? "";
+  const local = LOCAL_HOSTS.has(url.hostname) || client === "127.0.0.1" || client === "::1";
+  // HTTPS only: a page redirects; an API call is refused before its body or a bearer token is read.
+  if (url.protocol === "http:" && !local) {
+    if (incoming.method === "GET" || incoming.method === "HEAD") return new Response(null, { status: 301, headers: { Location: `https://${url.host}${url.pathname}${url.search}` } });
+    return json(403, { error: "https_required", detail: "use https://; nothing sent over plain HTTP is processed" });
+  }
   if (incoming.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   // HEAD is GET without a body (RFC 9110): discovery tools check /favicon.ico and pages with HEAD.
   const head = incoming.method === "HEAD";
   const request = head ? new Request(incoming.url, { method: "GET", headers: incoming.headers }) : incoming;
-  const path = new URL(request.url).pathname;
+  const path = url.pathname;
   maybeRefreshFeeds(env, ctx, EMBEDDED);
+  // Unpaid, unauthenticated traffic to paid routes and /status is rate-limited per IP (it costs work).
+  const paidRoute = PROTECTED.has(path) || path === "/v1/credits";
+  const unpaid = !request.headers.get("PAYMENT-SIGNATURE") && !request.headers.get("authorization");
+  if (env.UNPAID_LIMITER && ((paidRoute && request.method === "POST" && unpaid) || path === "/status")) {
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    const { success } = await env.UNPAID_LIMITER.limit({ key: `${path === "/status" ? "status" : "unpaid"}:${ip}` }).catch(() => ({ success: true }));
+    if (!success) return json(429, { error: "rate_limited", detail: "too many unpaid requests; pay or retry in a minute" }, { "Retry-After": "60", ...CORS_HEADERS });
+  }
   let res: Response;
   if (request.method === "GET" && path === "/healthz") {
-    res = healthz();
+    res = healthz(env);
   } else if (request.method === "GET" && path === "/status") {
     res = await status(env);
   } else if (request.method === "GET" && path === "/openapi.json") {
     res = json(200, openApi(env), { "Cache-Control": "public, max-age=300" });
+  } else if (!paidRoute) {
+    // Identity documents, the site and discovery never wait for the payment stack (a hung facilitator).
+    res = await createHandler(ensureDeps(env, feedsFor(env)).deps)(request);
   } else {
     const stack = await ensureStack(env, feedsFor(env));
     if (path === "/v1/credits") {
       res = await handleCredits(request, env, stack);
-    } else if (PROTECTED.has(path)) {
+    } else {
       // A cold isolate briefly waits for the first verified feed refresh (newer OFAC/MetaMask).
       if (request.method === "POST") await awaitColdStart();
       res = request.method !== "POST"
         ? json(405, usageFor(path), { Allow: "POST" })
-        : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req));
-    } else {
-      res = await createHandler(stack.deps)(request);
+        : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req), ctx);
     }
   }
-  for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+  for (const [k, v] of Object.entries({ ...CORS_HEADERS, ...securityHeaders(env, local) })) res.headers.set(k, v);
   return head ? new Response(null, { status: res.status, headers: res.headers }) : res;
 }
 
@@ -174,8 +222,16 @@ export default {
         return null;
       }),
     );
+    // Credits for packs whose payment settled but whose ledger write failed.
+    ctx.waitUntil(
+      retryPendingCredits(env).catch((err: unknown) => {
+        console.error(`queued credits retry failed: ${String(err).slice(0, 200)}`);
+        return 0;
+      }),
+    );
   },
 };
 
 // Durable Object classes must be exported by the main module (wrangler.toml [[durable_objects.bindings]]).
 export { CreditLedger } from "./credits.js";
+export { PaymentClaim } from "./payment-claims.js";

@@ -8,6 +8,9 @@ import { generateKeyPair } from "../src/jws.js";
 import type { JevLike } from "../src/jev.js";
 import type { Answer } from "../src/types.js";
 import type { HTTPRequestContext } from "@x402/core/http";
+/** A PAYMENT-SIGNATURE shaped like x402 v2 (the stack only accepts v2 payments). */
+const PAID_V2 = btoa(JSON.stringify({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: { from: "0x1111111111111111111111111111111111111111", nonce: "0x01" } } }));
+
 
 const WALLET = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const ANSWERS: Record<string, Answer> = {
@@ -65,7 +68,8 @@ test("testnet payment options exist only when explicitly enabled", () => {
   const prod = nets({});
   assert.ok(prod.includes("eip155:8453") && prod.includes("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"));
   for (const testnet of ["eip155:84532", "eip155:421614", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"]) assert.ok(!prod.includes(testnet), testnet);
-  assert.ok(nets({ ENABLE_TESTNETS: "true" }).includes("eip155:84532"));
+  assert.ok(nets({ ENABLE_TESTNETS: "true", PROVIDER_HOST: "localhost:8799" }).includes("eip155:84532"));
+  assert.ok(!nets({ ENABLE_TESTNETS: "true" }).includes("eip155:84532"), "never on the production host: testnet USDC is free");
   // Each network carries its own price: Base first.
   const ctx = { path: "/v1/risk-check", adapter: { getBody: () => ({ wallet: WALLET }) } } as unknown as HTTPRequestContext;
   const priced = Object.fromEntries(buildAccepts({}).map((a) => [String(a.network), (a.price as (c: HTTPRequestContext) => string)(ctx)]));
@@ -105,12 +109,12 @@ test("no free evaluations: a valid unpaid request gets the 402 challenge, priced
 
 test("paid path releases the attestation only after settlement succeeds", async () => {
   const ok: FakeHttp = { priced: [], settleOk: true, verifyOk: true };
-  const paid = await run({}, stack(ok), post("/v1/risk-check/batch", { requests: [{ wallet: WALLET }, { wallet: WALLET }] }, { "PAYMENT-SIGNATURE": "sig" }));
+  const paid = await run({}, stack(ok), post("/v1/risk-check/batch", { requests: [{ wallet: WALLET }, { wallet: WALLET }] }, { "PAYMENT-SIGNATURE": PAID_V2 }));
   assert.equal(paid.status, 200);
   assert.equal(paid.headers.get("PAYMENT-RESPONSE"), "settled");
   assert.deepEqual(ok.priced, ["$0.002"]);
   const bad: FakeHttp = { priced: [], settleOk: false, verifyOk: true };
-  const failed = await run({}, stack(bad), post("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": "sig" }));
+  const failed = await run({}, stack(bad), post("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": PAID_V2 }));
   assert.equal(failed.status, 402);
   assert.equal(failed.headers.get("X-Payment-Error"), "nonce_used");
   const body = (await failed.json()) as Record<string, unknown>;

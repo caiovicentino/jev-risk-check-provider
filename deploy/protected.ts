@@ -1,4 +1,5 @@
-import { generateKeyPair, type KeyPair } from "../src/jws.js";
+import { createHash, createPublicKey } from "node:crypto";
+import { generateKeyPair, signJws, verifyJws, type KeyPair } from "../src/jws.js";
 import { Provider, PROVIDER_VERSION, type PricingInfo } from "../src/provider.js";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient } from "../src/jev.js";
@@ -10,7 +11,8 @@ import { createContractIntel } from "../src/contract-intel.js";
 import { kitWatchLookup } from "./kit-watch.js";
 import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice, SIMULATION_PRICE } from "./pricing.js";
-import { allChecked, fetchAdapter, json } from "./http-util.js";
+import { allChecked, fetchAdapter, json, payerOf, readCapped, recordSettlement, sanctionedPayer, settlementReceipt } from "./http-util.js";
+import { claimPayment, paymentId, paymentVersion } from "./payment-claims.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
 import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
 import { BATCH_DISCOVERY, openApiDocument, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "./discovery.js";
@@ -30,34 +32,95 @@ const DEFAULT_MAINNET_FACILITATOR = "https://x402.dexter.cash";
 const DEFAULT_PAYAI_FACILITATOR = "https://facilitator.payai.network";
 const BASE_SEPOLIA = "eip155:84532";
 const MAX_BODY_BYTES = 64 * 1024;
+/** Whether the attestation key can sign verdicts relying parties accept (the stack refuses paid work otherwise). */
+export type AttestationKeyStatus = { ok: boolean; kid: string; thumbprint: string | null; reason?: string };
+
 export type Stack = {
   deps: HandlerDeps;
   http: x402HTTPResourceServer;
+  keyStatus: AttestationKeyStatus;
 };
 
 let cached: { key: string; stack: Stack } | null = null;
-let pending: { key: string; promise: Promise<Stack> } | null = null;
+let pending: { key: string; promise: Promise<{ stack: Stack; ok: boolean }> } | null = null;
 
-function loadKeyPair(env: WorkerEnv): KeyPair {
-  if (env.JEV_ATTEST_PRIVATE_KEY && env.JEV_ATTEST_PUBLIC_JWK) {
-    const jwk = JSON.parse(env.JEV_ATTEST_PUBLIC_JWK) as KeyPair["publicJwk"];
-    if (jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string") {
-      return { privatePem: env.JEV_ATTEST_PRIVATE_KEY, publicJwk: jwk };
-    }
+/** Production is any host other than a local one: there an ephemeral or mismatched key is refused. */
+export function isProductionHost(env: WorkerEnv): boolean {
+  const host = (env.PROVIDER_HOST ?? "x402check.xyz").replace(/:\d+$/, "");
+  return !(host === "localhost" || host === "127.0.0.1" || host.endsWith(".localhost") || host.endsWith(".test"));
+}
+
+function thumbprint(jwk: { crv: string; kty: string; x: string; y: string }): string {
+  return createHash("sha256").update(`{"crv":"${jwk.crv}","kty":"${jwk.kty}","x":"${jwk.x}","y":"${jwk.y}"}`).digest("base64url");
+}
+
+/**
+ * The attestation key, checked: both secrets present, the private key's public half equal to the
+ * published JWK, and a canary that signs and verifies. In production a failure is reported (and
+ * paid work refused, with no charge) instead of silently signing with an ephemeral key.
+ */
+export function loadKeyPair(env: WorkerEnv): { keyPair: KeyPair; status: AttestationKeyStatus } {
+  const production = isProductionHost(env);
+  if (!env.JEV_ATTEST_PRIVATE_KEY || !env.JEV_ATTEST_PUBLIC_JWK) {
+    const keyPair = generateKeyPair("jev-attest-v1");
+    const reason = "attestation secrets missing: an ephemeral key signs nothing relying parties accept";
+    if (production) console.error(`attestation key: ${reason}`);
+    return { keyPair, status: { ok: !production, kid: keyPair.publicJwk.kid, thumbprint: thumbprint(keyPair.publicJwk), ...(production ? { reason } : {}) } };
   }
-  return generateKeyPair("jev-attest-v1");
+  const privatePem = env.JEV_ATTEST_PRIVATE_KEY.replace(/\\n/g, "\n");
+  let jwk: KeyPair["publicJwk"];
+  try {
+    jwk = JSON.parse(env.JEV_ATTEST_PUBLIC_JWK) as KeyPair["publicJwk"];
+  } catch {
+    const keyPair = generateKeyPair("jev-attest-v1");
+    console.error("attestation key: JEV_ATTEST_PUBLIC_JWK is not JSON");
+    return { keyPair, status: { ok: false, kid: keyPair.publicJwk.kid, thumbprint: null, reason: "JEV_ATTEST_PUBLIC_JWK is not JSON" } };
+  }
+  const keyPair: KeyPair = { privatePem, publicJwk: jwk };
+  const fail = (reason: string) => {
+    console.error(`attestation key: ${reason}`);
+    return { keyPair, status: { ok: false, kid: String(jwk.kid ?? ""), thumbprint: null, reason } };
+  };
+  if (!(jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string" && typeof jwk.kid === "string" && jwk.kid)) return fail("JEV_ATTEST_PUBLIC_JWK is not an EC P-256 public key with a kid");
+  try {
+    const derived = createPublicKey(privatePem).export({ format: "jwk" }) as { crv?: string; x?: string; y?: string };
+    if (derived.crv !== "P-256" || derived.x !== jwk.x || derived.y !== jwk.y) return fail("JEV_ATTEST_PRIVATE_KEY does not match JEV_ATTEST_PUBLIC_JWK");
+    const now = Math.floor(Date.now() / 1000);
+    const canary = signJws({ iss: "canary", sub: "canary", score: 0, tier: "low", iat: now, exp: now + 60 } as never, jwk.kid, privatePem);
+    if (!verifyJws(canary, jwk)) return fail("a canary attestation did not verify against the published key");
+  } catch (err) {
+    return fail(`the attestation key could not be loaded (${String(err).slice(0, 80)})`);
+  }
+  return { keyPair, status: { ok: true, kid: jwk.kid, thumbprint: thumbprint(jwk) } };
 }
 
 /** Mainnet payment networks, in the order the 402 challenge lists them (Base first). */
 export const MAINNET_NETWORKS = [BASE_MAINNET, "eip155:137", "eip155:42161", "eip155:43114", "eip155:143", "eip155:1329", SOLANA_MAINNET] as const;
 
-export function buildAccepts(env: WorkerEnv, price: (network: string) => PaymentOption["price"] = (n) => makePrice(networkPrice(n), env.SIMULATION !== "off")): PaymentOption[] {
+/**
+ * The payment options of the 402 challenge. With a routing table, only the networks that have a
+ * live facilitator are offered (one facilitator's outage must not break every network), and a
+ * network routed to a Permit2-only facilitator says so. Testnets never in production.
+ */
+export function buildAccepts(env: WorkerEnv, price: (network: string) => PaymentOption["price"] = (n) => makePrice(networkPrice(n), env.SIMULATION !== "off"), routes: PaymentRoute[] | null = null): PaymentOption[] {
   const payToEvm = env.PAY_TO_EVM ?? "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178";
   const payToSol = env.PAY_TO_SOL ?? "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X";
   const payTo = (network: string) => (network.startsWith("solana:") ? payToSol : payToEvm);
-  const option = (network: string): PaymentOption => ({ scheme: "exact", network: network as PaymentOption["network"], payTo: payTo(network), price: price(network) });
-  const accepts: PaymentOption[] = MAINNET_NETWORKS.map(option);
-  if (env.ENABLE_TESTNETS === "true") for (const network of [BASE_SEPOLIA, "eip155:421614", SOLANA_DEVNET]) accepts.push(option(network));
+  const route = (network: string) => routes?.find((r) => r.network === network);
+  const option = (network: string): PaymentOption => ({
+    scheme: "exact",
+    network: network as PaymentOption["network"],
+    payTo: payTo(network),
+    price: price(network),
+    ...(route(network)?.transfer_method === "permit2" ? { extra: { assetTransferMethod: "permit2" } } : {}),
+  });
+  const live = routes ? MAINNET_NETWORKS.filter((n) => route(n)?.facilitator) : MAINNET_NETWORKS;
+  // Every network down (or unknown): offer them all rather than none; payments then fail per network.
+  const accepts: PaymentOption[] = (live.length ? live : MAINNET_NETWORKS).map(option);
+  if (env.ENABLE_TESTNETS === "true") {
+    if (isProductionHost(env)) console.error("ENABLE_TESTNETS is set on a production host: ignored (testnet USDC is free)");
+    else for (const network of [BASE_SEPOLIA, "eip155:421614", SOLANA_DEVNET]) accepts.push(option(network));
+  }
   return accepts;
 }
 
@@ -78,6 +141,15 @@ export function scopedFacilitator(inner: FacilitatorClient, allow: (network: str
 }
 
 const TEN_MINUTES = 10 * 60 * 1000;
+/** A facilitator's /supported answers within this, or it counts as down for this build (a hung one must not stall every route). */
+const SUPPORTED_DEADLINE_MS = 5000;
+/** verify and settle wait longer: a settlement confirms on-chain, and a timeout there would charge without a verdict. */
+const FACILITATOR_TIMEOUT_MS = 30_000;
+
+function withDeadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([promise, new Promise<T>((_resolve, reject) => (timer = setTimeout(() => reject(new Error(`${what}: no answer within ${ms} ms`)), ms)))]).finally(() => clearTimeout(timer));
+}
 
 /** Shares a facilitator's /supported for 10 minutes between routing and stack initialization. */
 function memoSupported(inner: FacilitatorClient): FacilitatorClient {
@@ -87,7 +159,7 @@ function memoSupported(inner: FacilitatorClient): FacilitatorClient {
     settle: (payload, requirements) => inner.settle(payload, requirements),
     getSupported: () => {
       if (!entry || Date.now() - entry.at > TEN_MINUTES) {
-        const value = inner.getSupported();
+        const value = withDeadline(inner.getSupported(), SUPPORTED_DEADLINE_MS, "facilitator /supported");
         entry = { at: Date.now(), value };
         value.catch(() => (entry = null));
       }
@@ -125,7 +197,7 @@ const clientCache = new Map<string, FacilitatorClient>();
 function facilitatorClient(url: string, key = url, auth?: ConstructorParameters<typeof HTTPFacilitatorClient>[0]): FacilitatorClient {
   let client = clientCache.get(key);
   if (!client) {
-    client = memoSupported(new HTTPFacilitatorClient({ url, ...auth }));
+    client = memoSupported(new HTTPFacilitatorClient({ url, timeoutMs: FACILITATOR_TIMEOUT_MS, ...auth }));
     clientCache.set(key, client);
   }
   return client;
@@ -208,9 +280,21 @@ let routingCache: { at: number; value: Promise<PaymentRoute[]> } | null = null;
 export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): Promise<PaymentRoute[]> {
   if (!injected && routingCache && Date.now() - routingCache.at < TEN_MINUTES) return routingCache.value;
   const facilitators = injected ?? mainnetFacilitators(env);
+  let degraded = false;
   const value = (async () => {
     const [supported, fees] = await Promise.all([
-      Promise.all(facilitators.map((f) => f.client.getSupported().then((s) => s.kinds as Kind[]).catch(() => [] as Kind[]))),
+      Promise.all(
+        facilitators.map((f) =>
+          f.client
+            .getSupported()
+            .then((s) => s.kinds as Kind[])
+            .catch((err: unknown) => {
+              degraded = true;
+              console.error(`facilitator ${f.name} /supported failed: ${String(err).slice(0, 160)}`);
+              return [] as Kind[];
+            }),
+        ),
+      ),
       Promise.all(facilitators.map((f) => (f.fees ? f.fees().catch(() => null) : Promise.resolve(new Map<string, number>())))),
     ]);
     return MAINNET_NETWORKS.map((network): PaymentRoute => {
@@ -232,10 +316,17 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
     });
   })();
   if (injected) return value;
-  routingCache = { at: Date.now(), value };
-  value.catch(() => {
-    routingCache = null;
-  });
+  const entry = { at: Date.now(), value };
+  routingCache = entry;
+  // A facilitator that failed is retried within a minute, not ten: recovery is picked up quickly.
+  value.then(
+    () => {
+      if (degraded && routingCache === entry) entry.at = Date.now() - TEN_MINUTES + 45_000;
+    },
+    () => {
+      if (routingCache === entry) routingCache = null;
+    },
+  );
   return value;
 }
 
@@ -281,14 +372,27 @@ export async function facilitatorStatus(env: WorkerEnv, injected?: FacilitatorEn
 
 function stackKey(env: WorkerEnv): string {
   return JSON.stringify([
-    env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK,
+    env.TYPESAFE_API_KEY ? "d" : env.AI_GATEWAY_API_KEY ? "g" : "n", env.PROVIDER_HOST, env.JEV_ATTEST_PRIVATE_KEY, env.JEV_ATTEST_PUBLIC_JWK, env.JEV_ATTEST_NEXT_PUBLIC_JWK,
     env.PAY_TO_EVM, env.PAY_TO_SOL, env.X402_FACILITATOR_URL, env.X402_FACILITATOR_URL_MAINNET, env.X402_FACILITATOR_URL_PAYAI, env.X402_FACILITATOR_URL_CDP,
     env.CDP_API_KEY_ID ?? null, env.CDP_API_KEY_SECRET ? "cdp-secret" : null,
     env.ENABLE_TESTNETS, env.ONCHAIN, env.RPC_URLS, env.SOL_RPC_URL_MAINNET, env.SIMULATION, env.SIMULATION_RPC_URLS, env.CONTRACT_INTEL,
   ]);
 }
 
-export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>, routes: PaymentRoute[] | null = null): Stack {
+let depsCache: { key: string; deps: HandlerDeps; keyStatus: AttestationKeyStatus } | null = null;
+
+/**
+ * The provider, its identity and pricing, without the payment stack: identity documents, the
+ * site and discovery never wait for a facilitator. Cached per configuration and shared with the
+ * payment stack (one Provider, one key).
+ */
+export function ensureDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): { deps: HandlerDeps; keyStatus: AttestationKeyStatus } {
+  const key = stackKey(env);
+  if (depsCache?.key !== key) depsCache = { key, ...buildDeps(env, feeds) };
+  return depsCache;
+}
+
+function buildDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): { deps: HandlerDeps; keyStatus: AttestationKeyStatus } {
   const host = env.PROVIDER_HOST ?? "x402check.xyz";
   const jev = env.TYPESAFE_API_KEY
     ? new JevClient({ apiKey: env.TYPESAFE_API_KEY })
@@ -322,7 +426,13 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
     ...(env.CREDITS ? { credits: CREDIT_PRICING } : {}),
   };
   const kitWatch = kitWatchLookup(env);
-  const deps: HandlerDeps = { provider: new Provider({ host, keyPair: loadKeyPair(env), jev, onchain, feeds, simulator, contractIntel, kitWatch }), pricing };
+  const { keyPair, status: keyStatus } = loadKeyPair(env);
+  const deps: HandlerDeps = { provider: new Provider({ host, keyPair, jev, onchain, feeds, simulator, contractIntel, kitWatch }), pricing, ...nextKey(env) };
+  return { deps, keyStatus };
+}
+
+export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>, routes: PaymentRoute[] | null = null): Stack {
+  const { deps, keyStatus } = ensureDeps(env, feeds);
 
   const facilitators: FacilitatorClient[] = [
     ...routedFacilitators(mainnetFacilitators(env), routes),
@@ -330,11 +440,23 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   ];
   const resourceServer = new x402ResourceServer(facilitators);
   resourceServer.register("eip155:*", new ExactEvmScheme());
-  resourceServer.register(SOLANA_MAINNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL_MAINNET ?? "https://api.mainnet-beta.solana.com" }));
+  // api.mainnet-beta.solana.com refuses Worker egress (src/rpc.ts): publicnode serves it.
+  resourceServer.register(SOLANA_MAINNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL_MAINNET ?? "https://solana-rpc.publicnode.com" }));
   if (env.ENABLE_TESTNETS === "true") {
     resourceServer.register(SOLANA_DEVNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL ?? "https://api.devnet.solana.com" }));
   }
-  return { deps, http: new x402HTTPResourceServer(resourceServer, paidRoutes(env)) };
+  return { deps, http: new x402HTTPResourceServer(resourceServer, paidRoutes(env, routes)), keyStatus };
+}
+
+/** A next attestation key, published ahead of a rotation (JEV_ATTEST_NEXT_PUBLIC_JWK). */
+function nextKey(env: WorkerEnv): { nextPublicJwk?: Record<string, unknown> } {
+  if (!env.JEV_ATTEST_NEXT_PUBLIC_JWK) return {};
+  try {
+    const jwk = JSON.parse(env.JEV_ATTEST_NEXT_PUBLIC_JWK) as Record<string, unknown>;
+    return jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string" && typeof jwk.kid === "string" ? { nextPublicJwk: jwk } : {};
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -342,9 +464,9 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
  * discovery declaration (deploy/discovery.ts): catalogs that settle a payment list the
  * endpoint with a callable example. A credit pack costs its face value on every network.
  */
-export function paidRoutes(env: WorkerEnv): RoutesConfig {
-  const accepts = buildAccepts(env);
-  const packAccepts = buildAccepts(env, () => (ctx) => formatUsd(packMicro(ctx.adapter.getBody?.()) ?? 0));
+export function paidRoutes(env: WorkerEnv, routes: PaymentRoute[] | null = null): RoutesConfig {
+  const accepts = buildAccepts(env, undefined, routes);
+  const packAccepts = buildAccepts(env, () => (ctx) => formatUsd(packMicro(ctx.adapter.getBody?.()) ?? 0), routes);
   const service = { serviceName: SERVICE_METADATA.serviceName, tags: [...SERVICE_METADATA.tags], iconUrl: SERVICE_METADATA.iconUrl, mimeType: "application/json" };
   return {
     "POST /v1/risk-check": {
@@ -398,13 +520,19 @@ export async function ensureStack(env: WorkerEnv, feeds?: () => Promise<ThreatIn
     pending = {
       key,
       promise: stack.http.initialize().then(
-        () => stack,
-        () => stack, // facilitator discovery failure surfaces later as a payment_processing_failed 500
+        () => ({ stack, ok: true }),
+        (err: unknown) => {
+          console.error(`payment stack initialization failed: ${String(err).slice(0, 200)}`);
+          return { stack, ok: false };
+        },
       ),
     };
   }
-  const stack = await pending.promise;
-  cached = { key, stack };
+  const current = pending;
+  const { stack, ok } = await current.promise;
+  // A stack whose facilitators could not be reached is used once, never cached: the next request retries.
+  if (ok) cached = { key, stack };
+  else if (pending === current) pending = null;
   return stack;
 }
 
@@ -415,37 +543,13 @@ function instructionsToResponse(instr: HTTPResponseInstructions): Response {
   });
 }
 
-async function readCapped(request: Request, max: number): Promise<Uint8Array | null> {
-  if (!request.body) return new Uint8Array(0);
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel().catch(() => {});
-      return null;
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.byteLength;
-  }
-  return out;
-}
-
-export async function handleProtected(request: Request, _env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>): Promise<Response> {
+export async function handleProtected(request: Request, _env: WorkerEnv, stack: Stack, serve: (req: Request) => Promise<Response>, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
   const path = new URL(request.url).pathname;
+  // 0. A key that cannot sign verifiable attestations: no paid work at all (no charge).
+  if (stack.keyStatus && !stack.keyStatus.ok) return json(503, { error: "attestation_key_unavailable", detail: "no charge: the provider cannot sign verifiable attestations right now" }, { "Retry-After": "60" });
   // 1. Read and validate before any payment work: invalid input is never priced. The
   //    cap is in BYTES and is enforced while streaming, so an oversized body is never
   //    fully buffered.
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
   const bytes = await readCapped(request, MAX_BODY_BYTES);
   if (!bytes) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
   const text = new TextDecoder().decode(bytes);
@@ -478,7 +582,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
 
   // Prepaid credits: `Authorization: Bearer x402c_…` debits the balance instead of paying per call.
   const token = creditToken(request);
-  if (token) return spendCredits(_env, token, path, parsed, () => serve(replay()));
+  if (token) return spendCredits(_env, token, path, parsed, () => serve(replay()), ctx);
   if (request.headers.get("authorization")?.startsWith("Bearer ")) return json(401, { error: "invalid_credit_token" });
 
   // 2. Every evaluation is paid (x402 v2, PAYMENT-SIGNATURE), priced per item and per
@@ -486,25 +590,48 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   //    transaction is simulated when that is higher; a batch is the sum of its items.
   //    There is no free tier. Without a payment the response is the 402 challenge
   //    listing the accepted mainnet options.
-  const ctx: HTTPRequestContext = {
+  // Only x402 v2 payments (what the challenge offers); anything else gets the v2 challenge.
+  const header = request.headers.get("PAYMENT-SIGNATURE");
+  const payment = header && paymentVersion(header) === 2 ? header : null;
+  const httpCtx: HTTPRequestContext = {
     adapter: fetchAdapter(request, parsed),
     path,
     method: request.method,
-    ...(request.headers.get("PAYMENT-SIGNATURE") ? { paymentHeader: request.headers.get("PAYMENT-SIGNATURE") as string } : {}),
+    ...(payment ? { paymentHeader: payment } : {}),
   };
   let result: HTTPProcessResult;
   try {
-    result = await stack.http.processHTTPRequest(ctx);
-  } catch {
+    result = await stack.http.processHTTPRequest(httpCtx);
+  } catch (err) {
+    console.error(`payment processing failed on ${path}: ${String(err).slice(0, 200)}`);
     return json(500, { error: "payment_processing_failed" });
   }
   // 3. Evaluate, then settle; the result is released only after settlement succeeds.
   if (result.type === "payment-error") return instructionsToResponse(result.response);
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
-  const res = await serve(replay());
-  if (res.status !== 200) return res;
+  // The payer is screened like any counterparty: no service is sold to an SDN-listed wallet.
+  if (sanctionedPayer(payerOf(result.paymentPayload))) return json(403, { error: "payer_sanctioned", detail: "the paying wallet is on the OFAC SDN list; nothing was charged" });
+  // Single use: one evaluation and one settlement per payment, however often it is sent.
+  const claim = await claimPayment(_env, await paymentId(payment));
+  if (!claim.claimed) {
+    return claim.reason === "duplicate"
+      ? json(409, { error: "payment_already_used", detail: "this payment was already presented; sign a new one" })
+      : json(503, { error: "payment_claims_unavailable", detail: "no charge: retry shortly" }, { "Retry-After": "5" });
+  }
+  let res: Response;
+  try {
+    res = await serve(replay());
+  } catch (err) {
+    await claim.release();
+    throw err;
+  }
+  if (res.status !== 200) {
+    await claim.release();
+    return res;
+  }
   // Never charge for a verdict that was not produced: every result must be checked.
   if (!(await allChecked(res.clone()))) {
+    await claim.release();
     return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5" });
   }
   // Settle before releasing the result: a payload that verifies but cannot settle
@@ -514,12 +641,17 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   try {
     const settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
     if (settle.success) {
+      await claim.settled();
       for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
+      const receipt = settlementReceipt(settle.headers);
+      if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction });
       return res;
     }
     reason = settle.errorReason ?? reason;
-  } catch {
-    // fall through to 402
+  } catch (err) {
+    console.error(`settlement failed on ${path}: ${String(err).slice(0, 200)}`);
   }
+  await claim.release();
+  console.warn(`settlement refused on ${path}: ${reason}`);
   return json(402, { error: "payment_settlement_failed" }, { "X-Payment-Error": reason });
 }

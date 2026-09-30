@@ -11,6 +11,9 @@ import { generateKeyPair } from "../src/jws.js";
 import type { JevLike } from "../src/jev.js";
 import type { Answer } from "../src/types.js";
 import type { HTTPRequestContext } from "@x402/core/http";
+/** A PAYMENT-SIGNATURE shaped like x402 v2 (the stack only accepts v2 payments). */
+const PAID_V2 = btoa(JSON.stringify({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: { from: "0x1111111111111111111111111111111111111111", nonce: "0x01" } } }));
+
 
 const WALLET = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const USER = "0x1111111111111111111111111111111111111111";
@@ -42,6 +45,9 @@ function memoryLedgers(): DurableObjectNamespace & { objects: Map<string, Credit
               if (typeof a === "string") data.set(a, b);
               else for (const [k, v] of Object.entries(a)) data.set(k, v);
             }) as DurableObjectState["storage"]["put"],
+            delete: async (key: string) => data.delete(key),
+            deleteAll: async () => data.clear(),
+            setAlarm: async () => undefined,
           },
         };
         obj = new CreditLedger(state);
@@ -95,7 +101,7 @@ test("buying credits: 402 first; after settlement a token and its balance; a rep
   assert.deepEqual(fake.priced, ['/v1/credits {"amount_usd":1}']);
   assert.equal((await handleCredits(req("POST", "/v1/credits", { amount_usd: 0.01 }), env, stack(fake))).status, 422, "below the minimum pack: rejected before any payment");
 
-  const bought = await handleCredits(req("POST", "/v1/credits", { amount_usd: 1 }, { "PAYMENT-SIGNATURE": "sig" }), env, stack(fake));
+  const bought = await handleCredits(req("POST", "/v1/credits", { amount_usd: 1 }, { "PAYMENT-SIGNATURE": PAID_V2 }), env, stack(fake));
   assert.equal(bought.status, 200);
   const body = (await bought.json()) as { token: string; balance_usd: string; credited_usd: string };
   assert.match(body.token, /^x402c_/);
@@ -105,15 +111,15 @@ test("buying credits: 402 first; after settlement a token and its balance; a rep
   // Top-up the same token; the same settlement (same tx) replayed is a no-op.
   const auth = { Authorization: `Bearer ${body.token}` };
   fake.tx = "0xdef";
-  const topped = (await (await handleCredits(req("POST", "/v1/credits", { amount_usd: 0.5 }, { ...auth, "PAYMENT-SIGNATURE": "sig" }), env, stack(fake))).json()) as { token?: string; balance_usd: string };
+  const topped = (await (await handleCredits(req("POST", "/v1/credits", { amount_usd: 0.5 }, { ...auth, "PAYMENT-SIGNATURE": PAID_V2 }), env, stack(fake))).json()) as { token?: string; balance_usd: string };
   assert.deepEqual([topped.token, topped.balance_usd], [undefined, "$1.50"]);
-  const replayed = (await (await handleCredits(req("POST", "/v1/credits", { amount_usd: 0.5 }, { ...auth, "PAYMENT-SIGNATURE": "sig" }), env, stack(fake))).json()) as { balance_usd: string };
+  const replayed = (await (await handleCredits(req("POST", "/v1/credits", { amount_usd: 0.5 }, { ...auth, "PAYMENT-SIGNATURE": PAID_V2 }), env, stack(fake))).json()) as { balance_usd: string };
   assert.equal(replayed.balance_usd, "$1.50");
   const balance = (await (await handleCredits(req("GET", "/v1/credits", undefined, auth), env, stack(fake))).json()) as { balance_usd: string };
   assert.equal(balance.balance_usd, "$1.50");
 
   // A failed settlement credits nothing.
-  const failed = await handleCredits(req("POST", "/v1/credits", { amount_usd: 1 }, { "PAYMENT-SIGNATURE": "sig" }), env, stack({ ...fake, settleOk: false }));
+  const failed = await handleCredits(req("POST", "/v1/credits", { amount_usd: 1 }, { "PAYMENT-SIGNATURE": PAID_V2 }), env, stack({ ...fake, settleOk: false }));
   assert.equal(failed.status, 402);
   assert.equal(failed.headers.get("X-Payment-Error"), "nonce_used");
 });
@@ -121,7 +127,7 @@ test("buying credits: 402 first; after settlement a token and its balance; a rep
 test("spending credits: no payment round trip; debited per item; insufficient balance refused; no verdict, no charge", async () => {
   const env: WorkerEnv = { CREDITS: memoryLedgers() };
   const fake: Fake = { priced: [], settleOk: true, tx: "0x01" };
-  const { token } = (await (await handleCredits(req("POST", "/v1/credits", { amount_usd: 0.1 }, { "PAYMENT-SIGNATURE": "sig" }), env, stack(fake))).json()) as { token: string };
+  const { token } = (await (await handleCredits(req("POST", "/v1/credits", { amount_usd: 0.1 }, { "PAYMENT-SIGNATURE": PAID_V2 }), env, stack(fake))).json()) as { token: string };
   const auth = { Authorization: `Bearer ${token}` };
   fake.priced = [];
 

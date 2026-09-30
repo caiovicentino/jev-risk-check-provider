@@ -25,6 +25,7 @@ export type EvaluateFn = (args: {
   state: object;
   questions: Record<string, GatewayQuestion>;
   maxRetries?: number;
+  abortSignal?: AbortSignal;
 }) => Promise<{
   answers: Record<string, GatewayAnswer>;
   usage?: { inputTokens?: number | undefined; outputTokens?: number | undefined };
@@ -82,6 +83,12 @@ function toAnswers(raw: Record<string, GatewayAnswer>): Record<string, Answer> {
   return answers;
 }
 
+/**
+ * The model's total budget, retries included. A verdict must come back before the SDK's 10 s
+ * timeout: past it the caller has given up, and a late verdict would only be charged for.
+ */
+export const MODEL_DEADLINE_MS = 8000;
+
 export class GatewayJevClient implements JevLike {
   private readonly model: string;
   private readonly evaluateImpl: EvaluateFn;
@@ -97,6 +104,7 @@ export class GatewayJevClient implements JevLike {
       state,
       questions: toGatewayQuestions(questions),
       maxRetries: 2,
+      abortSignal: AbortSignal.timeout(MODEL_DEADLINE_MS),
     });
     return {
       answers: toAnswers(result.answers as Record<string, GatewayAnswer>),

@@ -73,7 +73,19 @@ function isPublicJwks(json: unknown): boolean {
   if (!Array.isArray(keys) || keys.length === 0) return false;
   const first = keys[0];
   if (typeof first !== "object" || first === null) return false;
-  return (first as Record<string, unknown>).kid === "jev-attest-v1";
+  const kid = (first as Record<string, unknown>).kid;
+  return typeof kid === "string" && kid.length > 0 && (first as Record<string, unknown>).kty === "EC";
+}
+
+/** The kids the provider publishes (one key, or two during a rotation). */
+async function publishedKids(): Promise<string[]> {
+  try {
+    const res = await fetch(`${ENDPOINT}/.well-known/jwks.json`);
+    const body = (await res.json()) as { keys?: Array<{ kid?: unknown }> };
+    return (body.keys ?? []).map((k) => k.kid).filter((k): k is string => typeof k === "string");
+  } catch {
+    return [];
+  }
 }
 
 function leakTokensIn(text: string): string[] {
@@ -419,10 +431,11 @@ const probes: Probe[] = [
       if (typeof header !== "object" || header === null) return { status: "FAIL", detail: "jws header not parseable" };
       const alg = (header as Record<string, unknown>).alg;
       const kid = (header as Record<string, unknown>).kid;
-      if (alg !== "ES256" || kid !== "jev-attest-v1") {
-        return { status: "FAIL", detail: `jws header alg=${String(alg)} kid=${String(kid)} — expected ES256/jev-attest-v1` };
+      const kids = await publishedKids();
+      if (alg !== "ES256" || typeof kid !== "string" || !kids.includes(kid)) {
+        return { status: "FAIL", detail: `jws header alg=${String(alg)} kid=${String(kid)} — expected ES256 and a kid published in jwks.json (${kids.join(", ") || "none"})` };
       }
-      return { status: "PASS", detail: `jws header alg=ES256 kid=jev-attest-v1 (parsed locally, typ=${String((header as Record<string, unknown>).typ)})` };
+      return { status: "PASS", detail: `jws header alg=ES256 kid=${kid}, published in jwks.json (parsed locally, typ=${String((header as Record<string, unknown>).typ)})` };
     },
   },
   {
