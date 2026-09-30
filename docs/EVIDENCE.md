@@ -256,6 +256,16 @@ The `security:v5` probes cover:
 
 The token appears in the report only as a SHA-256 prefix.
 
+**v0.5.3: listed in the x402 Bazaar** (`eval/bazaar.ts`, `bazaar-report.json`).
+- **Payments:** a per-call check and a one-item batch were paid through CDP, and each payment carried the `bazaar` discovery extension (method POST). The transactions are in the report.
+- **Listing:** CDP's public discovery catalog, 19,196 resources at the time, lists both `https://x402check.xyz/v1/risk-check` and `/v1/risk-check/batch`. Each entry has:
+  - service name `x402check` and 5 tags;
+  - the icon;
+  - the JSON Schema of the body and a callable example;
+  - the price on all 7 networks.
+- **The first listing** came from the first CDP-settled payment that carried the extension, at 14:33 UTC.
+- **Before the Bazaar declaration:** outside our own probes, no agent had called the paid endpoints. Cloudflare analytics for the prior 24 hours showed 14 distinct outside clients hitting them, all with a browser GET (405) or an unauthenticated credits GET (401).
+
 **v0.5.1: Coinbase CDP settles Base, Polygon and Arbitrum.**
 - **Settlements:** the per-call check and the credit pack were settled by CDP signers `0xa32ccda9…` and `0x59b7ebc6…`, both published in CDP's `/supported`. They moved 0.0035 and 0.10 USDC from the probe payer to our `pay_to` (transactions in `security-v5-report.json`).
 - **Speed:**

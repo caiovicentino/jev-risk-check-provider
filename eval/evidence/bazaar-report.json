@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-09-30T14:46:24.794Z",
+  "base": "https://x402check.xyz",
+  "catalog_total": 19196,
+  "paid": [
+    {
+      "path": "/v1/risk-check",
+      "status": 200,
+      "transaction": "0x65f25ddb38c8bfd4d20fe2dced5b8f1875aa1db963e557b61c2185832da818fc",
+      "payment_carried_bazaar": true
+    },
+    {
+      "path": "/v1/risk-check/batch",
+      "status": 200,
+      "transaction": "0xa14a3997f56aa5c84fc3e6e9cf2eb9e1484d0eaebd00a02583180c2595753606",
+      "payment_carried_bazaar": true
+    }
+  ],
+  "listed": [
+    {
+      "resource": "https://x402check.xyz/v1/risk-check/batch",
+      "lastUpdated": "2026-09-30T14:39:07.622Z",
+      "serviceName": "x402check",
+      "tags": [
+        "security",
+        "risk-check",
+        "sanctions",
+        "phishing",
+        "wallets"
+      ],
+      "iconUrl": "https://res.cloudinary.com/bdb-prod/image/upload/c_fill,ar_1:1,w_256,h_256,f_auto,q_auto/v1790778816/bazaar-icons/27a66e3ae7b477b5.png",
+      "quality": {
+        "lastCalledAt": "2026-09-30T14:39:07.622Z"
+      },
+      "method": "POST",
+      "accepts": [
+        {
+          "network": "eip155:8453",
+          "amount": "7000"
+        },
+        {
+          "network": "eip155:137",
+          "amount": "14000"
+        },
+        {
+          "network": "eip155:42161",
+          "amount": "18000"
+        },
+        {
+          "network": "eip155:43114",
+          "amount": "2000"
+        },
+        {
+          "network": "eip155:143",
+          "amount": "2000"
+        },
+        {
+          "network": "eip155:1329",
+          "amount": "4000"
+        },
+        {
+          "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "amount": "4000"
+        }
+      ]
+    },
+    {
+      "resource": "https://x402check.xyz/v1/risk-check",
+      "lastUpdated": "2026-09-30T14:39:05.394Z",
+      "serviceName": "x402check",
+      "tags": [
+        "security",
+        "risk-check",
+        "sanctions",
+        "phishing",
+        "wallets"
+      ],
+      "iconUrl": "https://res.cloudinary.com/bdb-prod/image/upload/c_fill,ar_1:1,w_256,h_256,f_auto,q_auto/v1790778816/bazaar-icons/27a66e3ae7b477b5.png",
+      "quality": {
+        "lastCalledAt": "2026-09-30T14:33:36.119Z"
+      },
+      "method": "POST",
+      "accepts": [
+        {
+          "network": "eip155:8453",
+          "amount": "3500"
+        },
+        {
+          "network": "eip155:137",
+          "amount": "7000"
+        },
+        {
+          "network": "eip155:42161",
+          "amount": "9000"
+        },
+        {
+          "network": "eip155:43114",
+          "amount": "1000"
+        },
+        {
+          "network": "eip155:143",
+          "amount": "1000"
+        },
+        {
+          "network": "eip155:1329",
+          "amount": "2000"
+        },
+        {
+          "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "amount": "2000"
+        }
+      ]
+    }
+  ],
+  "all_listed": true
+}
