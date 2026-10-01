@@ -144,7 +144,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 |---|---|
 | x402-foundation/x402#3597 (our issue) | Open. We fixed a reviewer's `input_hash` point on 2026-09-29; waiting for them. |
 | x402-foundation/x402#2422 (risk-check spec, not ours) | Stalled since May. The process wants a spec-only PR first and one language per PR. |
-| x402-foundation/x402#2300 (trust-provider, not ours) | Active. The owner has commented 4 times. Do not post without new substance. |
+| x402-foundation/x402#2300 (trust-provider, not ours) | Active: participants are converging on a type-specific freshness anchor per evidence item. On 2026-10-01 we posted a live v0.6.1 attestation showing ours (OFAC release + SDN.XML digest, kit-watch `complete_through`). Our account has commented 6 times; do not post without new substance. |
 | PayAINetwork/docs#98 (our shadow proposal) | Open, no reply yet. |
 | solana-foundation/kora#682 (our issue) | Open, no reply yet. |
 
@@ -314,15 +314,15 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
 
 ---
 
-## 5. State as of 2026-09-30 (update when it changes)
+## 5. State as of 2026-10-01 (update when it changes)
 
-- **Production:** v0.6.0, the audit release, deployed on 2026-09-30 from commit `7d1e3ab` with `scripts/deploy.sh`.
+- **Production:** v0.6.1 (2026-10-01): every attestation signs a freshness anchor per evidence item — the OFAC SDN.XML release (`as_of` + `digest`, the file's SHA-256 as OFAC serves it), the kit watch's coverage (`complete_through` per chain, and `gaps`), the simulated block (`at_block`). v0.6.0, the audit release, was deployed on 2026-09-30 from commit `7d1e3ab` with `scripts/deploy.sh`.
   - Single-use payments, payer screening, a checked attestation key (with next-key rotation), HTTPS only, rate limits, Workers Logs and settlement records;
   - the model canary and the ScamSniffer refresh on the cron;
   - credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;
   - Bazaar and x402scan listings, `/openapi.json`.
 - **Audit (2026-09-30):** no critical findings, 11 high. Every finding code can fix is fixed. What remains needs the owner: repository settings, DNS, the git history rewrite, npm names.
-- **Packages:** `@x402check/client` 0.4.0 and `@x402check/mcp` 0.3.0 on npm (2026-09-30, tags `client-v0.4.0`, `mcp-v0.3.0`); the MCP Registry lists 0.3.0 as latest, published by the CI-gated workflow.
+- **Packages:** `@x402check/client` 0.4.0 and `@x402check/mcp` 0.3.0 on npm (the MCP's display of the v0.6.1 anchors ships in its next release) (2026-09-30, tags `client-v0.4.0`, `mcp-v0.3.0`); the MCP Registry lists 0.3.0 as latest, published by the CI-gated workflow.
 - **Solana signing guard** (`guardSolanaSigner`, since `@x402check/client` 0.3.0): decodes each transaction (lookup tables and token-account owners over RPC), refuses owner-change drains locally, and checks recipients, delegates and called programs. 4/4 on 1 real x402 payment and 3 constructed cases (`eval/solana-guard.ts`).
 - **Guarded x402 payments** (`x402check_pay`, since `@x402check/mcp` 0.2.0): the MCP server pays a resource only after x402check clears the exact payee, right before signing. A `warn` goes to the user through elicitation.
   - One real payment through the tool settled on Base (`eval/mcp-pay.ts`), to x402check's own `pay_to`, a trusted payee that is not checked.
