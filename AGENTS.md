@@ -147,6 +147,8 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | x402-foundation/x402#2300 (trust-provider, not ours) | Active: participants are converging on a type-specific freshness anchor per evidence item. On 2026-10-01 we posted a live v0.6.1 attestation showing ours (OFAC release + SDN.XML digest, kit-watch `complete_through`). Our account has commented 6 times; do not post without new substance. |
 | PayAINetwork/docs#98 (our shadow proposal) | Open, no reply yet. |
 | solana-foundation/kora#682 (our issue) | Open, no reply yet. |
+| romudille-bit/agentpay#9 (our proposal) | Opened 2026-10-01: screen the `pay_to` that `verified_route` (AgentPay's buyer-side x402 router) picks, as a signed evidence item. Its author commented on x402#2300 right after us. Offered a PR behind a flag. |
+| romudille-bit/awesome-x402#1 (our PR) | Opened 2026-10-01: x402check under Security & Audits. The list has been idle since March. |
 
 ---
 
