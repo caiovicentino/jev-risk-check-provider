@@ -45,6 +45,10 @@ const HOST = /^(?=.{4,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const FEED_CHECK = /^[a-z0-9][a-z0-9_-]{0,47}@[0-9A-Za-z.:+/-]{0,40}:[a-z_]{1,20}$/;
 const HEX64 = /^[0-9a-fA-F]{64}$/;
+/** A source artifact's digest, as signed in `checks.sanctions.digest`. */
+const ARTIFACT_DIGEST = /^sha256:[0-9a-f]{64}$/;
+/** A CAIP-2 network id, as the keys of the kit watch's coverage clock. */
+const NETWORK_KEY = /^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/;
 /** An identifier, date, network or version ("not_listed", "2026-09-23", "eip155:8453", "jev-wallet-risk/v6"). */
 const WORD = /^[A-Za-z0-9_.:/-]{1,64}$/;
 const CLAIM_KEY = /^[a-z][a-z0-9_]{0,31}$/;
@@ -179,6 +183,13 @@ function safePayment(value: unknown): unknown {
 }
 
 /** The provider-verified checks, as identifiers, dates and networks. */
+/** A per-chain block map (`complete_through`, `gaps`): network → non-negative integer, else NOT_SHOWN. */
+function blockMap(value: unknown): unknown {
+  if (!isRecord(value)) return NOT_SHOWN;
+  const entries = Object.entries(value);
+  return entries.length <= 8 && entries.every(([k, n]) => NETWORK_KEY.test(k) && typeof n === "number" && Number.isSafeInteger(n) && n >= 0) ? value : NOT_SHOWN;
+}
+
 function safeChecks(value: unknown): unknown {
   if (!isRecord(value)) return NOT_SHOWN;
   const out: Record<string, unknown> = {};
@@ -190,7 +201,20 @@ function safeChecks(value: unknown): unknown {
       out[key] = Object.fromEntries(
         Object.entries(v)
           .filter(([k]) => CLAIM_KEY.test(k))
-          .map(([k, x]) => [k, k === "findings" ? (Array.isArray(x) ? x.filter(isSafeId) : NOT_SHOWN) : wordValue(x)]),
+          .map(([k, x]) => [
+            k,
+            k === "findings"
+              ? Array.isArray(x)
+                ? x.filter(isSafeId)
+                : NOT_SHOWN
+              : k === "digest"
+                ? typeof x === "string" && ARTIFACT_DIGEST.test(x)
+                  ? x
+                  : NOT_SHOWN
+                : k === "complete_through" || k === "gaps"
+                  ? blockMap(x)
+                  : wordValue(x),
+          ]),
       );
     } else out[key] = NOT_SHOWN;
   }

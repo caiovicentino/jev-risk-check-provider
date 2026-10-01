@@ -121,6 +121,8 @@ export type Category = KnownCategory | (string & {});
 export interface SanctionsEvidence {
   list: "ofac-sdn";
   as_of: string;
+  /** "sha256:<hex>" of the source artifact, OFAC's SDN.XML (since provider 0.6.1). */
+  digest?: string;
   status: "listed" | "not_listed";
   entity?: string;
   ticker?: string;
@@ -223,6 +225,8 @@ export interface SimulationEvidence {
   forwarder_verified?: boolean;
   /** Why the simulation is incomplete (finding `simulation_incomplete`): "unclassified", "logs_truncated", "flows_truncated". */
   limits?: string[];
+  /** The block whose state the transaction was simulated on (since provider 0.6.1). */
+  at_block?: number;
 }
 
 /** v0.4: what the kit watch knows about an address in the request. */
@@ -250,6 +254,10 @@ export interface KitWatchEvidence {
   /** When the watch last scanned. */
   as_of: string;
   status: "hit" | "clear" | "unavailable";
+  /** The coverage clock: per chain (CAIP-2), the last block the scan completed (since provider 0.6.1). */
+  complete_through?: Record<string, number>;
+  /** Per chain, skipped ranges the scan recorded after outages, only when any (since provider 0.6.1). */
+  gaps?: Record<string, number>;
   hits?: KitWatchHit[];
 }
 
@@ -298,13 +306,16 @@ export interface RiskCheckBatchResponse {
 // ---------------------------------------------------------------------------
 
 export interface AttestationChecks {
-  sanctions: { list: string; as_of: string; status: string };
+  /** `digest`: "sha256:<hex>" of OFAC's SDN.XML the screen ran against (since provider 0.6.1). */
+  sanctions: { list: string; as_of: string; digest?: string; status: string };
   domain?: { host: string; impersonation: string };
   onchain: { status: string; network?: string; activity?: string };
   /** Threat feeds consulted, as "source@as_of:status". */
   feeds?: string[];
-  /** v0.3 */
-  simulation?: { status: string; network?: string; findings?: string[] };
+  /** v0.3; `at_block`: the block whose state was simulated (since provider 0.6.1). */
+  simulation?: { status: string; network?: string; findings?: string[]; at_block?: number };
+  /** The kit watch, when consulted: scan clock, status and coverage clock (since provider 0.6.1). */
+  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number>; gaps?: Record<string, number> };
   /** Question set, or "skipped" (e.g. deterministic sanctions verdict). */
   model: string;
   /** The model revision that answered, signed (since provider 0.6.0). */

@@ -10,7 +10,7 @@
 // A cold isolate waits briefly for the first refresh; every attestation states the
 // list date it used.
 import { hashSetFromBytes, feedHost, type LoadedFeed } from "../src/threat-intel.js";
-import { sanctionsListMeta, setSanctionsList, type SanctionsRow } from "../src/sanctions.js";
+import { artifactDigest, sanctionsListMeta, setSanctionsList, type SanctionsRow } from "../src/sanctions.js";
 import type { ExecutionContext, WorkerEnv } from "./runtime.js";
 
 export const DEFAULT_FEEDS_URL = "https://raw.githubusercontent.com/caiovicentino/jev-risk-check-provider/feeds/";
@@ -30,7 +30,8 @@ type Manifest = {
   format: number;
   generated_at: string;
   metamask?: { as_of: string; entries: number; bin_sha256: string; json_sha256: string };
-  ofac?: { publish_date: string; addresses: number; json_sha256: string };
+  /** `xml_sha256`: SHA-256 of the SDN.XML the snapshot was built from (manifests since 2026-10-01). */
+  ofac?: { publish_date: string; addresses: number; json_sha256: string; xml_sha256?: string };
 };
 
 export type FreshMetamask = LoadedFeed & { allow: ReadonlySet<string>; entries: number };
@@ -118,12 +119,17 @@ export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: 
     try {
       const json = await get(base, "ofac-sdn.json", fetchImpl);
       if ((await sha256Hex(json)) !== of.json_sha256) throw new Error("ofac: checksum mismatch");
-      const parsed = JSON.parse(new TextDecoder().decode(json)) as { meta?: { source?: unknown }; rows?: unknown };
+      const parsed = JSON.parse(new TextDecoder().decode(json)) as { meta?: { source?: unknown; sha256?: unknown }; rows?: unknown };
       const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
       const valid = rows.every((r): r is SanctionsRow => Array.isArray(r) && r.length === 4 && typeof r[0] === "string" && r[0].length > 0 && r[0].length <= 128 && typeof r[1] === "string" && typeof r[2] === "number" && typeof r[3] === "string");
       if (!valid || rows.length !== of.addresses) throw new Error("ofac: malformed rows");
       if (rows.length < Math.max(embedded.ofacRows, ofacNow.addresses) * MIN_OFAC_RATIO) throw new Error(`ofac: ${rows.length} addresses is a large shrink`);
-      setSanctionsList(rows as SanctionsRow[], { source: typeof parsed.meta?.source === "string" ? parsed.meta.source : "OFAC SDN", publish_date: of.publish_date });
+      // The SDN.XML digest, from the signed manifest and the checksummed snapshot: both must agree when both say.
+      const fromManifest = artifactDigest(of.xml_sha256);
+      const fromSnapshot = artifactDigest(parsed.meta?.sha256);
+      if (fromManifest && fromSnapshot && fromManifest !== fromSnapshot) throw new Error("ofac: source digest mismatch");
+      const digest = fromManifest ?? fromSnapshot;
+      setSanctionsList(rows as SanctionsRow[], { source: typeof parsed.meta?.source === "string" ? parsed.meta.source : "OFAC SDN", publish_date: of.publish_date, ...(digest ? { digest } : {}) });
     } catch (err) {
       errors.push(String(err instanceof Error ? err.message : err));
     }

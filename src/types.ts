@@ -57,6 +57,10 @@ export type KitWatchEvidence = {
   /** When the watch last scanned. */
   as_of: string;
   status: "hit" | "clear" | "unavailable";
+  /** The coverage clock (since provider 0.6.1): per chain, the last block the scan completed. */
+  complete_through?: Record<string, number>;
+  /** Per chain, skipped ranges the scan recorded after outages (only when any). */
+  gaps?: Record<string, number>;
   hits?: import("./kit-watch.js").KitWatchHit[];
 };
 

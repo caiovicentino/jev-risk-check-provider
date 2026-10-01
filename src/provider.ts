@@ -14,7 +14,7 @@ import { GRANTING_INTERACTIONS, type Answer, type Evidence, type KitWatchEvidenc
 
 export const PROVIDER_DID_PREFIX = "did:web:";
 export const ATTESTATION_TTL_MS = 60 * 60 * 1000;
-export const PROVIDER_VERSION = "0.6.0";
+export const PROVIDER_VERSION = "0.6.1";
 
 export type ProviderConfig = {
   host: string;
@@ -272,7 +272,17 @@ async function kitWatchEvidence(
   const asOf = await kw.asOf().catch(() => "");
   // Only evidence against an address makes the watch a "hit" (a listed address); notes are reported, not counted.
   const strong = hits.filter((h) => !KIT_WATCH_INFORMATIONAL.has(h.kind));
-  return { as_of: asOf, status: strong.length ? "hit" : failed ? "unavailable" : "clear", ...(hits.length ? { hits: hits.slice(0, 10) } : {}) };
+  return { as_of: asOf, status: strong.length ? "hit" : failed ? "unavailable" : "clear", ...(await coverageFor(kw, [network])), ...(hits.length ? { hits: hits.slice(0, 10) } : {}) };
+}
+
+/** The coverage clock for these chains (the ones the verdict consulted); nothing when unknown. */
+async function coverageFor(kw: KitWatchLookup, chains: readonly string[]): Promise<Pick<KitWatchEvidence, "complete_through" | "gaps">> {
+  const coverage = kw.coverage ? await kw.coverage().catch(() => undefined) : undefined;
+  if (!coverage) return {};
+  const pick = (m: Record<string, number> | undefined) => Object.fromEntries(chains.filter((c) => typeof m?.[c] === "number").map((c) => [c, m?.[c] as number]));
+  const through = pick(coverage.complete_through);
+  const gaps = pick(coverage.gaps);
+  return { ...(Object.keys(through).length ? { complete_through: through } : {}), ...(Object.keys(gaps).length ? { gaps } : {}) };
 }
 
 type Verdict = { score: number; tier: RiskTier; categories: string[]; model: string; model_id?: string | undefined };
@@ -406,7 +416,7 @@ export class Provider {
       const hits: KitWatchHit[] = [...(entries ?? [])].map(([address, e]) => ({ address, role: "subject" as const, kind: e.k, family: e.f, chain: e.c, first_seen: new Date(e.t * 1000).toISOString(), via: "watchlist" as const }));
       const strong = hits.filter((h) => !KIT_WATCH_INFORMATIONAL.has(h.kind));
       const asOf = await anyChain.asOf().catch(() => "");
-      kitWatch = { as_of: asOf, status: strong.length ? "hit" : entries === null ? "unavailable" : "clear", ...(hits.length ? { hits } : {}) };
+      kitWatch = { as_of: asOf, status: strong.length ? "hit" : entries === null ? "unavailable" : "clear", ...(await coverageFor(anyChain, WATCH_CHAINS)), ...(hits.length ? { hits } : {}) };
       feedResults = [...feedResults, { source: "x402check-kit-watch", kind: "address", as_of: asOf, status: kitWatch.status }];
     }
 
@@ -544,12 +554,30 @@ export class Provider {
       : undefined;
     const evidence: Evidence = { sanctions, ...(domain ? { domain } : {}), onchain, ...(feeds.length ? { feeds } : {}), ...(simulation ? { simulation } : {}), ...(kitWatch ? { kit_watch: kitWatch } : {}), model: verdict.model, ...(verdict.model_id ? { model_id: verdict.model_id } : {}) };
     const signedChecks: AttestationChecks = {
-      sanctions: { list: sanctions.list, as_of: sanctions.as_of, status: sanctions.status },
+      sanctions: { list: sanctions.list, as_of: sanctions.as_of, ...(sanctions.digest ? { digest: sanctions.digest } : {}), status: sanctions.status },
       ...(domain ? { domain: { host: domain.host, impersonation: domain.impersonation } } : {}),
       onchain: { status: onchain.status, ...(onchain.network ? { network: onchain.network } : {}), ...(onchain.activity ? { activity: onchain.activity } : {}) },
       ...(feeds.length ? { feeds: feeds.map((f) => `${f.source}@${f.as_of || "n/a"}:${f.status}`) } : {}),
       ...(simulation
-        ? { simulation: { status: simulation.status, ...(simulation.network ? { network: simulation.network } : {}), ...(simulation.findings?.length ? { findings: simulation.findings } : {}) } }
+        ? {
+            simulation: {
+              status: simulation.status,
+              ...(simulation.network ? { network: simulation.network } : {}),
+              ...(simulation.findings?.length ? { findings: simulation.findings } : {}),
+              ...(simulation.at_block !== undefined ? { at_block: simulation.at_block } : {}),
+            },
+          }
+        : {}),
+      // The kit watch's scan clock and coverage clock (no watchlist content: hits stay in the unsigned evidence).
+      ...(kitWatch
+        ? {
+            kit_watch: {
+              as_of: kitWatch.as_of,
+              status: kitWatch.status,
+              ...(kitWatch.complete_through ? { complete_through: kitWatch.complete_through } : {}),
+              ...(kitWatch.gaps ? { gaps: kitWatch.gaps } : {}),
+            },
+          }
         : {}),
       model: verdict.model,
       ...(verdict.model_id ? { model_id: verdict.model_id } : {}),

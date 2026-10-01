@@ -29,7 +29,8 @@ function main(): void {
     format: FEEDS_FORMAT,
     generated_at: new Date().toISOString(),
     metamask: { as_of: METAMASK_FEED_META.as_of, commit: METAMASK_FEED_META.commit, entries: bin.byteLength / 8, bin_sha256: sha256(bin), json_sha256: sha256(mmJson) },
-    ofac: { publish_date: OFAC_SDN_META.publish_date, addresses: OFAC_SDN_ADDRESSES.length, json_sha256: sha256(ofacJson) },
+    // xml_sha256: the SDN.XML the snapshot was built from (the artifact relying parties can fetch and recompute).
+    ofac: { publish_date: OFAC_SDN_META.publish_date, addresses: OFAC_SDN_ADDRESSES.length, json_sha256: sha256(ofacJson), xml_sha256: OFAC_SDN_META.sha256 },
   };
   writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2));
   writeFileSync(

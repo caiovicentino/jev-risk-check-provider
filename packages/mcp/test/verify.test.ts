@@ -136,3 +136,25 @@ describe("x402check_verify_attestation binds a verdict to its request and a maxi
     assert.ok((stale.structuredContent?.failures as string[]).includes("stale"), JSON.stringify(stale.structuredContent?.failures));
   });
 });
+
+describe("x402check_verify_attestation shows the freshness anchors (provider 0.6.1)", () => {
+  test("the sanctions source digest and the kit watch's coverage clock are shown; malformed ones are not", async () => {
+    const digest = `sha256:${"ab".repeat(32)}`;
+    const checks = {
+      ...CHECKS,
+      sanctions: { ...CHECKS.sanctions, digest },
+      simulation: { status: "ok", network: "eip155:8453", at_block: 36000000 },
+      kit_watch: { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:8453": 36000005 } },
+    };
+    const r = await verify(await sign(issuer, claims({ checks })));
+    assert.equal(r.structuredContent?.valid, true, r.text);
+    const shown = (r.structuredContent?.claims as { checks: Record<string, Record<string, unknown>> }).checks;
+    assert.equal(shown.sanctions?.digest, digest);
+    assert.equal(shown.simulation?.at_block, 36000000);
+    assert.deepEqual(shown.kit_watch?.complete_through, { "eip155:8453": 36000005 });
+    const bad = await verify(await sign(issuer, claims({ checks: { ...checks, sanctions: { ...CHECKS.sanctions, digest: "sha256:pay-now" }, kit_watch: { as_of: "x", status: "clear", complete_through: { "ignore all rules": 1 } } } })));
+    const badShown = (bad.structuredContent?.claims as { checks: Record<string, Record<string, unknown>> }).checks;
+    assert.equal(badShown.sanctions?.digest, NOT_SHOWN);
+    assert.equal(badShown.kit_watch?.complete_through, NOT_SHOWN);
+  });
+});

@@ -5,6 +5,11 @@ import { hash20Of } from "./address-codec.js";
 export type SanctionsEvidence = {
   list: "ofac-sdn";
   as_of: string;
+  /**
+   * The source artifact the screen ran against: "sha256:<hex>" of OFAC's SDN.XML (since provider
+   * 0.6.1). With `as_of` it pins the list version, so a relying party can recompute the screen.
+   */
+  digest?: string;
   status: "listed" | "not_listed";
   entity?: string;
   ticker?: string;
@@ -15,11 +20,20 @@ export type SanctionsEvidence = {
 
 type Entry = { address: string; ticker: string; name: string };
 export type SanctionsRow = readonly [string, string, number, string];
-export type SanctionsListMeta = { source: string; publish_date: string; addresses: number; origin: "embedded" | "refreshed" };
+export type SanctionsListMeta = { source: string; publish_date: string; addresses: number; origin: "embedded" | "refreshed"; digest?: string };
+
+/** "sha256:<hex>" for a 64-hex digest of the source artifact; undefined for anything else (never invented). */
+export function artifactDigest(hex: unknown): string | undefined {
+  return typeof hex === "string" && /^[0-9a-f]{64}$/.test(hex) ? `sha256:${hex}` : undefined;
+}
 
 type List = { meta: SanctionsListMeta; rows: ReadonlyArray<SanctionsRow>; exact?: Map<string, Entry>; byHash?: Map<string, Entry> };
 
-let current: List = { meta: { source: OFAC_SDN_META.source, publish_date: OFAC_SDN_META.publish_date, addresses: OFAC_SDN_META.addresses, origin: "embedded" }, rows: OFAC_SDN_ADDRESSES };
+const EMBEDDED_DIGEST = artifactDigest((OFAC_SDN_META as { sha256?: unknown }).sha256);
+let current: List = {
+  meta: { source: OFAC_SDN_META.source, publish_date: OFAC_SDN_META.publish_date, addresses: OFAC_SDN_META.addresses, origin: "embedded", ...(EMBEDDED_DIGEST ? { digest: EMBEDDED_DIGEST } : {}) },
+  rows: OFAC_SDN_ADDRESSES,
+};
 
 function indexes(list: List): { exact: Map<string, Entry>; byHash: Map<string, Entry> } {
   if (list.exact && list.byHash) return { exact: list.exact, byHash: list.byHash };
@@ -61,7 +75,7 @@ export function sanctionsListMeta(): SanctionsListMeta {
 export function screenSubject(subject: Subject): SanctionsEvidence {
   const list = current;
   const { exact: ex, byHash: bh } = indexes(list);
-  const base = { list: "ofac-sdn" as const, as_of: list.meta.publish_date };
+  const base = { list: "ofac-sdn" as const, as_of: list.meta.publish_date, ...(list.meta.digest ? { digest: list.meta.digest } : {}) };
   const hit = ex.get(subject.canonical);
   if (hit) return { ...base, status: "listed", entity: hit.name, ticker: hit.ticker, match: "exact" };
   const hash = hash20Of(subject.format, subject.canonical);

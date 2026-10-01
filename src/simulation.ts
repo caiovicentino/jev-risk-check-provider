@@ -48,7 +48,19 @@ export type SimulationEvidence = {
   forwarder_verified?: boolean;
   /** Why the result is incomplete (`simulation_incomplete`): e.g. "unclassified", "logs_truncated". */
   limits?: string[];
+  /**
+   * The block whose state the transaction was simulated on (the chain head at the time; since
+   * provider 0.6.1). eth_simulateV1 builds the simulated block on top of it.
+   */
+  at_block?: number;
 };
+
+/** The state block of an eth_simulateV1 result: the simulated block's parent. */
+function stateBlockOf(number: unknown): number | undefined {
+  if (typeof number !== "string" || !/^0x[0-9a-fA-F]{1,16}$/.test(number)) return undefined;
+  const n = Number.parseInt(number, 16);
+  return Number.isSafeInteger(n) && n >= 1 ? n - 1 : undefined;
+}
 
 /**
  * What the user knowingly intends to give: an address, optionally scoped to one asset
@@ -468,7 +480,7 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
       ...(tx.data && tx.data !== "0x" ? { input: tx.data } : {}),
       gas: "0x1c9c380",
     };
-    let result: { calls?: Array<{ status?: string; logs?: Log[] }> } | undefined;
+    let result: { number?: string; calls?: Array<{ status?: string; logs?: Log[] }> } | undefined;
     try {
       const body = {
         jsonrpc: "2.0",
@@ -478,7 +490,7 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
         // sender can currently afford it.
         params: [{ blockStateCalls: [{ stateOverrides: { [from]: { balance: `0x${(value + BALANCE_HEADROOM).toString(16)}` } }, calls: [call] }], traceTransfers: true, validation: false }, "latest"],
       };
-      const res = (await rpcWithFallback(urls, body, timeoutMs, doFetch, (json) => Array.isArray((json as { result?: unknown }).result))) as { result?: Array<{ calls?: Array<{ status?: string; logs?: Log[] }> }>; error?: unknown };
+      const res = (await rpcWithFallback(urls, body, timeoutMs, doFetch, (json) => Array.isArray((json as { result?: unknown }).result))) as { result?: Array<{ number?: string; calls?: Array<{ status?: string; logs?: Log[] }> }>; error?: unknown };
       if (res.error || !Array.isArray(res.result)) return { status: "unavailable", network };
       result = res.result[0];
     } catch {
@@ -486,6 +498,8 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
     }
     const c = result?.calls?.[0];
     if (!c) return { status: "unavailable", network };
+    const atBlock = stateBlockOf(result?.number);
+    const anchor = atBlock !== undefined ? { at_block: atBlock } : {};
     if (c.status !== "0x1") {
       // Still worth knowing whether the called contract is a known drainer kit.
       let codes = new Map<string, CodeFacts>();
@@ -497,6 +511,7 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
         findings: ["simulation_reverted", ...(matches.length ? ["known_drainer_code"] : [])],
         ...(matches.length ? { code_matches: matches } : {}),
         ...(context.codeMatch ? { code_checked: checked } : {}),
+        ...anchor,
       };
     }
 
@@ -618,6 +633,7 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
       ...(context.codeMatch ? { code_checked: checked } : {}),
       ...(forwarderVerified !== undefined ? { forwarder_verified: forwarderVerified } : {}),
       ...(limits.length ? { limits } : {}),
+      ...anchor,
     };
   };
 }

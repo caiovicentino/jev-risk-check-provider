@@ -51,12 +51,16 @@ export function jwksDocument(kid: string, jwk: Jwk): { keys: Jwk[] } {
 }
 
 export type AttestationChecks = {
-  sanctions: { list: string; as_of: string; status: string };
+  /** `digest` (since provider 0.6.1): "sha256:<hex>" of the source artifact (OFAC's SDN.XML). */
+  sanctions: { list: string; as_of: string; digest?: string | undefined; status: string };
   domain?: { host: string; impersonation: string } | undefined;
   onchain: { status: string; network?: string | undefined; activity?: string | undefined };
   /** Threat feeds consulted, as "source@as_of:status". */
   feeds?: string[] | undefined;
-  simulation?: { status: string; network?: string | undefined; findings?: string[] | undefined } | undefined;
+  /** `at_block` (since provider 0.6.1): the block whose state was simulated. */
+  simulation?: { status: string; network?: string | undefined; findings?: string[] | undefined; at_block?: number | undefined } | undefined;
+  /** The kit watch, when it was consulted (since provider 0.6.1): its scan clock and coverage clock. */
+  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number> | undefined; gaps?: Record<string, number> | undefined } | undefined;
   model: string;
   /** The model revision that answered (the vendor's alias can change underneath). */
   model_id?: string | undefined;

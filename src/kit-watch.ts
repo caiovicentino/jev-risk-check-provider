@@ -395,10 +395,19 @@ export const KIND_RANK: Record<WatchKind, number> = {
 };
 
 /** Evaluation-time access to the kit watch (deploy/kit-watch.ts in production). */
+/**
+ * The watch's coverage clock (since provider 0.6.1): per chain, the last block the scan completed
+ * (`complete_through`), and how many skipped ranges it recorded after outages (`gaps`, only when
+ * any). Aggregates only: nothing about what the watchlist holds.
+ */
+export type KitWatchCoverage = { complete_through: Record<string, number>; gaps?: Record<string, number> };
+
 export type KitWatchLookup = {
   families(): Promise<FamilyIndex>;
   /** When the watch last scanned (ISO): stated with every verdict that consulted it. */
   asOf(): Promise<string>;
+  /** The coverage clock (signed with each verdict that consulted the watch). */
+  coverage?(): Promise<KitWatchCoverage>;
   /** Watchlist entries for these addresses that hold on `network`. */
   addresses(addresses: string[], network: string): Promise<Map<string, WatchEntry>>;
   /** The scan's verdict on an EIP-7702 delegate (covers delegates with no logic fingerprint). */

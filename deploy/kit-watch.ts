@@ -1,4 +1,4 @@
-import { EOA_KINDS, indexFamilies, KIND_RANK, scanBlocks, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchLookup, type Registry, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
+import { EOA_KINDS, indexFamilies, KIND_RANK, scanBlocks, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchCoverage, type KitWatchLookup, type Registry, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
 import type { WorkerEnv } from "./runtime.js";
 
@@ -154,17 +154,30 @@ export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fet
 }
 
 const FAMILY_TTL_MS = 5 * 60 * 1000;
-let familyCache: { at: number; value: Promise<{ index: FamilyIndex; asOf: string }> } | null = null;
+let familyCache: { at: number; value: Promise<{ index: FamilyIndex; asOf: string; coverage: KitWatchCoverage }> } | null = null;
 const delegateCache = new Map<WatchChain, { at: number; value: Promise<Record<string, DelegateVerdict>> }>();
 
-async function loadFamilies(env: WorkerEnv): Promise<{ index: FamilyIndex; asOf: string }> {
+/** The coverage clock from the cron's stats: the cursor is the last block a run completed. */
+export function coverageOf(stats: KitWatchStats): KitWatchCoverage {
+  const complete_through: Record<string, number> = {};
+  const gaps: Record<string, number> = {};
+  for (const chain of WATCH_CHAINS) {
+    const c = stats.chains[chain];
+    if (!c || !(c.cursor > 0)) continue;
+    complete_through[chain] = c.cursor;
+    if (c.gaps?.length) gaps[chain] = c.gaps.length;
+  }
+  return { complete_through, ...(Object.keys(gaps).length ? { gaps } : {}) };
+}
+
+async function loadFamilies(env: WorkerEnv): Promise<{ index: FamilyIndex; asOf: string; coverage: KitWatchCoverage }> {
   const [registry, learned, stats] = await Promise.all([
     readJson<Registry>(env, KW.registry, { updated_at: "", families: [] }),
     readJson<Family[]>(env, KW.learned, []),
     readJson<KitWatchStats>(env, KW.stats, { updated_at: "", chains: {} }),
   ]);
   if (!registry.families.length) throw new Error("kit watch registry not seeded");
-  return { index: indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] }), asOf: stats.updated_at || registry.updated_at };
+  return { index: indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] }), asOf: stats.updated_at || registry.updated_at, coverage: coverageOf(stats) };
 }
 
 /** Evaluation-time lookups: watchlist entries per address (KV), families (cached 5 min). */
@@ -188,6 +201,7 @@ export function kitWatchLookup(env: WorkerEnv): KitWatchLookup | null {
   return {
     families: async () => (await families()).index,
     asOf: async () => (await families()).asOf,
+    coverage: async () => (await families()).coverage,
     delegate: async (network, delegate) => ((WATCH_CHAINS as readonly string[]).includes(network) ? (await delegates(network as WatchChain))[delegate] : undefined),
     addresses: async (addresses, network) => {
       const out = new Map<string, WatchEntry>();
