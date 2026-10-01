@@ -15,6 +15,8 @@ export type RiskCheckClientInfo = RiskCheckExtensionInfo & {
 export type SanctionsEvidence = {
   list: "ofac-sdn";
   as_of: string;
+  /** "sha256:<hex>" of the source artifact (OFAC's SDN.XML) the screen ran against (since provider 0.6.1). */
+  digest?: string;
   status: "listed" | "not_listed";
   entity?: string;
   ticker?: string;
