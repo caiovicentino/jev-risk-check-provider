@@ -39,6 +39,13 @@
     },
     "@metamask/snaps-controllers": {
       "@metamask/snaps-rpc-methods": "13.1.0"
+    },
+    "@metamask/eth-json-rpc-provider": {
+      "uuid": "^11.1.1"
+    },
+    "fast-xml-parser": "^5.7.0",
+    "@metamask/utils": {
+      "uuid": "^11.1.1"
     }
   }
 }
