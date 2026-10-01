@@ -31,16 +31,18 @@ export function normalizeListedAddress(raw: string): string {
   return /^0x[0-9a-fA-F]{40}$/.test(a) ? a.toLowerCase() : a;
 }
 
-async function loadXml(): Promise<string> {
+/** The SDN.XML bytes exactly as OFAC serves them: the signed digest is their SHA-256, so anyone can recompute it. */
+async function loadXml(): Promise<Uint8Array> {
   const local = process.argv[2];
-  if (local) return readFileSync(local, "utf8");
+  if (local) return readFileSync(local);
   const res = await fetch(SOURCE);
   if (!res.ok) throw new Error(`OFAC download failed: HTTP ${res.status}`);
-  return await res.text();
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 async function main(): Promise<void> {
-  const xml = await loadXml();
+  const bytes = await loadXml();
+  const xml = new TextDecoder().decode(bytes);
   const publish = xml.match(/<Publish_Date>(\d{2})\/(\d{2})\/(\d{4})<\/Publish_Date>/);
   if (!publish) throw new Error("Publish_Date not found — not an SDN.XML export?");
   const publishDate = `${publish[3]}-${publish[1]}-${publish[2]}`;
@@ -60,7 +62,7 @@ async function main(): Promise<void> {
   }
   if (rows.size < 100) throw new Error(`only ${rows.size} digital currency addresses parsed — format changed?`);
   const sorted = [...rows.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1));
-  const sha256 = createHash("sha256").update(xml).digest("hex");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
   const byTicker: Record<string, number> = {};
   for (const r of sorted) byTicker[r[1]] = (byTicker[r[1]] ?? 0) + 1;
 
