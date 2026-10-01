@@ -143,7 +143,7 @@ A compact JWS (`alg: ES256`, `typ: risk-check+jwt`, `kid` as published in the DI
 |---|---|
 | `iss`, `sub`, `iat`, `exp`, `jti` | issuer `did:web:x402check.xyz`, the subject wallet, times, unique id |
 | `score`, `tier`, `categories` | the verdict and the findings behind it |
-| `checks` | **what the provider verified**: `sanctions` (list, date, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`, including code-fingerprint sets), `simulation` (status, network, findings), `model` (question set, or `skipped`), `model_id` (the model id the backend reported; through the AI Gateway this is the alias `typesafe-ai/jev`) |
+| `checks` | **what the provider verified**, each item with its freshness anchor (since 0.6.1; [METHODOLOGY §5](docs/METHODOLOGY.md)): `sanctions` (list, date, `digest` of OFAC's SDN.XML, status), `domain` (impersonation), `onchain` (status, network, activity), `feeds` (`source@date:status`, including code-fingerprint sets), `simulation` (status, network, findings, `at_block`), `kit_watch` (scan clock, status, `complete_through` per chain), `model` (question set, or `skipped`), `model_id` (the model id the backend reported; through the AI Gateway this is the alias `typesafe-ai/jev`) |
 | `asserted` | what the caller **claimed** (screening / pre-authorization): not verified |
 | `payment`, `interaction`, `aud` | what the verdict was issued for |
 | `input_hash` | SHA-256 over the canonical normalized inputs, sources and question set |

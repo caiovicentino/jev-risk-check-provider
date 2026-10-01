@@ -1,4 +1,4 @@
-# Evidence — x402check v0.6 (v0.3.0–v0.6.0)
+# Evidence — x402check v0.6 (v0.3.0–v0.6.1)
 
 **v0.6.0** is the audit release (2026-09-30). It closes paths around the rules rather than adding new ones, and it re-measures the signing guard. It was measured in production on v0.6.0 (Worker commit `7d1e3ab`) on 2026-09-30 (UTC); see the next section.
 

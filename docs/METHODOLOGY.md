@@ -110,7 +110,7 @@ Tiers: **low** ≥ 80; **medium** 60–79 only when a signal is elevated, otherw
 Each verdict is an ES256 JWS (`typ: risk-check+jwt`, with the `kid` the DID document publishes, today `jev-attest-v1`) issued by `did:web:<host>` and valid for one hour. It carries:
 
 - `sub`, `score`, `tier` and `categories`;
-- `checks`: what the provider verified, with list dates and statuses, e.g. `metamask-phishing-detect@2026-09-29:clear`, `forta-phishing-code@2023-01-26:hit`, the on-chain status, the simulation status and findings, the question set (`model`) and the model id the backend reported (`model_id`);
+- `checks`: what the provider verified, with list dates and statuses, e.g. `metamask-phishing-detect@2026-09-29:clear`, `forta-phishing-code@2023-01-26:hit`, the on-chain status, the simulation status and findings, the kit watch's clocks, the question set (`model`) and the model id the backend reported (`model_id`). Each item carries its freshness anchor (§5);
 - `asserted`: what the caller claimed, kept separate from `checks`;
 - `payment` and `interaction`: what the verdict covers;
 - `input_hash`: SHA-256 of the RFC 8785 (JCS) canonical normalized request, the list versions and the question set;
@@ -142,6 +142,19 @@ A verifier that checks only the signature accepts a genuine verdict issued for s
 | Contract verification | — | Blockscout API v2 | live, cached 24 h |
 
 `GET /status` reports the list versions verdicts are using right now, their age, and the last refresh attempt.
+
+### Freshness anchors (since 0.6.1)
+
+Each signed evidence item carries the anchor of its kind, so a relying party can tell how fresh the evidence was, and recompute what can be recomputed, without trusting the provider's word:
+
+| Evidence (`checks`) | Anchor | How a relying party uses it |
+|---|---|---|
+| `sanctions` | `as_of` (OFAC's publish date) and `digest`, the SHA-256 of OFAC's SDN.XML | Fetch the SDN.XML release of that date, check its SHA-256, and recompute the screen for the subject. The digest is signed only when the list in use carries it; it is never borrowed from another list. |
+| `feeds` | `source@as_of:status` per list | The list version consulted (MetaMask's, Forta's and ScamSniffer's dates). |
+| `kit_watch` | `as_of` (the scan clock: the watch's last update) and `complete_through`, per chain the last block the scan completed (the coverage clock); `gaps`, per chain, counts the ranges the scan skipped after outages, when there are any | Compare `complete_through` with the block the payment or delegation happened in: activity after it was not covered. The watchlist itself stays private. |
+| `simulation` | `at_block`, the block whose state the transaction was simulated on | Re-run `eth_simulateV1` against that block. A transaction sent much later can behave differently. |
+
+Fail closed: an anchor a policy requires and the verdict lacks, or one that is too old for it, does not count as a fresh clear. The provider applies the same rule to itself: a lookup that failed raises a review floor (§3), and `/status` marks a stale feed.
 
 ## 6. How we measure
 

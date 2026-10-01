@@ -2,6 +2,16 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.1 — 2026-10-01: freshness anchors
+
+Every signed evidence item now carries the freshness anchor of its kind, the shape discussed in x402-foundation/x402#2300 (each evidence kind brings its own clock instead of one watermark for all). All new fields are optional and additive: verifiers keep accepting older attestations.
+
+- **`checks.sanctions.digest`:** the SHA-256 of OFAC's SDN.XML the screen ran against (`sha256:<hex>`), next to its publish date. A relying party can fetch that release, check the digest and recompute the screen. The feeds manifest now carries the digest too (`ofac.xml_sha256`); a refreshed list whose manifest and snapshot disagree on it is refused, and a list without one signs no digest.
+- **`checks.kit_watch`:** `as_of` (the scan clock), the status, and `complete_through`, per chain the last block the scan completed (the coverage clock), with `gaps` when outages made it skip ranges. Only aggregates: the watchlist stays private.
+- **`checks.simulation.at_block`:** the block whose state the transaction was simulated on, read from the `eth_simulateV1` result (no extra call).
+- METHODOLOGY §5 explains what each anchor lets a relying party check, and the fail-closed rule.
+- The MCP server shows the new fields in `x402check_verify_attestation` (next MCP release).
+
 ## v0.6.0 — 2026-09-30: the audit release
 
 A full multi-agent audit (security, payments, operations, supply chain, evidence) found no critical issue and 11 high ones. This release fixes every finding that code can fix; the rest are owner settings (see the release notes).
