@@ -64,6 +64,45 @@ export function endpointsFor(network: string, defaults: Record<string, readonly 
  * JSON-RPC response without a top-level error. The whole attempt is bounded by
  * `budgetMs`; the primary gets at most 60% of it when a fallback exists.
  */
+/**
+ * Batched reads across endpoints, in order: each endpoint is sent only the items the ones before
+ * it left unanswered, split into batches it accepts (`BATCH_LIMITS`: a keyless tier refuses a
+ * larger batch outright, so it would otherwise be no fallback at all). An item no endpoint answered
+ * within the budget is undefined: unknown, never empty.
+ */
+export async function batchReads(urls: readonly string[], requests: ReadonlyArray<{ method: string; params: unknown[] }>, budgetMs: number, doFetch: typeof fetch, maxBatch = 10): Promise<unknown[]> {
+  const out: unknown[] = Array.from({ length: requests.length }, () => undefined);
+  const deadline = Date.now() + budgetMs;
+  let missing = requests.map((_, i) => i);
+  for (let u = 0; u < urls.length && missing.length; u++) {
+    const url = urls[u] as string;
+    const remaining = deadline - Date.now();
+    if (remaining < 150) break;
+    const timeout = u < urls.length - 1 ? Math.min(remaining, Math.round(budgetMs * 0.6)) : remaining;
+    const size = Math.max(1, Math.min(maxBatch, BATCH_LIMITS[url] ?? maxBatch));
+    const parts = Array.from({ length: Math.ceil(missing.length / size) }, (_, p) => missing.slice(p * size, (p + 1) * size));
+    // An endpoint's parts go out together: the budget is for the whole read, not per part.
+    await Promise.all(
+      parts.map(async (part) => {
+        try {
+          const res = await doFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(part.map((j, k) => ({ jsonrpc: "2.0", id: k + 1, ...requests[j] }))), signal: AbortSignal.timeout(timeout) });
+          if (!res.ok) return;
+          const json = (await res.json()) as unknown;
+          if (!Array.isArray(json)) return;
+          for (const item of json as Array<{ id?: unknown; result?: unknown; error?: unknown }>) {
+            const k = typeof item?.id === "number" ? item.id - 1 : -1;
+            if (k >= 0 && k < part.length && item.error === undefined && item.result !== undefined && item.result !== null) out[part[k] as number] = item.result;
+          }
+        } catch {
+          // this part goes to the next endpoint
+        }
+      }),
+    );
+    missing = missing.filter((j) => out[j] === undefined);
+  }
+  return out;
+}
+
 export async function rpcWithFallback(urls: readonly string[], body: unknown, budgetMs: number, doFetch: typeof fetch, accept: (json: unknown) => boolean = () => true): Promise<unknown> {
   const deadline = Date.now() + budgetMs;
   let lastError: unknown = new Error("no rpc endpoint");

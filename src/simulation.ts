@@ -7,7 +7,7 @@
 // turns findings into deterministic caps. Failures degrade to "unavailable", and a
 // result that could not be completed (unclassified recipients, truncated logs) says
 // so with the `simulation_incomplete` finding: it is never read as clear.
-import { endpointsFor, rpcWithFallback, RPC_ENDPOINTS, SIMULATION_ENDPOINTS } from "./rpc.js";
+import { batchReads, endpointsFor, rpcWithFallback, RPC_ENDPOINTS, SIMULATION_ENDPOINTS } from "./rpc.js";
 import type { ContractIntel } from "./contract-intel.js";
 import { codeFacts, fingerprintsOf, isContractCode, resolveIndirection, verificationTarget, type CodeFacts } from "./code-fingerprint.js";
 
@@ -432,18 +432,9 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
     const urls = endpointsFor(network, RPC_ENDPOINTS);
     if (urls.length === 0 || addresses.length === 0) return out;
     const budget = Math.min(timeoutMs, 1500);
-    const call = async (requests: Array<{ method: string; params: unknown[] }>): Promise<unknown[]> => {
-      const results: unknown[] = [];
-      for (let i = 0; i < requests.length; i += PROBE_BATCH) {
-        const chunk = requests.slice(i, i + PROBE_BATCH);
-        const batch = chunk.map((r, k) => ({ jsonrpc: "2.0", id: k + 1, ...r }));
-        const complete = (json: unknown) => Array.isArray(json) && json.length === chunk.length && json.every((r: { result?: unknown }) => typeof r?.result === "string");
-        const res = (await rpcWithFallback(urls, batch, budget, doFetch, complete)) as Array<{ id: number; result: string }>;
-        const byId = new Map(res.map((r) => [r.id, r.result]));
-        chunk.forEach((_, k) => results.push(byId.get(k + 1)));
-      }
-      return results;
-    };
+    // Each endpoint gets only what the ones before it left unanswered, in batches it accepts:
+    // dRPC's keyless tier refuses more than 3 calls, so a batch of 10 had no fallback on Ethereum.
+    const call = (requests: Array<{ method: string; params: unknown[] }>): Promise<unknown[]> => batchReads(urls, requests, budget, doFetch, PROBE_BATCH);
     const codes = await Promise.all(
       Array.from({ length: Math.ceil(addresses.length / PROBE_BATCH) }, (_, b) => addresses.slice(b * PROBE_BATCH, (b + 1) * PROBE_BATCH)).map((chunk) =>
         call(chunk.map((a) => ({ method: "eth_getCode", params: [a, "latest"] }))).then(
