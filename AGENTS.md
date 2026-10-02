@@ -83,7 +83,7 @@ One agent may hold several roles in one session. Know which lane you are working
 | `docs/` | `STRATEGY.md` (direction), `METHODOLOGY.md` (verdict rules), `EVIDENCE.md` (measurements). The rest are historical records: `DISTRIBUTION.md` holds superseded drafts, `PR-PLAN.md` dates from 2026-09-27, and the `EVIDENCE-*` files and `hackathon/` are older. |
 | `test/` | Provider tests (`npm test`). |
 | `.github/workflows/` | `ci.yml` (push to main and PRs: provider, Worker bundle dry-run, Snap with a manifest-vs-rebuild check, client and MCP, production `npm audit`), `feeds.yml` (daily at 05:17 UTC → the guard compares with the published manifest → signed → `feeds` branch), `publish-mcp-registry.yml` (tag `mcp-v*` → waits for green CI on that main commit → pinned, SHA-256-verified `mcp-publisher` → MCP Registry). Every action is pinned to a commit SHA and every token is least-privilege. |
-| `.github/dependabot.yml` | Weekly version-update PRs, grouped (npm for the root, `packages/client`, `packages/mcp` and `snap`, plus GitHub Actions); each major update gets its own PR. |
+| `.github/dependabot.yml` | Monthly version-update PRs, grouped (npm for the root, `packages/client`, `packages/mcp` and `snap`, plus GitHub Actions); each major update gets its own PR. |
 | `SECURITY.md` | Vulnerability reporting (GitHub private reporting), scope, testing rules and the trust anchor. `/.well-known/security.txt` points to it. |
 | `AGENTS.md`, `CLAUDE.md` | This map. |
 
@@ -165,7 +165,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | Every push to `main` | `ci.yml` | The GitHub Actions status |
 | 05:37 and 17:37 UTC | Worker cron: the ScamSniffer domain and address sets are rebuilt into KV (GPL, runtime only), read at the upstream commit | `/status` → `data.scamsniffer.stale` is false; a refused refresh logs `scamsniffer refresh kept the previous data` (§3.13) |
 | 06:07 and 18:07 UTC | Worker cron: the model canary (fixed cases through the live model) | `/status` → `model.canary.ok` is true and `stale` false |
-| Weekly | Dependabot version-update PRs (grouped; majors one by one) | Review and merge like any change (§3.1) |
+| Monthly | Dependabot version-update PRs (grouped; majors one by one, except the planned migrations it ignores) | Review and merge like any change (§3.1) |
 | Tag `mcp-v*` | `publish-mcp-registry.yml` | The run log, and the registry API |
 
 ### 3.1 Any code change
