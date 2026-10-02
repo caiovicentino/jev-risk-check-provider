@@ -59,8 +59,10 @@ function namespace<T extends { fetch(r: Request): Promise<Response> }>(make: (s:
 function stack(settle: { throws: boolean; calls: number }): Stack {
   const deps = { provider: new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev }) };
   const http = {
-    processHTTPRequest: async (ctx: HTTPRequestContext) =>
-      ctx.paymentHeader ? { type: "payment-verified", paymentPayload: { payload: { authorization: { from: USER } } }, paymentRequirements: {} } : { type: "payment-error", response: { status: 402, headers: {}, body: {} } },
+    processHTTPRequest: async (ctx: HTTPRequestContext) => {
+      const header = ctx.adapter.getHeader("PAYMENT-SIGNATURE");
+      return header ? { type: "payment-verified", paymentPayload: JSON.parse(atob(header)) as unknown, paymentRequirements: {} } : { type: "payment-error", response: { status: 402, headers: {}, body: {} } };
+    },
     processSettlement: async () => {
       settle.calls++;
       if (settle.throws) throw new Error("facilitator connection reset");

@@ -14,7 +14,8 @@ import { KW, runKitWatch, type KitWatchStats } from "./kit-watch.js";
 
 /** Seconds after which /status reports the kit watch as stale (the cron runs every minute). */
 const KIT_WATCH_STALE_S = 180;
-import { CREDIT_PRICING, handleCredits, retryPendingCredits } from "./credits.js";
+import { creditToken, CREDIT_PRICING, handleCredits, retryPendingCredits } from "./credits.js";
+import { paymentVersion } from "./payment-claims.js";
 import type { ExecutionContext, ScheduledController, WorkerEnv } from "./runtime.js";
 // Bundled as a Wrangler Data module (see [[rules]] in wrangler.toml).
 import metamaskPhishing from "../src/data/metamask-phishing.bin";
@@ -180,6 +181,12 @@ function securityHeaders(env: WorkerEnv, local: boolean): Record<string, string>
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+/** A well-formed credential: an x402 v2 PAYMENT-SIGNATURE or a `Bearer x402c_…` credit token. */
+function credentialed(request: Request): boolean {
+  const payment = request.headers.get("PAYMENT-SIGNATURE");
+  return (payment !== null && paymentVersion(payment) === 2) || creditToken(request) !== null;
+}
+
 /** The request router; `fetch` wraps it, so that nothing escapes as an HTML error page. */
 async function handle(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(incoming.url);
@@ -187,26 +194,32 @@ async function handle(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext)
   // route's host over http). Cloudflare sets CF-Connecting-IP itself, so a remote client cannot claim loopback.
   const client = incoming.headers.get("CF-Connecting-IP") ?? "";
   const local = LOCAL_HOSTS.has(url.hostname) || client === "127.0.0.1" || client === "::1";
+  const res = await route(incoming, url, env, local, ctx);
+  // Every response carries CORS and the security headers: errors, 429s and preflights included.
+  for (const [k, v] of Object.entries({ ...CORS_HEADERS, ...securityHeaders(env, local) })) res.headers.set(k, v);
+  return incoming.method === "HEAD" ? new Response(null, { status: res.status, headers: res.headers }) : res;
+}
+
+async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean, ctx?: ExecutionContext): Promise<Response> {
   // HTTPS only: a page redirects; an API call is refused before its body or a bearer token is read.
   if (url.protocol === "http:" && !local) {
     if (incoming.method === "GET" || incoming.method === "HEAD") return new Response(null, { status: 301, headers: { Location: `https://${url.host}${url.pathname}${url.search}` } });
     return json(403, { error: "https_required", detail: "use https://; nothing sent over plain HTTP is processed" });
   }
-  if (incoming.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
-  }
+  if (incoming.method === "OPTIONS") return new Response(null, { status: 204 });
   // HEAD is GET without a body (RFC 9110): discovery tools check /favicon.ico and pages with HEAD.
-  const head = incoming.method === "HEAD";
-  const request = head ? new Request(incoming.url, { method: "GET", headers: incoming.headers }) : incoming;
+  const request = incoming.method === "HEAD" ? new Request(incoming.url, { method: "GET", headers: incoming.headers }) : incoming;
   const path = url.pathname;
   maybeRefreshFeeds(env, ctx, EMBEDDED);
-  // Unpaid, unauthenticated traffic to paid routes and /status is rate-limited per IP (it costs work).
+  // Every POST to a paid route, and /status, is rate-limited per IP: unpaid traffic tightly (it costs
+  // work), traffic with a well-formed credential generously. A header's mere presence never skips it.
   const paidRoute = PROTECTED.has(path) || path === "/v1/credits";
-  const unpaid = !request.headers.get("PAYMENT-SIGNATURE") && !request.headers.get("authorization");
-  if (env.UNPAID_LIMITER && ((paidRoute && request.method === "POST" && unpaid) || path === "/status")) {
+  if ((paidRoute && request.method === "POST") || path === "/status") {
+    const paid = paidRoute && credentialed(request);
+    const limiter = paid ? env.PAID_LIMITER : env.UNPAID_LIMITER;
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-    const { success } = await env.UNPAID_LIMITER.limit({ key: `${path === "/status" ? "status" : "unpaid"}:${ip}` }).catch(() => ({ success: true }));
-    if (!success) return json(429, { error: "rate_limited", detail: "too many unpaid requests; pay or retry in a minute" }, { "Retry-After": "60", ...CORS_HEADERS });
+    const { success } = limiter ? await limiter.limit({ key: `${path === "/status" ? "status" : paid ? "paid" : "unpaid"}:${ip}` }).catch(() => ({ success: true })) : { success: true };
+    if (!success) return json(429, { error: "rate_limited", detail: paid ? "too many requests; use /v1/risk-check/batch for volume, or retry in a minute" : "too many unpaid requests; pay or retry in a minute" }, { "Retry-After": "60" });
   }
   let res: Response;
   if (request.method === "GET" && path === "/healthz") {
@@ -221,7 +234,7 @@ async function handle(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext)
   } else {
     const stack = await ensureStack(env, feedsFor(env));
     if (path === "/v1/credits") {
-      res = await handleCredits(request, env, stack);
+      res = await handleCredits(request, env, stack, ctx);
     } else {
       // A cold isolate briefly waits for the first verified feed refresh (newer OFAC/MetaMask).
       if (request.method === "POST") await awaitColdStart();
@@ -230,8 +243,7 @@ async function handle(incoming: Request, env: WorkerEnv, ctx?: ExecutionContext)
         : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req), ctx);
     }
   }
-  for (const [k, v] of Object.entries({ ...CORS_HEADERS, ...securityHeaders(env, local) })) res.headers.set(k, v);
-  return head ? new Response(null, { status: res.status, headers: res.headers }) : res;
+  return res;
 }
 
 export default {

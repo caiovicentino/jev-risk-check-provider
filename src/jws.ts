@@ -46,8 +46,18 @@ export function generateKeyPair(kid: string): KeyPair {
   };
 }
 
+/** JWK members that hold private key material: a key carrying any of them is never published. */
+export const PRIVATE_JWK_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "k", "oth"] as const;
+
+/** A key's public members only: a private `d` pasted by mistake is never published. */
+export function publicJwkOf(jwk: Record<string, unknown>): Jwk {
+  const out: Record<string, unknown> = {};
+  for (const k of ["kty", "crv", "x", "y", "kid", "alg", "use"]) if (typeof jwk[k] === "string") out[k] = jwk[k];
+  return out as Jwk;
+}
+
 export function jwksDocument(kid: string, jwk: Jwk): { keys: Jwk[] } {
-  return { keys: [{ ...jwk, kid }] };
+  return { keys: [{ ...publicJwkOf(jwk), kid }] };
 }
 
 export type AttestationChecks = {

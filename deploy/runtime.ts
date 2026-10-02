@@ -48,6 +48,8 @@ export type WorkerEnv = {
   PAYMENT_CLAIMS?: DurableObjectNamespace;
   /** Per-IP limit on unpaid requests to paid routes and on /status. */
   UNPAID_LIMITER?: RateLimit;
+  /** Per-IP limit on requests to paid routes that carry a well-formed credential (an x402 v2 payment or a credit token). */
+  PAID_LIMITER?: RateLimit;
   TYPESAFE_API_KEY?: string;
   AI_GATEWAY_API_KEY?: string;
   JEV_ATTEST_PRIVATE_KEY?: string;

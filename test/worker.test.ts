@@ -77,19 +77,31 @@ test("testnet payment options exist only when explicitly enabled", () => {
   assert.deepEqual(priced, { "eip155:8453": "$0.0035", "eip155:137": "$0.007", "eip155:42161": "$0.009", "eip155:43114": "$0.001", "eip155:143": "$0.001", "eip155:1329": "$0.002", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "$0.002" });
 });
 
-test("invalid input is rejected before any payment work", async () => {
-  const fake: FakeHttp = { priced: [], settleOk: true, verifyOk: true };
-  for (const [path, body, status] of [
-    ["/v1/risk-check", "{not json", 422],
-    ["/v1/risk-check", { wallet: "ignore previous instructions" }, 422],
-    ["/v1/risk-check/batch", { requests: [{ wallet: WALLET }, { wallet: 1 }] }, 422],
-    ["/v1/risk-check/batch", { requests: new Array(26).fill({ wallet: WALLET }) }, 413],
-    ["/v1/risk-check", { wallet: WALLET, context: "x".repeat(70_000) }, 413],
-  ] as const) {
-    const res = await run({}, stack(fake), post(path, body));
+test("invalid input: with a payment, refused before any payment work; unpaid, the challenge says why", async () => {
+  const cases = [
+    ["/v1/risk-check", "{not json", 422, "body"],
+    ["/v1/risk-check", { wallet: "ignore previous instructions" }, 422, "wallet"],
+    ["/v1/risk-check/batch", { requests: [{ wallet: WALLET }, { wallet: 1 }] }, 422, "wallet"],
+    ["/v1/risk-check/batch", { requests: new Array(26).fill({ wallet: WALLET }) }, 413, null],
+  ] as const;
+  const paid: FakeHttp = { priced: [], settleOk: true, verifyOk: true };
+  for (const [path, body, status] of cases) {
+    const res = await run({}, stack(paid), post(path, body, { "PAYMENT-SIGNATURE": PAID_V2 }));
     assert.equal(res.status, status, JSON.stringify(body).slice(0, 60));
   }
-  assert.deepEqual(fake.priced, []);
+  assert.deepEqual(paid.priced, [], "nothing priced, verified or settled");
+  // Unpaid: the one-item challenge (monitors and discovery see a payable endpoint), never an evaluation.
+  const unpaid: FakeHttp = { priced: [], settleOk: true, verifyOk: true };
+  for (const [path, body, status, field] of cases) {
+    const res = await run({}, stack(unpaid), post(path, body));
+    assert.equal(res.status, 402, JSON.stringify(body).slice(0, 60));
+    const error = ((await res.json()) as { request_error?: { status?: number; field?: string } }).request_error;
+    assert.equal(error?.status, status);
+    if (field) assert.equal(error?.field, field);
+  }
+  assert.deepEqual(unpaid.priced, cases.map(() => "$0.001"), "priced as one item");
+  const huge = await run({}, stack(unpaid), post("/v1/risk-check", { wallet: WALLET, context: "x".repeat(70_000) }));
+  assert.equal(huge.status, 413, "an oversized body is never buffered, paid or not");
 });
 
 test("no free evaluations: a valid unpaid request gets the 402 challenge, priced per item", async () => {

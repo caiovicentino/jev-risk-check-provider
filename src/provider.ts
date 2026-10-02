@@ -140,8 +140,8 @@ export function discoveryDocument(host: string, pricing?: PricingInfo, kid = "je
       : {}),
     signals: ["ofac_sdn_address", "threat_feeds", "domain_impersonation", "onchain_activity", "transaction_simulation", "contract_verification", "drainer_code_fingerprint", "kit_watch", "operation_context_intent"],
     chains_supported: Object.keys(DEFAULT_RPC),
-    // Measured in production (docs/EVIDENCE.md): about 0.7 s from credits; per call about 4 s end to end, settlement included.
-    response_time_ms: "~700 from credits; ~4000 per call (settlement included)",
+    // Measured in production (docs/EVIDENCE.md, and the 2026-10-02 evaluation): 0.7–2 s from credits; per call about 4 s end to end, settlement included.
+    response_time_ms: "~700–2000 from credits; ~4000 per call (settlement included)",
     attestation: {
       jwks_url: `${schemeForHost(host)}://${host}/.well-known/jwks.json`,
       algorithm: "ES256",

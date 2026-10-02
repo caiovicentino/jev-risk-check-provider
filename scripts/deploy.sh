@@ -6,7 +6,7 @@
 #   2. HEAD is the tip of main on GitHub (asked with git ls-remote, so a stale local
 #      origin/main cannot pass);
 #   3. the `ci` workflow's push run for that commit on main completed successfully.
-# Then it installs the locked dependencies (npm ci, as CI does) and runs `wrangler deploy`
+# Then it installs the locked dependencies (npm ci without install scripts, as the feeds workflow does) and runs `wrangler deploy`
 # from deploy/ with GIT_COMMIT=<short SHA> (for /healthz), tagging the Cloudflare Worker
 # version with the same commit.
 #
@@ -51,7 +51,7 @@ read -r status conclusion url <<< "$ci"
 echo "deploy: $head is main on GitHub and passed CI ($url)"
 
 # The dependency tree exactly as locked, as CI built it.
-npm ci --no-audit --no-fund
+npm ci --ignore-scripts --no-audit --no-fund
 
 short=$(git rev-parse --short=12 HEAD)
 cd deploy

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { discoveryDocument, Provider, type PricingInfo } from "./provider.js";
-import { jwksDocument } from "./jws.js";
+import { jwksDocument, publicJwkOf } from "./jws.js";
 import { landingPage, OG_PNG_B64 } from "./landing.js";
 import { FAVICON_ICO_B64, ICON_PNG_B64 } from "./icon.js";
 import { validateBatch, validateRequest } from "./validate.js";
@@ -25,7 +25,8 @@ export const SECURITY_TXT = [
 let landingCache: { html: string; csp: string } | null = null;
 /**
  * The site and its Content-Security-Policy: its one inline script is allowed by hash, styles and
- * fonts from Google Fonts, the video from youtube-nocookie, and nothing may frame the page.
+ * fonts from Google Fonts, the video from youtube-nocookie, Cloudflare's cookieless Web Analytics
+ * beacon (injected by the zone), and nothing may frame the page.
  */
 function landing(): { html: string; csp: string } {
   if (landingCache) return landingCache;
@@ -33,11 +34,11 @@ function landing(): { html: string; csp: string } {
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => `'sha256-${createHash("sha256").update(m[1] as string).digest("base64")}'`);
   const csp = [
     "default-src 'none'",
-    `script-src ${scripts.join(" ") || "'none'"}`,
+    `script-src ${[...scripts, "https://static.cloudflareinsights.com"].join(" ")}`,
     "style-src 'unsafe-inline' https://fonts.googleapis.com",
     "font-src https://fonts.gstatic.com",
     "img-src 'self' data:",
-    "connect-src 'self'",
+    "connect-src 'self' https://cloudflareinsights.com",
     "frame-src https://www.youtube-nocookie.com",
     "base-uri 'none'",
     "form-action 'none'",
@@ -61,7 +62,7 @@ async function readJson(req: Request): Promise<unknown> {
 
 function didDocument(host: string, publicJwk: Record<string, unknown>, nextPublicJwk?: Record<string, unknown>): Record<string, unknown> {
   const did = `did:web:${host}`;
-  const keys = [publicJwk, ...(nextPublicJwk && nextPublicJwk.kid !== publicJwk.kid ? [nextPublicJwk] : [])];
+  const keys = [publicJwk, ...(nextPublicJwk && nextPublicJwk.kid !== publicJwk.kid ? [nextPublicJwk] : [])].map((k) => publicJwkOf(k) as Record<string, unknown>);
   const ids = keys.map((k) => `${did}#${k.kid ?? "jev-attest-v1"}`);
   return {
     "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/jws-2020/v1"],
@@ -100,7 +101,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/jwks.json") {
       const current = jwksDocument(deps.provider.keyPair.publicJwk.kid, deps.provider.keyPair.publicJwk);
-      const next = deps.nextPublicJwk && deps.nextPublicJwk.kid !== deps.provider.keyPair.publicJwk.kid ? [deps.nextPublicJwk] : [];
+      const next = deps.nextPublicJwk && deps.nextPublicJwk.kid !== deps.provider.keyPair.publicJwk.kid ? [publicJwkOf(deps.nextPublicJwk)] : [];
       return json(200, { keys: [...current.keys, ...next] });
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/did.json") {

@@ -1,6 +1,6 @@
 import { formatUsd, priceMicro, SIMULATION_PRICE, simulates, toMicro } from "./pricing.js";
-import { allChecked, fetchAdapter, json, payerOf, readCapped, recordSettlement, sanctionedPayer, settlementReceipt } from "./http-util.js";
-import { claimPayment, paymentId, paymentVersion } from "./payment-claims.js";
+import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, readCapped, recordSettlement, settlementReceipt, settlementReused, type Admission } from "./http-util.js";
+import { paymentVersion } from "./payment-claims.js";
 import type { Stack } from "./protected.js";
 import type { DurableObjectState, WorkerEnv } from "./runtime.js";
 import type { HTTPProcessResult } from "@x402/core/http";
@@ -24,6 +24,8 @@ export const CREDIT_TOKEN_PREFIX = "x402c_";
 export const CREDIT_CHECK_PRICE = 0.001;
 export const CREDIT_PACK_MIN_USD = 0.1;
 export const CREDIT_PACK_MAX_USD = 100;
+/** The pack bought when the body names no amount (a discovery probe's POST with no body gets this 402). */
+export const CREDIT_PACK_DEFAULT_USD = 1;
 
 export type CreditPricing = { check_usd: string; simulated_check_usd: string; pack_min_usd: string; pack_max_usd: string; endpoint: string };
 export const CREDIT_PRICING: CreditPricing = {
@@ -97,18 +99,27 @@ async function ledgerCallByName(env: WorkerEnv, name: string, op: "balance" | "c
 /** A settled pack whose credit did not go through yet: retried by the cron until the ledger takes it. */
 const PENDING_PREFIX = "pc:";
 
-/** Credits a settled pack, retrying; if the ledger still fails, the credit is queued (idempotent by settlement ref). */
-async function creditSettled(env: WorkerEnv, token: string, micro: number, ref: string | null): Promise<{ micro: number } | { pending: true }> {
+/**
+ * Credits a settled pack, retrying; if the ledger still fails, the credit is queued for the cron.
+ * Idempotent by `ref` (the settlement, or the payment itself): a retry never credits twice. It never
+ * throws: the buyer has paid, so they always leave with their token.
+ */
+async function creditSettled(env: WorkerEnv, token: string, micro: number, ref: string): Promise<{ micro: number } | { pending: true }> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await ledgerCall(env, token, "credit", { micro, ...(ref ? { ref } : {}) });
+      return await ledgerCall(env, token, "credit", { micro, ref });
     } catch (err) {
       console.error(`credit after settlement failed (attempt ${attempt + 1}): ${String(err).slice(0, 120)}`);
       if (attempt < 2) await new Promise((r) => setTimeout(r, 200 * 3 ** attempt));
     }
   }
-  const key = `${PENDING_PREFIX}${ref ?? crypto.randomUUID()}`;
-  await env.RATE?.put(key, JSON.stringify({ name: await ledgerName(token), micro, ref, at: new Date().toISOString() }), { expirationTtl: 30 * 86400 });
+  const entry = { name: await ledgerName(token), micro, ref, at: new Date().toISOString() };
+  try {
+    await env.RATE?.put(`${PENDING_PREFIX}${ref}`, JSON.stringify(entry), { expirationTtl: 30 * 86400 });
+  } catch (err) {
+    // Last resort: the log line carries what reconciliation needs (the ledger is named by the token's hash, never the token).
+    console.error(JSON.stringify({ event: "credit_unqueued", ...entry, error: String(err).slice(0, 120) }));
+  }
   return { pending: true };
 }
 
@@ -133,9 +144,10 @@ export async function retryPendingCredits(env: WorkerEnv): Promise<number> {
   return applied;
 }
 
-/** A pack's price from the request body: $0.10–$100 in whole cents, else null. */
+/** A pack's price from the request body: $0.10–$100 in whole cents ($1 when it names none), else null. */
 export function packMicro(body: unknown): number | null {
-  const amount = (body as { amount_usd?: unknown } | null)?.amount_usd;
+  const named = (body as { amount_usd?: unknown } | null)?.amount_usd;
+  const amount = named === undefined ? CREDIT_PACK_DEFAULT_USD : named;
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < CREDIT_PACK_MIN_USD || amount > CREDIT_PACK_MAX_USD) return null;
   const micro = toMicro(amount);
   return micro % 10_000 === 0 ? micro : null;
@@ -224,7 +236,7 @@ async function unsimulatedSurcharge(path: string, parsed: unknown, res: Response
 }
 
 /** GET /v1/credits (balance) and POST /v1/credits (buy or top up a balance, paid via x402). */
-export async function handleCredits(request: Request, env: WorkerEnv, stack: Stack): Promise<Response> {
+export async function handleCredits(request: Request, env: WorkerEnv, stack: Stack, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
   if (!env.CREDITS) return json(503, { error: "credits_unavailable" });
   const token = creditToken(request);
   if (request.method === "GET") {
@@ -237,7 +249,7 @@ export async function handleCredits(request: Request, env: WorkerEnv, stack: Sta
       return json(503, { error: "credits_unavailable" }, { "Retry-After": "5", "Cache-Control": "no-store" });
     }
   }
-  if (request.method !== "POST") return json(405, { error: "method_not_allowed" });
+  if (request.method !== "POST") return json(405, { error: "method_not_allowed" }, { Allow: "GET, POST" });
   const bytes = await readCapped(request, 1024);
   if (!bytes) return json(413, { error: "body_too_large", max_bytes: 1024 });
   const text = new TextDecoder().decode(bytes);
@@ -250,7 +262,7 @@ export async function handleCredits(request: Request, env: WorkerEnv, stack: Sta
   const micro = packMicro(parsed);
   if (micro === null) return json(422, { error: "invalid_request", field: "amount_usd", detail: `a number of dollars from ${CREDIT_PACK_MIN_USD} to ${CREDIT_PACK_MAX_USD}, in whole cents` });
   if (request.headers.get("authorization") && !token) return json(422, { error: "invalid_request", field: "authorization", detail: "Bearer x402c_… (a token from this endpoint), or none for a new one" });
-  // Only x402 v2 payments (what the challenge offers); anything else gets the v2 challenge.
+  // Only x402 v2 payments (what the challenge offers): the adapter hands x402 core nothing else.
   const header = request.headers.get("PAYMENT-SIGNATURE");
   const payment = header && paymentVersion(header) === 2 ? header : null;
   let result: HTTPProcessResult;
@@ -267,38 +279,49 @@ export async function handleCredits(request: Request, env: WorkerEnv, stack: Sta
   }
   if (result.type === "payment-error") return new Response(typeof result.response.body === "string" ? result.response.body : JSON.stringify(result.response.body), { status: result.response.status, headers: result.response.headers });
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
-  if (sanctionedPayer(payerOf(result.paymentPayload))) return json(403, { error: "payer_sanctioned", detail: "the paying wallet is on the OFAC SDN list; nothing was charged" });
-  // Single use: one payment buys one pack, however often it is sent.
-  const claim = await claimPayment(env, await paymentId(payment));
-  if (!claim.claimed) {
-    return claim.reason === "duplicate"
-      ? json(409, { error: "payment_already_used", detail: "this payment was already presented; sign a new one" })
-      : json(503, { error: "payment_claims_unavailable", detail: "no charge: retry shortly" }, { "Retry-After": "5" });
-  }
+  const admission = await admitPayment(env, result.paymentPayload);
+  if (!admission.ok) return admission.response;
+  // Settle and credit run to completion even if the buyer disconnects: a settled pack is always credited.
+  const work = buyPack(env, stack, result, admission, token, micro);
+  ctx?.waitUntil(work.catch(() => undefined));
+  return work;
+}
+
+async function buyPack(env: WorkerEnv, stack: Stack, result: Extract<HTTPProcessResult, { type: "payment-verified" }>, admission: Extract<Admission, { ok: true }>, token: string | null, micro: number): Promise<Response> {
   let reason = "settlement_failed";
+  let refused = false;
   let settle: Awaited<ReturnType<Stack["http"]["processSettlement"]>> | null = null;
   try {
     settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
-    if (!settle.success) reason = settle.errorReason ?? reason;
+    if (!settle.success) {
+      reason = settle.errorReason ?? reason;
+      refused = payerRefusal(settle.errorReason);
+    }
   } catch (err) {
     console.error(`settlement failed on /v1/credits: ${String(err).slice(0, 200)}`);
   }
   if (!settle?.success) {
-    await claim.release();
+    await admission.finish(refused ? "refused" : "unused");
     console.warn(`credit pack settlement refused: ${reason}`);
     return json(402, { error: "payment_settlement_failed" }, { "X-Payment-Error": reason });
   }
   // Settled: from here on the buyer has paid, so they always leave with their token.
-  await claim.settled();
+  await admission.finish("settled");
   const receipt = settlementReceipt(settle.headers);
+  // One on-chain transaction buys one pack, even if a facilitator confirms it twice.
+  if (await settlementReused(env, receipt)) {
+    console.error("settlement transaction reused on /v1/credits");
+    return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already bought a pack; sign a new payment" });
+  }
   if (receipt) await recordSettlement(env, { path: "/v1/credits", network: receipt.network, transaction: receipt.transaction, micro });
   const owner = token ?? newCreditToken();
-  const credited = await creditSettled(env, owner, micro, receipt ? `${receipt.network}:${receipt.transaction}` : null);
+  const ref = receipt ? `${receipt.network}:${receipt.transaction}` : `payment:${admission.id}`;
+  const credited = await creditSettled(env, owner, micro, ref);
   const body = {
     ...(token ? {} : { token: owner }),
     credited_usd: formatUsd(micro),
     ...("pending" in credited
-      ? { status: "pending", detail: "the payment settled; the balance is being credited and will show within a few minutes" }
+      ? { status: "pending", reference: ref, detail: "the payment settled; the balance is being credited and will show within a few minutes" }
       : { balance_usd: formatUsd(credited.micro) }),
     pricing: CREDIT_PRICING,
     usage: "send Authorization: Bearer <token> with POST /v1/risk-check or /v1/risk-check/batch; the token is shown once: store it like a password",

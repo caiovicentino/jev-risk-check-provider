@@ -1,5 +1,5 @@
 import { createHash, createPublicKey } from "node:crypto";
-import { generateKeyPair, signJws, verifyJws, type KeyPair } from "../src/jws.js";
+import { generateKeyPair, PRIVATE_JWK_MEMBERS, publicJwkOf, signJws, verifyJws, type KeyPair } from "../src/jws.js";
 import { Provider, PROVIDER_VERSION, type PricingInfo } from "../src/provider.js";
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient, type JevLike } from "../src/jev.js";
@@ -11,8 +11,8 @@ import { createContractIntel } from "../src/contract-intel.js";
 import { kitWatchLookup } from "./kit-watch.js";
 import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice, SIMULATION_PRICE } from "./pricing.js";
-import { allChecked, fetchAdapter, json, payerOf, readCapped, recordSettlement, sanctionedPayer, settlementReceipt } from "./http-util.js";
-import { claimPayment, paymentId, paymentVersion } from "./payment-claims.js";
+import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, readCapped, recordSettlement, settlementReceipt, settlementReused } from "./http-util.js";
+import { paymentVersion } from "./payment-claims.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
 import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
 import { BATCH_DISCOVERY, openApiDocument, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "./discovery.js";
@@ -82,6 +82,11 @@ export function loadKeyPair(env: WorkerEnv): { keyPair: KeyPair; status: Attesta
     return { keyPair, status: { ok: false, kid: String(jwk.kid ?? ""), thumbprint: null, reason } };
   };
   if (!(jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string" && typeof jwk.kid === "string" && jwk.kid)) return fail("JEV_ATTEST_PUBLIC_JWK is not an EC P-256 public key with a kid");
+  // A private key pasted as the public one: refused loudly (and never published: only public members ever are).
+  if (PRIVATE_JWK_MEMBERS.some((m) => m in jwk)) {
+    keyPair.publicJwk = publicJwkOf(jwk as unknown as Record<string, unknown>);
+    return fail("JEV_ATTEST_PUBLIC_JWK carries private key material: set it to the public key only");
+  }
   try {
     const derived = createPublicKey(privatePem).export({ format: "jwk" }) as { crv?: string; x?: string; y?: string };
     if (derived.crv !== "P-256" || derived.x !== jwk.x || derived.y !== jwk.y) return fail("JEV_ATTEST_PRIVATE_KEY does not match JEV_ATTEST_PUBLIC_JWK");
@@ -454,7 +459,11 @@ function nextKey(env: WorkerEnv): { nextPublicJwk?: Record<string, unknown> } {
   if (!env.JEV_ATTEST_NEXT_PUBLIC_JWK) return {};
   try {
     const jwk = JSON.parse(env.JEV_ATTEST_NEXT_PUBLIC_JWK) as Record<string, unknown>;
-    return jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string" && typeof jwk.kid === "string" ? { nextPublicJwk: jwk } : {};
+    if (PRIVATE_JWK_MEMBERS.some((m) => m in jwk)) {
+      console.error("attestation key: JEV_ATTEST_NEXT_PUBLIC_JWK carries private key material; not published");
+      return {};
+    }
+    return jwk.kty === "EC" && jwk.crv === "P-256" && typeof jwk.x === "string" && typeof jwk.y === "string" && typeof jwk.kid === "string" ? { nextPublicJwk: publicJwkOf(jwk) as Record<string, unknown> } : {};
   } catch {
     return {};
   }
@@ -543,6 +552,23 @@ export async function ensureStack(env: WorkerEnv, feeds?: () => Promise<ThreatIn
   return stack;
 }
 
+/** A 402 challenge for a body that would be refused once paid: the reason rides along in the JSON body. */
+async function withRequestError(res: Response, error: Record<string, unknown> | null): Promise<Response> {
+  if (!error) return res;
+  let body: Record<string, unknown>;
+  try {
+    const parsed = (await res.clone().json()) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return res;
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return res; // not JSON (a browser's paywall page): left as it is
+  }
+  const headers = new Headers(res.headers);
+  headers.set("content-type", "application/json");
+  headers.delete("content-length");
+  return new Response(JSON.stringify({ ...body, request_error: { ...error, detail: "this body would be refused (422) once paid; it is never charged" } }), { status: res.status, headers });
+}
+
 function instructionsToResponse(instr: HTTPResponseInstructions): Response {
   return new Response(typeof instr.body === "string" ? instr.body : JSON.stringify(instr.body), {
     status: instr.status,
@@ -554,36 +580,39 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   const path = new URL(request.url).pathname;
   // 0. A key that cannot sign verifiable attestations: no paid work at all (no charge).
   if (stack.keyStatus && !stack.keyStatus.ok) return json(503, { error: "attestation_key_unavailable", detail: "no charge: the provider cannot sign verifiable attestations right now" }, { "Retry-After": "60" });
-  // 1. Read and validate before any payment work: invalid input is never priced. The
+  // 1. Read and validate before any payment work: invalid input is never charged. The
   //    cap is in BYTES and is enforced while streaming, so an oversized body is never
   //    fully buffered.
   const bytes = await readCapped(request, MAX_BODY_BYTES);
   if (!bytes) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
   const text = new TextDecoder().decode(bytes);
-  // A discovery probe (x402scan, AgentCash): an unpaid, unauthenticated request with no body
-  // gets the 402 challenge for one item, so the endpoint shows as payable. A body that is
-  // present but invalid still gets a 422 naming the field, and nothing unpaid is evaluated.
-  if (text.trim() === "" && !request.headers.get("PAYMENT-SIGNATURE") && !request.headers.get("authorization")) {
+  let parsed: unknown;
+  let invalid: { status: number; body: Record<string, unknown> } | null = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    invalid = { status: 422, body: { error: "invalid_request", field: "body" } };
+  }
+  if (!invalid && path.endsWith("/batch")) {
+    const v = validateBatch(parsed);
+    if (!v.ok) invalid = { status: v.status, body: v.body as Record<string, unknown> };
+  } else if (!invalid) {
+    const v = validateRequest(parsed);
+    if (!v.ok) invalid = { status: 422, body: { error: "invalid_request", field: v.field } };
+  }
+  if (invalid) {
+    // With a payment or a credit token, an invalid request is refused before any payment work.
+    if (request.headers.get("PAYMENT-SIGNATURE") || request.headers.get("authorization")) return json(invalid.status, invalid.body);
+    // Unpaid, it gets the 402 challenge for one item, whatever its body: discovery probes and
+    // monitors (x402scan, AgentCash) see a payable endpoint, and the challenge says why this
+    // body would be refused. Nothing unpaid is evaluated, and nothing invalid is ever charged.
     try {
       const probe = await stack.http.processHTTPRequest({ adapter: fetchAdapter(request, {}), path, method: request.method });
-      if (probe.type === "payment-error") return instructionsToResponse(probe.response);
+      if (probe.type === "payment-error") return withRequestError(instructionsToResponse(probe.response), text.trim() === "" ? null : { status: invalid.status, ...invalid.body });
     } catch {
       return json(500, { error: "payment_processing_failed" });
     }
     return json(402, { error: "payment_required" });
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return json(422, { error: "invalid_request", field: "body" });
-  }
-  if (path.endsWith("/batch")) {
-    const v = validateBatch(parsed);
-    if (!v.ok) return json(v.status, v.body);
-  } else {
-    const v = validateRequest(parsed);
-    if (!v.ok) return json(422, { error: "invalid_request", field: v.field });
   }
   const replay = () => new Request(request.url, { method: "POST", headers: request.headers, body: text });
 
@@ -597,7 +626,8 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   //    transaction is simulated when that is higher; a batch is the sum of its items.
   //    There is no free tier. Without a payment the response is the 402 challenge
   //    listing the accepted mainnet options.
-  // Only x402 v2 payments (what the challenge offers); anything else gets the v2 challenge.
+  // Only x402 v2 payments (what the challenge offers): the adapter hands x402 core nothing else,
+  // so anything else gets the v2 challenge.
   const header = request.headers.get("PAYMENT-SIGNATURE");
   const payment = header && paymentVersion(header) === 2 ? header : null;
   const httpCtx: HTTPRequestContext = {
@@ -616,49 +646,52 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   // 3. Evaluate, then settle; the result is released only after settlement succeeds.
   if (result.type === "payment-error") return instructionsToResponse(result.response);
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
-  // The payer is screened like any counterparty: no service is sold to an SDN-listed wallet.
-  if (sanctionedPayer(payerOf(result.paymentPayload))) return json(403, { error: "payer_sanctioned", detail: "the paying wallet is on the OFAC SDN list; nothing was charged" });
-  // Single use: one evaluation and one settlement per payment, however often it is sent.
-  const claim = await claimPayment(_env, await paymentId(payment));
-  if (!claim.claimed) {
-    return claim.reason === "duplicate"
-      ? json(409, { error: "payment_already_used", detail: "this payment was already presented; sign a new one" })
-      : json(503, { error: "payment_claims_unavailable", detail: "no charge: retry shortly" }, { "Retry-After": "5" });
-  }
+  // Admission: the payer is screened like any counterparty, the authorization must be settleable,
+  // the payer may have only a few payments in flight, and the payment is used once, however often
+  // (or however re-encoded) it is sent.
+  const admission = await admitPayment(_env, result.paymentPayload);
+  if (!admission.ok) return admission.response;
   let res: Response;
   try {
     res = await serve(replay());
   } catch (err) {
-    await claim.release();
+    await admission.finish("unused");
     throw err;
   }
   if (res.status !== 200) {
-    await claim.release();
+    await admission.finish("unused");
     return res;
   }
   // Never charge for a verdict that was not produced: every result must be checked.
   if (!(await allChecked(res.clone()))) {
-    await claim.release();
+    await admission.finish("unused");
     return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5" });
   }
   // Settle before releasing the result: a payload that verifies but cannot settle
   // (replayed authorization, funds moved between verify and settle) must not
   // receive a signed attestation.
   let reason = "settlement_failed";
+  let refused = false;
   try {
     const settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
     if (settle.success) {
-      await claim.settled();
-      for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
+      await admission.finish("settled");
       const receipt = settlementReceipt(settle.headers);
+      // One on-chain transaction pays for one verdict, even if a facilitator confirms it twice.
+      if (await settlementReused(_env, receipt)) {
+        console.error(`settlement transaction reused on ${path}`);
+        return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already paid for another request; sign a new payment" });
+      }
+      for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
       if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction });
       return res;
     }
     reason = settle.errorReason ?? reason;
+    refused = payerRefusal(settle.errorReason);
   } catch (err) {
     console.error(`settlement failed on ${path}: ${String(err).slice(0, 200)}`);
   }
-  await claim.release();
+  await admission.finish(refused ? "refused" : "unused");
   console.warn(`settlement refused on ${path}: ${reason}`);
   return json(402, { error: "payment_settlement_failed" }, { "X-Payment-Error": reason });
 }

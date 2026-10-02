@@ -8,7 +8,7 @@ import assert from "node:assert";
 import { generateKeyPairSync } from "node:crypto";
 import { CreditLedger, handleCredits, retryPendingCredits } from "../deploy/credits.js";
 import { buildAccepts, handleProtected, loadKeyPair, type PaymentRoute, type Stack } from "../deploy/protected.js";
-import { PaymentClaim, paymentId } from "../deploy/payment-claims.js";
+import { PaymentClaim, paymentIdentity } from "../deploy/payment-claims.js";
 import type { DurableObjectNamespace, DurableObjectState, KVNamespace, WorkerEnv } from "../deploy/runtime.js";
 import { createHandler } from "../src/handler.js";
 import { Provider } from "../src/provider.js";
@@ -44,7 +44,8 @@ const ANSWERS: Record<string, Answer> = {
   trust: { type: "score", score: 3.8, legend: {}, probabilities: { "4": 0.8 }, confidence: 0.85 },
 };
 const jev: JevLike = { systemOne: async () => ({ answers: ANSWERS, usage: { inputTokens: 1, outputTokens: 0 } }) };
-const payment = (from: string, nonce = "0x01") => btoa(JSON.stringify({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: { from, nonce } } }));
+const inAMinute = () => String(Math.floor(Date.now() / 1000) + 300);
+const payment = (from: string, nonce = "0x01", validBefore = inAMinute()) => btoa(JSON.stringify({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: { from, nonce, validBefore } } }));
 
 function memoryState(): DurableObjectState {
   const data = new Map<string, unknown>();
@@ -62,19 +63,25 @@ function memoryState(): DurableObjectState {
   };
 }
 
-/** An in-memory Durable Object namespace running a real class; `down` makes every call fail. */
+/**
+ * An in-memory Durable Object namespace running a real class; `down` makes every call fail. Calls
+ * to one object run one at a time, as a Durable Object's input gate delivers them.
+ */
 function namespace<T extends { fetch(r: Request): Promise<Response> }>(make: (s: DurableObjectState) => T, down = { value: false }): DurableObjectNamespace {
-  const objects = new Map<string, T>();
+  const objects = new Map<string, { obj: T; queue: Promise<unknown> }>();
   return {
     idFromName: (name: string) => ({ toString: () => name }),
     get: (id) => {
       const name = id.toString();
-      let obj = objects.get(name);
-      if (!obj) objects.set(name, (obj = make(memoryState())));
+      let entry = objects.get(name);
+      if (!entry) objects.set(name, (entry = { obj: make(memoryState()), queue: Promise.resolve() }));
+      const e = entry;
       return {
         fetch: async (input: string | Request, init?: RequestInit) => {
           if (down.value) throw new Error("durable object unavailable");
-          return (obj as T).fetch(new Request(input, init));
+          const run = e.queue.then(() => e.obj.fetch(new Request(input, init)));
+          e.queue = run.catch(() => undefined);
+          return run;
         },
       };
     },
@@ -96,9 +103,12 @@ function memoryKv(): KVNamespace & { data: Map<string, string> } {
 function stack(from: string, settle: { ok: boolean; tx: string; settled: number }): Stack {
   const deps = { provider: new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("jev-attest-v1"), jev }) };
   const http = {
+    // Like x402 core, the payment is read through the adapter (which hands over only v2 payments).
     processHTTPRequest: async (ctx: HTTPRequestContext) => {
-      if (!ctx.paymentHeader) return { type: "payment-error", response: { status: 402, headers: {}, body: { error: "payment_required" } } };
-      return { type: "payment-verified", paymentPayload: { payload: { authorization: { from } } }, paymentRequirements: {} };
+      const header = ctx.adapter.getHeader("PAYMENT-SIGNATURE") ?? ctx.adapter.getHeader("X-PAYMENT");
+      if (!header) return { type: "payment-error", response: { status: 402, headers: { "PAYMENT-REQUIRED": "challenge" }, body: { error: "payment_required" } } };
+      const decoded = JSON.parse(atob(header)) as { payload?: { authorization?: { from?: string } } };
+      return { type: "payment-verified", paymentPayload: { ...decoded, payload: { ...decoded.payload, authorization: { ...decoded.payload?.authorization, from: decoded.payload?.authorization?.from ?? from } } }, paymentRequirements: {} };
     },
     processSettlement: async () => {
       settle.settled++;
@@ -129,7 +139,8 @@ test("a payment is used once: concurrent copies get a 409; a payment that did no
   failing.ok = true;
   const retry = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": other }), env, f, (r) => createHandler(f.deps)(r));
   assert.equal(retry.status, 200, "a claim is released when nothing settled");
-  assert.notEqual(await paymentId(header), await paymentId(other));
+  const decode = (h: string) => JSON.parse(atob(h)) as unknown;
+  assert.notEqual(await paymentIdentity(decode(header)), await paymentIdentity(decode(other)));
 });
 
 test("claims unreachable: no evaluation and no charge (503); a credit pack is bought once", async () => {
@@ -176,6 +187,11 @@ test("the attestation key is checked at load: missing on a production host, or a
   assert.equal(mismatch.status.ok, false);
   assert.match(mismatch.status.reason ?? "", /does not match/);
   assert.equal(loadKeyPair({}).status.ok, false, "production without secrets");
+  const privateJwk = { ...a.jwk, d: "c2VjcmV0" };
+  const pasted = loadKeyPair({ JEV_ATTEST_PRIVATE_KEY: a.pem, JEV_ATTEST_PUBLIC_JWK: JSON.stringify(privateJwk) });
+  assert.equal(pasted.status.ok, false);
+  assert.match(pasted.status.reason ?? "", /private key material/);
+  assert.equal("d" in pasted.keyPair.publicJwk, false, "never kept for publication");
   assert.equal(loadKeyPair({ PROVIDER_HOST: "localhost:8799" }).status.ok, true, "local development may use an ephemeral key");
 });
 
@@ -245,4 +261,168 @@ test("the Worker: HTTPS only, security headers everywhere, a CSP on the site, se
   assert.match(await txt.text(), /^Contact: https:\/\/github\.com\/caiovicentino\/jev-risk-check-provider\/security\/advisories\/new/m);
   const health = (await (await worker.fetch(new Request("https://x402check.xyz/healthz"), env)).json()) as { ok: boolean; attestation_key: string };
   assert.deepEqual([health.ok, health.attestation_key], [false, "misconfigured"], "no attestation secrets on a production host");
+});
+
+// The 2026-10-02 evaluation: single use by what the payer signed (F1), only v2 payments reach
+// verification (F2), payments that cannot settle are not evaluated for free (F3), a settlement
+// transaction pays once, and every unpaid request gets the challenge.
+const evaluate = (s: Stack, calls = { n: 0 }, delayMs = 0) => async (r: Request) => {
+  calls.n++;
+  if (delayMs) await new Promise((ok) => setTimeout(ok, delayMs));
+  return createHandler(s.deps)(r);
+};
+const claimsEnv = (): WorkerEnv => ({ PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)) });
+const encode = (o: unknown) => btoa(JSON.stringify(o));
+
+test("F1: one authorization re-encoded (key order, hex case, extra field, checksum) is one payment", async () => {
+  const validBefore = inAMinute();
+  const auth = { from: USER, to: "0x2222222222222222222222222222222222222222", value: "3500", validAfter: "0", validBefore, nonce: "0xabcdef" };
+  const variants = [
+    encode({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: auth } }),
+    encode({ payload: { authorization: { nonce: "0xABCDEF", validBefore, validAfter: "0", value: "3500", to: auth.to, from: USER }, signature: "0x01" }, accepted: { network: "eip155:8453", scheme: "exact" }, x402Version: 2 }),
+    encode({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: { ...auth, from: USER.toUpperCase().replace("0X", "0x") }, padding: "x" } }),
+  ];
+  const ids = new Set(await Promise.all(variants.map((v) => paymentIdentity(JSON.parse(atob(v))))));
+  assert.equal(ids.size, 1, "one identity");
+  const env = claimsEnv();
+  const settle = { ok: true, tx: "0xf1", settled: 0 };
+  const s = stack(USER, settle);
+  const calls = { n: 0 };
+  const statuses = (await Promise.all(variants.map((v) => handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": v }), env, s, evaluate(s, calls, 20))))).map((r) => r.status).sort();
+  assert.deepEqual(statuses, [200, 409, 409]);
+  assert.deepEqual([calls.n, settle.settled], [1, 1], "evaluated and settled once");
+});
+
+test("F1: a Solana payment is identified by its message bytes, whatever its signatures or base64 spelling", async () => {
+  const message = Uint8Array.from({ length: 120 }, (_, i) => (i * 7) % 256);
+  const wire = (sigByte: number) => {
+    const bytes = new Uint8Array(1 + 64 + message.length);
+    bytes[0] = 1;
+    bytes.fill(sigByte, 1, 65);
+    bytes.set(message, 65);
+    return Buffer.from(bytes).toString("base64");
+  };
+  const pp = (tx: string) => ({ accepted: { network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" }, payload: { transaction: tx } });
+  const a = await paymentIdentity(pp(wire(1)));
+  assert.ok(a);
+  assert.equal(await paymentIdentity(pp(wire(2))), a, "other signature bytes");
+  assert.equal(await paymentIdentity(pp(wire(1).replace(/=+$/, ""))), a, "no padding");
+  assert.equal(await paymentIdentity({ payload: { foo: 1 } }), null, "an unknown scheme payload has no identity");
+});
+
+test("F1/F2: an unidentifiable payload, a v1 header or X-PAYMENT never reaches an evaluation", async () => {
+  const env = claimsEnv();
+  const settle = { ok: true, tx: "0xf2", settled: 0 };
+  const s = stack(USER, settle);
+  const calls = { n: 0 };
+  const odd = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": encode({ x402Version: 2, accepted: { network: "eip155:8453" }, payload: { foo: 1 } }) }), env, s, evaluate(s, calls));
+  assert.equal(odd.status, 402);
+  assert.equal(((await odd.json()) as { error: string }).error, "payment_unrecognized");
+  const v1 = encode({ x402Version: 1, scheme: "exact", network: "base", payload: { signature: "0x01", authorization: { from: USER, nonce: "0x99", validBefore: inAMinute() } } });
+  for (const headers of [{ "PAYMENT-SIGNATURE": v1 }, { "X-PAYMENT": v1 }]) {
+    const res = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, headers), env, s, evaluate(s, calls));
+    assert.equal(res.status, 402, JSON.stringify(headers).slice(0, 20));
+  }
+  assert.deepEqual([calls.n, settle.settled], [0, 0]);
+});
+
+test("F3: an authorization about to expire, or valid beyond its claim, is refused before any work", async () => {
+  const env = claimsEnv();
+  const settle = { ok: true, tx: "0xf3", settled: 0 };
+  const s = stack(USER, settle);
+  const calls = { n: 0 };
+  const now = Math.floor(Date.now() / 1000);
+  for (const [validBefore, error] of [[now + 7, "authorization_expires_too_soon"], [now + 2 * 86400, "authorization_valid_too_long"]] as const) {
+    const res = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(USER, `0x${validBefore}`, String(validBefore)) }), env, s, evaluate(s, calls));
+    assert.equal(res.status, 402);
+    assert.equal(((await res.json()) as { error: string }).error, error);
+  }
+  assert.deepEqual([calls.n, settle.settled], [0, 0]);
+});
+
+test("F3: a payer has at most 8 payments in flight, and is held back after 5 settlement refusals", async () => {
+  const env = claimsEnv();
+  const s = stack(USER, { ok: true, tx: "0xf4", settled: 0 });
+  const busy = await Promise.all(Array.from({ length: 9 }, (_, i) => handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(USER, `0x4${i}`) }), env, s, evaluate(s, { n: 0 }, 30))));
+  const codes = busy.map((r) => r.status);
+  assert.equal(codes.filter((c) => c === 429).length, 1, "the ninth waits");
+  assert.equal(codes.filter((c) => c === 409).length, 0);
+
+  const failing = stack(USER, { ok: false, tx: "0x0", settled: 0 });
+  const other = "0x3333333333333333333333333333333333333333";
+  for (let i = 0; i < 5; i++) {
+    const res = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(other, `0x5${i}`) }), env, failing, evaluate(failing));
+    assert.equal(res.status, 402);
+  }
+  const calls = { n: 0 };
+  const held = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(other, "0x60") }), env, failing, evaluate(failing, calls));
+  assert.equal(held.status, 429);
+  assert.equal(((await held.json()) as { error: string }).error, "payer_settlement_failures");
+  assert.equal(calls.n, 0, "not evaluated");
+  const ok = stack(USER, { ok: true, tx: "0xf4b", settled: 0 });
+  const fine = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(USER, "0x61") }), env, ok, evaluate(ok));
+  assert.equal(fine.status, 200, "another payer is unaffected");
+});
+
+test("one settlement transaction pays once: a facilitator confirming it twice releases nothing more", async () => {
+  const env: WorkerEnv = { ...claimsEnv(), CREDITS: namespace((st) => new CreditLedger(st)) };
+  const s = stack(USER, { ok: true, tx: "0xsame", settled: 0 });
+  const first = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(USER, "0x70") }), env, s, evaluate(s));
+  const second = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(USER, "0x71") }), env, s, evaluate(s));
+  assert.deepEqual([first.status, second.status], [200, 402]);
+  assert.equal(((await second.json()) as { error: string }).error, "payment_settlement_reused");
+  const pack = await handleCredits(req("/v1/credits", { amount_usd: 1 }, { "PAYMENT-SIGNATURE": payment(USER, "0x72") }), env, stack(USER, { ok: true, tx: "0xsame", settled: 0 }));
+  assert.equal(pack.status, 402, "no pack for a reused transaction");
+  assert.equal(((await pack.json()) as { token?: string }).token, undefined);
+});
+
+test("unpaid, any body gets the challenge (with the reason it would be refused); paid, an invalid body is a 422", async () => {
+  const s = stack(USER, { ok: true, tx: "0xf5", settled: 0 });
+  const calls = { n: 0 };
+  const unpaid = await handleProtected(req("/v1/risk-check", { wallet: "not-a-wallet" }), {}, s, evaluate(s, calls));
+  assert.equal(unpaid.status, 402);
+  assert.ok(unpaid.headers.get("PAYMENT-REQUIRED"));
+  assert.deepEqual(((await unpaid.json()) as { request_error?: { field?: string } }).request_error?.field, "wallet");
+  const typo = await handleProtected(req("/v1/risk-check", { wallet: WALLET, contxt: "x" }, { "PAYMENT-SIGNATURE": payment(USER, "0x80") }), claimsEnv(), s, evaluate(s, calls));
+  assert.equal(typo.status, 422);
+  assert.equal(calls.n, 0);
+  const pack = await handleCredits(new Request("https://x402check.xyz/v1/credits", { method: "POST" }), { CREDITS: namespace((st) => new CreditLedger(st)) }, s);
+  assert.equal(pack.status, 402, "no body: the default $1 pack's challenge");
+});
+
+test("the Worker: every POST to a paid route is limited (credentialed traffic separately); 429 and preflight carry the headers", async () => {
+  const seen: string[] = [];
+  const limiter = (allow: boolean) => ({ limit: async ({ key }: { key: string }) => (seen.push(key), { success: allow }) });
+  const env: WorkerEnv = { PROVIDER_HOST: "x402check.xyz", UNPAID_LIMITER: limiter(false), PAID_LIMITER: limiter(false) } as WorkerEnv;
+  const post = (headers: Record<string, string>) => worker.fetch(new Request("https://x402check.xyz/v1/risk-check", { method: "POST", body: "{}", headers: { "CF-Connecting-IP": "203.0.113.9", ...headers } }), env);
+  const fake = await post({ Authorization: "Bearer whatever" });
+  assert.equal(fake.status, 429, "a malformed credential is unpaid traffic");
+  await post({ Authorization: `Bearer x402c_${"A".repeat(43)}` });
+  await post({ "PAYMENT-SIGNATURE": payment(USER) });
+  await post({ "PAYMENT-SIGNATURE": btoa(JSON.stringify({ x402Version: 1 })) });
+  assert.deepEqual(seen, ["unpaid:203.0.113.9", "paid:203.0.113.9", "paid:203.0.113.9", "unpaid:203.0.113.9"]);
+  assert.equal(fake.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.equal(fake.headers.get("Access-Control-Allow-Origin"), "*");
+  const preflight = await worker.fetch(new Request("https://x402check.xyz/v1/risk-check", { method: "OPTIONS" }), env);
+  assert.equal(preflight.status, 204);
+  assert.match(preflight.headers.get("Strict-Transport-Security") ?? "", /max-age/);
+  assert.equal(preflight.headers.get("Access-Control-Allow-Methods"), "GET, POST, OPTIONS");
+});
+
+test("only public key members are published: a next key pasted with its private part is not published at all", async () => {
+  const { publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const pub = publicKey.export({ format: "jwk" }) as { x: string; y: string };
+  const next = { kty: "EC", crv: "P-256", x: pub.x, y: pub.y, kid: "jev-attest-v9", alg: "ES256", use: "sig" };
+  const docs = async (value: Record<string, unknown>) => {
+    const env: WorkerEnv = { PROVIDER_HOST: "localhost:8799", JEV_ATTEST_NEXT_PUBLIC_JWK: JSON.stringify(value) };
+    const jwks = (await (await worker.fetch(new Request("http://localhost:8799/.well-known/jwks.json"), env)).json()) as { keys: Array<Record<string, unknown>> };
+    const did = (await (await worker.fetch(new Request("http://localhost:8799/.well-known/did.json"), env)).json()) as { verificationMethod: Array<{ publicKeyJwk: Record<string, unknown> }> };
+    return { jwks: jwks.keys, did: did.verificationMethod.map((m) => m.publicKeyJwk) };
+  };
+  const ok = await docs({ ...next, extra: "dropped" });
+  assert.deepEqual(ok.jwks.find((k) => k.kid === "jev-attest-v9"), next, "public members only");
+  assert.deepEqual(ok.did.find((k) => k.kid === "jev-attest-v9"), next);
+  const leaked = await docs({ ...next, d: "c2VjcmV0" });
+  assert.equal(leaked.jwks.some((k) => k.kid === "jev-attest-v9" || "d" in k), false);
+  assert.equal(leaked.did.some((k) => k.kid === "jev-attest-v9" || "d" in k), false);
 });

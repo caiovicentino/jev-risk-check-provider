@@ -80,6 +80,14 @@ name = "UNPAID_LIMITER"
 namespace_id = "4021"
 simple = { limit = 60, period = 60 }
 
+# Requests that carry a well-formed credential (an x402 v2 PAYMENT-SIGNATURE or a Bearer x402c_
+# token) are limited too, more generously: a header's mere presence never skips the limit, and
+# each such request costs a facilitator verify or a ledger call. Volume belongs in batches.
+[[ratelimits]]
+name = "PAID_LIMITER"
+namespace_id = "4022"
+simple = { limit = 300, period = 60 }
+
 # Workers Logs: only the Worker's own console.error/warn/log lines on failure paths (they carry no
 # tokens and no request bodies). Invocation logs (per-request metadata) are off, so no request
 # header (Authorization: Bearer x402c_…, PAYMENT-SIGNATURE) is ever stored in Cloudflare's logs.

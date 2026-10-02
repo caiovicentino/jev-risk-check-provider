@@ -142,11 +142,11 @@ function tierGuidance(): string {
 
 export function openApiDocument(version: string, prices: { minUsd: string; maxUsd: string; creditUsd: string; simulatedUsd: string; basePerCallUsd: string }): Record<string, unknown> {
   const x402 = (min: string, max: string) => ({ price: { mode: "dynamic", currency: "USD", min, max }, protocols: [{ x402: {} }] });
-  const result = { type: "object", properties: { checked: { type: "boolean" }, score: { type: "integer", minimum: 0, maximum: 100 }, tier: { type: "string", enum: ["low", "medium", "high", "critical"] }, categories: { type: "array", items: { type: "string" } }, evidence: { type: "object" }, jws: { type: "string", description: "ES256 attestation from did:web:x402check.xyz" }, checked_at: { type: "string" }, expires_at: { type: "string" } }, required: ["checked"] };
+  const result = { type: "object", properties: { checked: { type: "boolean" }, score: { type: "integer", minimum: 0, maximum: 100 }, tier: { type: "string", enum: ["low", "medium", "high", "critical"] }, categories: { type: "array", items: { type: "string" }, description: "Always starts with the evaluated families \"intent_risk\" and \"behavioral\" (present in every verdict, not findings), then the specific findings behind the verdict" }, evidence: { type: "object" }, jws: { type: "string", description: "ES256 attestation from did:web:x402check.xyz" }, checked_at: { type: "string" }, expires_at: { type: "string" } }, required: ["checked"] };
   const responses = (schema: Record<string, unknown>) => ({
     "200": { description: "The verdict, with its signed attestation", content: { "application/json": { schema } } },
-    "402": { description: "Payment Required: pay with x402 (the challenge lists every network), or send Authorization: Bearer x402c_… to pay from prepaid credits" },
-    "422": { description: "Invalid request: the offending field is named; nothing is charged" },
+    "402": { description: "Payment Required: pay with x402 (the challenge lists every network), or send Authorization: Bearer x402c_… to pay from prepaid credits. Unpaid, a body that would be refused still gets the challenge, with the reason in request_error; it is never charged" },
+    "422": { description: "Invalid request (with a payment or a credit token): the offending field is named, including an unknown field; nothing is charged" },
   });
   const maxBatch = (Number(prices.maxUsd) * 25).toFixed(3);
   return {
