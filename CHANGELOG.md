@@ -2,9 +2,11 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## `@x402check/client` (next release, unpublished)
+## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — 2026-10-02
 
-- **Sellers can screen the payer before settling:** `x402checkTrustProvider()` implements a provider for the proposed x402 trust-provider extension (x402-foundation/x402#2300). It maps a verified, request-bound verdict on the payer's wallet to PASS / FAIL / UNCERTAIN, never PASS for anything it cannot verify, and returns the attestation as `evidence_uri`.
+- **Sellers can screen the payer before settling (client):** `x402checkTrustProvider()` implements a provider for the proposed x402 trust-provider extension (x402-foundation/x402#2300). It maps a verified, request-bound verdict on the payer's wallet to PASS / FAIL / UNCERTAIN, never PASS for anything it cannot verify, and returns the attestation as `evidence_uri`. A check that did not complete reports why (`not_checked:<reason>`).
+- **Freshness anchors in the types (client):** `checks.sanctions.digest`, `checks.kit_watch` (`complete_through`, `gaps`) and `checks.simulation.at_block`, signed since provider 0.6.1; all optional, older attestations still verify.
+- **`x402check_verify_attestation` and check results show the anchors (MCP):** the OFAC release digest and the per-chain block maps, each value only in its expected format.
 
 ## v0.6.1 — 2026-10-01: freshness anchors
 

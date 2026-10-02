@@ -43,6 +43,8 @@ test("never PASS without a verified attestation: unknown key, unreachable API, n
   assert.equal(pinnedElsewhere.evidence_uri, undefined);
   const down = await x402checkTrustProvider({ fetch: mockFetch(() => json(503, { error: "evaluation_unavailable" })).fetch, pinnedKeys: false }).evaluate(query(EVM));
   assert.equal(down.decision, "UNCERTAIN");
+  const notChecked = await x402checkTrustProvider({ fetch: mockFetch(() => json(200, { checked: false, reason: "model_unavailable" })).fetch, pinnedKeys: false }).evaluate(query(EVM));
+  assert.deepEqual([notChecked.decision, notChecked.reason_code], ["UNCERTAIN", "not_checked:model_unavailable"]);
   const noWallet = await x402checkTrustProvider({ fetch: api.fetch, pinnedKeys: false }).evaluate(query());
   assert.deepEqual([noWallet.decision, noWallet.reason_code], ["UNCERTAIN", "no_payer_wallet"]);
   assert.equal(api.seen.length, 1, "no check is bought without a wallet");

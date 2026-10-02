@@ -85,7 +85,8 @@ export function x402checkTrustProvider(options: X402checkTrustProviderOptions = 
         const { action } = interpret(result, { verification });
         const claims = verification.claims;
         const hard = result.checked ? result.categories?.find((c) => HARD_BLOCK.has(c)) : undefined;
-        const reason_code = !verification.valid ? "attestation_invalid" : !result.checked ? `not_checked:${result.reason ?? "unknown"}` : (hard ?? `tier_${result.tier}`);
+        // A check that did not complete carries no attestation: say why, not that the attestation failed.
+        const reason_code = !result.checked ? `not_checked:${result.reason ?? "unknown"}` : !verification.valid ? "attestation_invalid" : (hard ?? `tier_${result.tier}`);
         return {
           ...base,
           decision: DECISION[action],
