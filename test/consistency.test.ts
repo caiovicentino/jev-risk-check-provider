@@ -4,8 +4,10 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { readFileSync } from "node:fs";
-import { X402CHECK_PAY_TO } from "../packages/client/src/guard.js";
+import { X402CHECK_PAY_TO, X402CHECK_PAYMENT_ASSETS } from "../packages/client/src/guard.js";
 import { buildAccepts, MAINNET_NETWORKS } from "../deploy/protected.js";
+import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { formatUsd, networkPrice, SIMULATION_PRICE, toMicro } from "../deploy/pricing.js";
 import { CREDIT_CHECK_PRICE } from "../deploy/credits.js";
 import { PROVIDER_VERSION } from "../src/provider.js";
@@ -116,10 +118,14 @@ test("the client parses addresses and chains as the provider does", () => {
     const b = clientParseSubject(s);
     assert.deepEqual(b && { canonical: b.canonical, caip2: b.caip2 }, a && { canonical: a.canonical, caip2: a.caip2 }, s);
   }
-  const chains = ["base", "Base", "eip155:8453", "ethereum", "eip155:1", "polygon", "arbitrum", "optimism", "bsc", "avalanche", "sei", "monad", "solana", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "base-sepolia", "bitcoin", "tron", "foo", ""];
+  const chains = ["base", "Base", "eip155:8453", "ethereum", "eip155:1", "polygon", "arbitrum", "optimism", "bsc", "avalanche", "sei", "monad", "solana", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", "base-sepolia", "bitcoin", "tron", "bip122:000000000019d6689c085ae165831e93", "tron:0x2b6653dc", "solana:mainnet", "foo:bar", "cosmos:cosmoshub-4", "foo", ""];
   for (const c of chains) assert.equal(toCaip2(c), normalizeChain(c)?.caip2 ?? null, c);
-  // One deliberate difference: the client canonicalizes a zero-padded chain id before sending; the provider refuses it.
+  // Deliberate differences: the client canonicalizes a zero-padded chain id before sending (the
+  // provider refuses it), and leaves checksums (EIP-55, base58check) to the provider, which refuses
+  // a bad one with a 422 before any charge.
   assert.deepEqual([toCaip2("eip155:08453"), normalizeChain("eip155:08453")], ["eip155:8453", null]);
+  const badChecksum = "0xBf88b1F49B5e8Ec386289341c4a5ee00bB0E0178";
+  assert.deepEqual([clientParseSubject(badChecksum)?.canonical, parseSubject(badChecksum)], [badChecksum.toLowerCase(), null]);
 });
 
 test("docs agree with the code and with each other (audit docev-11)", async () => {
@@ -141,4 +147,16 @@ test("docs agree with the code and with each other (audit docev-11)", async () =
   // The client README documents the credit methods and the guard's key pinning.
   const client = read("packages/client/README.md");
   for (const name of ["buyCredits", "creditBalance", "creditToken", "pinnedKeys", "trustedPayeeMaxAmount"]) assert.ok(client.includes(name), `packages/client/README.md documents ${name}`);
+});
+
+test("the guard exempts payments to x402check only in the asset the challenge asks for, on every network", async () => {
+  // The schemes price each offered network in its default asset: that is what the challenge asks for.
+  const evm = new ExactEvmScheme() as unknown as { parsePrice(price: string, network: string): Promise<{ asset: string }> };
+  const svm = new ExactSvmScheme() as unknown as { parsePrice(price: string, network: string): Promise<{ asset: string }> };
+  const offered: Record<string, string> = {};
+  for (const o of buildAccepts({})) {
+    const network = String(o.network);
+    offered[network] = (await (network.startsWith("solana:") ? svm : evm).parsePrice("$0.001", network)).asset;
+  }
+  assert.deepEqual(offered, X402CHECK_PAYMENT_ASSETS);
 });

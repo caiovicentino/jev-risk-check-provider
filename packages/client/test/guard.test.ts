@@ -283,6 +283,10 @@ describe("x402PaymentGuard (x402 client hook)", () => {
     assert.equal(await hook(ctx(X402CHECK_PAY_TO[0] as string, "5000000")), undefined);
     assert.equal(api.seen.length, 3);
     assert.equal(api.seen[2]?.wallet, X402CHECK_PAY_TO[0]);
+    // The cap is in USDC units: the same amount of another asset (8-decimal cbBTC) is checked.
+    const cbBtc = { ...ctx(X402CHECK_PAY_TO[0] as string), selectedRequirements: { ...ctx(X402CHECK_PAY_TO[0] as string).selectedRequirements, asset: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf" } };
+    assert.equal(await hook(cbBtc), undefined);
+    assert.equal(api.seen.length, 4, "a non-USDC payment to x402check is checked");
     assert.deepEqual(api.seen[0]?.payment, { network: "eip155:8453", pay_to: BOB, amount: "10000", asset: USDC_BASE, resource: "https://api.example.com/data" });
     assert.equal(api.seen[0]?.domain, "api.example.com");
   });

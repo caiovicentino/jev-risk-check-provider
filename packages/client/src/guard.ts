@@ -66,6 +66,21 @@ export const X402CHECK_PAY_TO: readonly string[] = ["0xbF88b1F49B5e8Ec386289341c
 /** Payments to a trusted payee up to this many atomic units ($0.25 of USDC) are not checked. */
 export const TRUSTED_PAYEE_MAX_AMOUNT = 250_000n;
 
+/**
+ * The asset x402check's own challenge asks for on each network (USDC, 6 decimals). The trusted-payee
+ * cap is in USDC units, so only a payment in that asset is exempt: 250000 units of an 8-decimal token
+ * is not $0.25.
+ */
+export const X402CHECK_PAYMENT_ASSETS: Readonly<Record<string, string>> = {
+  "eip155:8453": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "eip155:137": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+  "eip155:42161": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  "eip155:43114": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+  "eip155:143": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+  "eip155:1329": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+  "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+};
+
 /** x402's Permit2 proxies (exact and upto schemes): a PermitWitnessTransferFrom to one of them is an x402 payment to its witness `to`. */
 export const X402_PERMIT2_PROXIES: readonly string[] = ["0x402085c248eea27d92e8b30b2c58ed07f9e20001", "0x4020a4f3b7b90cca423b9fabcc0ce57c6c240002"];
 
@@ -143,6 +158,8 @@ export interface GuardOptions {
    * other, so a stale or compromised pay_to can never take more than the price of checks.
    */
   trustedPayeeMaxAmount?: bigint | undefined;
+  /** The asset (per CAIP-2 network) a trusted payee's exempt payment must be in. Default: USDC, as x402check's challenge asks. */
+  trustedPayeeAssets?: Readonly<Record<string, string>> | undefined;
   /** `sign({ hash })` and messages of opaque bytes sign anything, unreadable: refused unless true (some smart-account flows need it). */
   allowRawHashSigning?: boolean | undefined;
   /** EIP-7702 authorizations valid on every chain (chainId 0): refused unless true; then the delegate is checked on each chain the kit watch covers. */
@@ -350,7 +367,9 @@ export function createGuard(options: GuardOptions = {}) {
       const network = toCaip2(request.network) ?? request.network;
       const summary = `x402 payment of ${request.amount ?? "?"} (atomic units) of ${request.asset ?? "?"} on ${network} to ${request.payTo}${request.resource ? ` for ${request.resource}` : ""}`;
       const small = typeof request.amount === "string" && /^\d{1,78}$/.test(request.amount) && BigInt(request.amount) <= (options.trustedPayeeMaxAmount ?? TRUSTED_PAYEE_MAX_AMOUNT);
-      if (isTrusted(request.payTo) && small) return verdictOf("x402_payment", summary, "allow", ["payment to x402check itself for checks (trusted payee, small amount): not checked"], []);
+      const exemptAsset = (options.trustedPayeeAssets ?? X402CHECK_PAYMENT_ASSETS)[network];
+      const usdc = typeof request.asset === "string" && !!exemptAsset && (network.startsWith("eip155:") ? request.asset.toLowerCase() === exemptAsset.toLowerCase() : request.asset === exemptAsset);
+      if (isTrusted(request.payTo) && small && usdc) return verdictOf("x402_payment", summary, "allow", ["payment to x402check itself for checks (trusted payee, small amount): not checked"], []);
       const payment: PaymentBinding = {
         network,
         pay_to: request.payTo,
