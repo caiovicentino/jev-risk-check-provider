@@ -21,7 +21,7 @@
   "devDependencies": {
     "@metamask/eth-sig-util": "8.2.0",
     "@metamask/snaps-cli": "^8.0.0",
-    "@metamask/snaps-jest": "9.1.0",
+    "@metamask/snaps-jest": "10.2.1",
     "@metamask/snaps-sdk": "^8.0.0",
     "@metamask/snaps-simulation": "3.1.0",
     "@swc/jest": "^0.2.39",
