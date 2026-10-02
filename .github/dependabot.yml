@@ -45,6 +45,12 @@ updates:
       # kit-5 test lane and for the decoder to read the newer message versions.
       - dependency-name: "@solana/kit"
         update-types: ["version-update:semver-major"]
+      # The Snap (a preview, not published) moves its MetaMask toolchain and Jest together, in one
+      # planned migration: snaps-sdk, snaps-jest and snaps-simulation majors change the test harness.
+      - dependency-name: "@metamask/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jest"
+        update-types: ["version-update:semver-major"]
     groups:
       runtime:
         applies-to: version-updates
