@@ -1,7 +1,8 @@
 # Dependabot version updates for the Worker (root), the published packages
 # (@x402check/client, @x402check/mcp), the Snap and the GitHub Actions pins.
 #
-# - Weekly. Minor and patch updates arrive grouped: runtime dependencies (what the Worker
+# - Monthly (fewer PRs and notification emails; security updates still arrive as soon as needed).
+#   Minor and patch updates arrive grouped: runtime dependencies (what the Worker
 #   bundle and npm users get: review them closely, the MCP server holds a payer key) in one
 #   group, development tooling in another. Each major update gets its own PR.
 # - Cooldown: a release is proposed only once it has been public for 7 days, so a hijacked
@@ -17,8 +18,7 @@ updates:
       - "/packages/mcp"
       - "/snap"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
@@ -71,8 +71,7 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 3
