@@ -23,7 +23,7 @@
     "@metamask/snaps-cli": "^8.0.0",
     "@metamask/snaps-jest": "9.1.0",
     "@metamask/snaps-sdk": "^8.0.0",
-    "@metamask/snaps-simulation": "3.1.0",
+    "@metamask/snaps-simulation": "4.3.1",
     "@swc/jest": "^0.2.39",
     "@types/node": "^22.0.0",
     "jest": "^29.7.0",
