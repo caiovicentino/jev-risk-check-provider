@@ -3,7 +3,7 @@
 // report as "ss:<16 hex>" (SHA-256 of its lowercase form): counts and joins survive, the entry
 // itself is not published. Forta (MIT) and MetaMask (DBAD) entries stay readable.
 import { createHash } from "node:crypto";
-import { normalizeFeedDomain } from "../src/threat-intel.js";
+import { feedEntryHost, normalizeFeedDomain } from "../src/threat-intel.js";
 
 const SOURCES = {
   ssAddresses: "https://raw.githubusercontent.com/scamsniffer/scam-database/main/blacklist/address.json",
@@ -34,8 +34,9 @@ export async function scamSnifferOnly(fetchImpl: typeof fetch = fetch): Promise<
       .map((a) => String(a).trim().toLowerCase())
       .filter((a) => /^0x[0-9a-f]{40}$/.test(a) && !fortaSet.has(a)),
   );
+  // Redacting too much is the safe side: MetaMask hosts strictly, ScamSniffer hosts leniently (a wrapped entry's host too).
   const mmSet = new Set(((JSON.parse(mm) as { blacklist?: string[] }).blacklist ?? []).map(normalizeFeedDomain).filter((d): d is string => d !== null));
-  const domains = new Set((JSON.parse(ssD) as string[]).map(normalizeFeedDomain).filter((d): d is string => d !== null && !mmSet.has(d)));
+  const domains = new Set((JSON.parse(ssD) as string[]).map(feedEntryHost).filter((d): d is string => d !== null && !mmSet.has(d)));
   return { addresses, domains };
 }
 

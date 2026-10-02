@@ -117,7 +117,14 @@ npx tsx scripts/update-threat-feeds.ts --forta       # + Forta drainer-code fing
 npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer domains, addresses and code fingerprints → KV (binding RATE), 4 writes; the cron refreshes domains and addresses on its own
 ```
 
-- OFAC and MetaMask are embedded **and** refreshed at runtime. `.github/workflows/feeds.yml` rebuilds them daily with a read-only token and no install scripts. A separate job signs the manifest with Ed25519 and publishes it to the `feeds` branch; the key is in the `FEEDS_SIGNING_KEY` repository secret.
+- OFAC and MetaMask are embedded **and** refreshed at runtime. `.github/workflows/feeds.yml` rebuilds them daily with a read-only token and no install scripts. A separate job signs the manifest with Ed25519 and publishes it to the `feeds` branch; the key is the `FEEDS_SIGNING_KEY` secret of the `feeds` environment.
+- Before signing, that job compares the new manifest with the published one (`scripts/feeds-guard.mjs`: plain node, checked out from the run's commit, never taken from the build artifact). It signs nothing when:
+  - OFAC addresses shrink by more than 5% or grow by more than 50%;
+  - MetaMask entries move by more than 20% either way;
+  - a date goes backwards, or runs more than a day ahead;
+  - no published manifest can be read.
+
+  The run then fails with `feeds guard` errors and the Worker keeps its lists. After reviewing the change, `gh workflow run feeds.yml -f override=true` publishes it anyway.
 - The Worker pins the public key (`FEEDS_PUBLIC_KEY` in `fresh-feeds.ts`) and checks hourly, in the background. A cold isolate waits up to 400 ms. It swaps in data only if all of these hold:
   - the signature is valid;
   - the data is newer and dated no later than tomorrow;
@@ -126,7 +133,7 @@ npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer do
 
   Otherwise it keeps the current list. `/status` shows which version is in use.
 - **To rotate the publisher key,** generate a new Ed25519 key, store the PKCS#8 PEM with `gh secret set FEEDS_SIGNING_KEY --env feeds` (the environment only main may use), put the raw public key (base64url) in `FEEDS_PUBLIC_KEY`, deploy, then run the workflow (`gh workflow run feeds.yml`) so the branch carries a manifest signed with the new key. Until it does, the Worker keeps its current lists. Last rotated 2026-09-30.
-- ScamSniffer lives only in KV and is picked up within an hour. The Worker's cron rebuilds the domain and address sets at 05:37 and 17:37 UTC (`scamsniffer-refresh.ts`: a list that shrank by half is refused, and the code set keeps its own date, `code_as_of`). `/status` marks the feed stale after 3 days without a refresh. The code fingerprints come from the listed addresses' runtime code on 7 EVM chains (about 2 minutes via publicnode), with the manual upload above.
+- ScamSniffer lives only in KV and is picked up within an hour. The Worker's cron rebuilds the domain and address sets at 05:37 and 17:37 UTC (`scamsniffer-refresh.ts`). It resolves the upstream commit first and reads both lists at that SHA; when GitHub does not answer, it reads `main` and records the fetch date and no commit. A list that halves, or grows by more than 50% or by more than 100,000 domains or 2,000 addresses since the last refresh, is refused: the previous sets stay and Workers Logs show `scamsniffer refresh kept the previous data: <reason>`. Addresses x402check never flags (`src/never-flag.ts`) are left out and counted in the meta's `never_flag_dropped`. The code set keeps its own date, `code_as_of`. `/status` marks the feed stale after 3 days without a refresh. The code fingerprints come from the listed addresses' runtime code on 7 EVM chains (about 2 minutes via publicnode), with the manual upload above.
 - Every attestation states the date and status of each list it consulted (`checks.sanctions`, `checks.feeds`).
 
 ## Kit watch

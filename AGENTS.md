@@ -56,7 +56,7 @@ One agent may hold several roles in one session. Know which lane you are working
 | **Lead agent** | Direction (`docs/STRATEGY.md`), releases (`CHANGELOG.md`, tags, GitHub releases), this file. | Sets priorities, splits work across the roles, verifies, and reports to the owner in **Brazilian Portuguese with correct accents**. | Every session. | Work verified in production, docs updated, the owner told plainly what changed and what is pending. |
 | **Provider & Worker** | `src/` (provider core, scoring, landing, validation), `deploy/` (Worker, paid flow), `test/`. | Builds the API and the site. | Any code change. | All suites green (§3.1), deployed, `/healthz` shows the new version. |
 | **Payments & Economics** | `deploy/pricing.ts`, the routing in `deploy/protected.ts`, `deploy/credits.ts`, `deploy/cdp.ts`. | Maintains prices, facilitator routing (CDP, PayAI, Dexter) and prepaid credits. Watches margins. | Fee changes, facilitator incidents, pricing work. | `/status` → `payments` shows every margin above 0, and `facilitators` are all ok. |
-| **Intelligence** | Kit watch (`src/kit-watch*.ts`, `deploy/kit-watch.ts`, the per-minute cron), feeds (`scripts/update-*.ts`, `scripts/publish-feeds.ts`, `.github/workflows/feeds.yml`), code sets (`scripts/kit-*.ts`, `hunt-kits.ts`, `legit-corpus.ts`). | Owns detection data: our own watch, lists and fingerprints. | The cron runs every minute and feeds refresh daily; also on new threat intel. | `/status` → `kit_watch` has lag 0 and gaps 0. Every code set passed the collision gate. |
+| **Intelligence** | Kit watch (`src/kit-watch*.ts`, `deploy/kit-watch.ts`, the per-minute cron), feeds (`scripts/update-*.ts`, `scripts/publish-feeds.ts`, `scripts/feeds-guard.mjs`, `.github/workflows/feeds.yml`, `deploy/scamsniffer-refresh.ts`, `src/never-flag.ts`), code sets (`scripts/kit-*.ts`, `hunt-kits.ts`, `legit-corpus.ts`). | Owns detection data: our own watch, lists and fingerprints. | The cron runs every minute and feeds refresh daily; also on new threat intel. | `/status` → `kit_watch` has lag 0 and gaps 0. Every code set passed the collision gate. |
 | **Evidence & Research** | `eval/`, `eval/evidence/*-report.json`, `docs/EVIDENCE.md`, `docs/METHODOLOGY.md`. | Measures, and publishes negative results too. Runs the paid production probes. | Every release that changes behaviour, and every public claim. | Numbers reproducible from the report, with Wilson CIs and externally grounded labels. |
 | **SDK & MCP** | `packages/client` (`@x402check/client`, including the signing guard), `packages/mcp` (`@x402check/mcp`), `packages/mcp/server.json`, `scripts/publish-npm.sh`, `scripts/sync-decoders.mjs`. | Typed client, attestation verifier, **signing guard**, and the MCP server for agents. | API changes that affect clients, and releases. | Published on npm, installable with `npx`, and listed in the MCP Registry. |
 | **Distribution & Ecosystem** | Catalog listings (§2.5), `deploy/discovery.ts` (Bazaar declaration, `/openapi.json`), `src/landing.ts`, `README.md`, upstream threads (§2.6), `docs/DISTRIBUTION.md` (drafts). | Keeps x402check wherever agents and their developers look. | After discovery-affecting changes, and weekly. | Each catalog shows current prices and endpoints (§3.5). |
@@ -71,7 +71,7 @@ One agent may hold several roles in one session. Know which lane you are working
 
 | Path | What |
 |---|---|
-| `src/` | Provider core: `provider.ts` (evaluation and `PROVIDER_VERSION`), `scoring.ts`, `validate.ts`, `handler.ts` (routes the Worker does not special-case), `landing.ts` (the site and `og.png`), `jws.ts` (attestations, `request_hash`), `simulation.ts`, `kit-watch*.ts`, `sanctions.ts`, `domain-analysis.ts`, `icon.ts`, `data/` (embedded OFAC and MetaMask sets) |
+| `src/` | Provider core: `provider.ts` (evaluation and `PROVIDER_VERSION`), `scoring.ts`, `validate.ts`, `handler.ts` (routes the Worker does not special-case), `landing.ts` (the site and `og.png`), `jws.ts` (attestations, `request_hash`), `simulation.ts`, `kit-watch*.ts`, `sanctions.ts`, `domain-analysis.ts`, `icon.ts`, `never-flag.ts` (addresses no community list may flag: our `pay_to`, Permit2 and x402's proxies, the asset x402 charges in per network, major tokens), `data/` (embedded OFAC and MetaMask sets) |
 | `deploy/` | Cloudflare Worker. `worker.ts` (routing, `/status`, cron, HEAD handling), `protected.ts` (paid flow, routing, stack, attestation-key check), `payment-claims.ts` (single use of each payment), `http-util.ts` (payer screening, settlement records), `pricing.ts`, `credits.ts`, `cdp.ts`, `discovery.ts`, `kit-watch.ts`, `feeds.ts` (GPL blobs from KV), `fresh-feeds.ts`, `wrangler.toml`. Details in `deploy/README.md`. |
 | `packages/client`, `packages/mcp` | npm packages (`@x402check/client`, `@x402check/mcp`). The MCP server depends on the client via `file:../client` in the repo; publishing swaps it for `^version`. |
 | `packages/client/src/guard.ts`, `packages/client/src/solana.ts` | **Signing guard** (`@x402check/client/guard`): `guardAccount` (EVM), `guardSolanaSigner` (Solana, with a dependency-free message decoder), `x402PaymentGuard`. The key signs only after a verified, bound `allow`. |
@@ -79,10 +79,10 @@ One agent may hold several roles in one session. Know which lane you are working
 | `packages/client/src/decode/` | The Snap's decoders, **vendored**: never edit them there. Edit `snap/src`, then run `node scripts/sync-decoders.mjs`. `test/decoders-sync.test.ts` fails on drift. |
 | `snap/` | MetaMask Snap (preview). |
 | `eval/` | Evaluations and paid production probes. Reports go to `eval/evidence/`. `paid-fetch.ts` pays with the probe payer, `flags.ts` parses the scripts' flags, `redact.ts` writes ScamSniffer-only entries as hashes (every report writer that handles that data uses it), and `replay.ts` probes single-use payments. |
-| `scripts/` | `deploy.sh` (the only deploy path, §3.2), feed builders, kit-watch tooling, `publish-npm.sh`, `verify-attest.ts` (the SDK's verifier as a CLI: `--request`, `--max-age`, key pinned), `redact-evidence.ts` (`--check`: no ScamSniffer-only entry in the reports), `payai-shadow.ts`. **Money scripts:** `x402-pay.ts`, `sol-treasury-transfer.ts`, `gen-payer-wallets.ts` (see §4). |
+| `scripts/` | `deploy.sh` (the only deploy path, §3.2), feed builders, `feeds-guard.mjs` (the feeds workflow's check before signing, plain node; §3.13), kit-watch tooling, `publish-npm.sh`, `verify-attest.ts` (the SDK's verifier as a CLI: `--request`, `--max-age`, key pinned), `redact-evidence.ts` (`--check`: no ScamSniffer-only entry in the reports), `payai-shadow.ts`. **Money scripts:** `x402-pay.ts`, `sol-treasury-transfer.ts`, `gen-payer-wallets.ts` (see §4). |
 | `docs/` | `STRATEGY.md` (direction), `METHODOLOGY.md` (verdict rules), `EVIDENCE.md` (measurements). The rest are historical records: `DISTRIBUTION.md` holds superseded drafts, `PR-PLAN.md` dates from 2026-09-27, and the `EVIDENCE-*` files and `hackathon/` are older. |
 | `test/` | Provider tests (`npm test`). |
-| `.github/workflows/` | `ci.yml` (push to main and PRs: provider, Worker bundle dry-run, Snap with a manifest-vs-rebuild check, client and MCP, production `npm audit`), `feeds.yml` (daily at 05:17 UTC → `feeds` branch), `publish-mcp-registry.yml` (tag `mcp-v*` → waits for green CI on that main commit → pinned, SHA-256-verified `mcp-publisher` → MCP Registry). Every action is pinned to a commit SHA and every token is least-privilege. |
+| `.github/workflows/` | `ci.yml` (push to main and PRs: provider, Worker bundle dry-run, Snap with a manifest-vs-rebuild check, client and MCP, production `npm audit`), `feeds.yml` (daily at 05:17 UTC → the guard compares with the published manifest → signed → `feeds` branch), `publish-mcp-registry.yml` (tag `mcp-v*` → waits for green CI on that main commit → pinned, SHA-256-verified `mcp-publisher` → MCP Registry). Every action is pinned to a commit SHA and every token is least-privilege. |
 | `.github/dependabot.yml` | Weekly version-update PRs, grouped (npm for the root, `packages/client`, `packages/mcp` and `snap`, plus GitHub Actions); each major update gets its own PR. |
 | `SECURITY.md` | Vulnerability reporting (GitHub private reporting), scope, testing rules and the trust anchor. `/.well-known/security.txt` points to it. |
 | `AGENTS.md`, `CLAUDE.md` | This map. |
@@ -160,9 +160,9 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 |---|---|---|
 | Every minute | Kit watch cron: new Ethereum and Base blocks, EIP-7702 delegations, kit deployments. The same cron applies queued credits (`pc:*`). | `/status` → `kit_watch` has `lag_blocks` near 0, `gaps` 0, and no `stale` |
 | Every 10 min per isolate | Facilitator routing: `/supported`, PayAI's `/pricing`, CDP reachability | `/status` → `payments`, `facilitators` |
-| Daily at 05:17 UTC | `feeds.yml`: OFAC and MetaMask refresh → `feeds` branch → the Worker refreshes in the background | `/status` → `refresh` |
+| Daily at 05:17 UTC | `feeds.yml`: OFAC and MetaMask refresh → guard → `feeds` branch → the Worker refreshes in the background | `/status` → `refresh`; a failed run with `feeds guard` errors is a refused change (§3.13) |
 | Every push to `main` | `ci.yml` | The GitHub Actions status |
-| 05:37 and 17:37 UTC | Worker cron: the ScamSniffer domain and address sets are rebuilt into KV (GPL, runtime only) | `/status` → `data.scamsniffer.stale` is false |
+| 05:37 and 17:37 UTC | Worker cron: the ScamSniffer domain and address sets are rebuilt into KV (GPL, runtime only), read at the upstream commit | `/status` → `data.scamsniffer.stale` is false; a refused refresh logs `scamsniffer refresh kept the previous data` (§3.13) |
 | 06:07 and 18:07 UTC | Worker cron: the model canary (fixed cases through the live model) | `/status` → `model.canary.ok` is true and `stale` false |
 | Weekly | Dependabot version-update PRs (grouped; majors one by one) | Review and merge like any change (§3.1) |
 | Tag `mcp-v*` | `publish-mcp-registry.yml` | The run log, and the registry API |
@@ -288,6 +288,20 @@ Draft emails, DMs, forms and social posts. **The owner approves and sends them.*
   4. The owner swaps `JEV_ATTEST_PRIVATE_KEY` and `JEV_ATTEST_PUBLIC_JWK` to the new key, and sets `JEV_ATTEST_NEXT_PUBLIC_JWK` to the **old** public JWK, so attestations it signed stay verifiable until they expire (1 h).
   5. After 2 h, the owner deletes `JEV_ATTEST_NEXT_PUBLIC_JWK`. In a later client release, drop the old thumbprint.
   6. Check `/healthz` and `/status` → `attestation.thumbprint`.
+
+### 3.13 A feed update was refused
+
+Both refusals keep the data in use, so nothing breaks while you look.
+
+- **The feeds workflow (OFAC, MetaMask).** The `publish` job printed `feeds guard` errors and signed nothing. The bounds (`scripts/feeds-guard.mjs`):
+  - OFAC addresses shrink by more than 5% or grow by more than 50%;
+  - MetaMask entries move by more than 20% either way;
+  - a date goes backwards or runs more than a day ahead;
+  - no published manifest can be read.
+
+  Check the upstream change (OFAC's recent actions, the MetaMask repository's commits). If it is legitimate, for example an OFAC delisting, run `gh workflow run feeds.yml -f override=true`. If it is not, find what broke the build: never override blind.
+- **The ScamSniffer refresh.** Workers Logs show `scamsniffer refresh kept the previous data: <reason>`: a list halved, or grew by more than 50% or by more than 100,000 domains or 2,000 addresses. Look at the upstream commit. If it is legitimate, for example a large import, run `npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload`, which has no growth bound.
+- **`scamsniffer lists N never-flag address(es)`** in the logs means the list named an address from `src/never-flag.ts`. It was left out, so nothing is blocked; find out which entry it was and why.
 
 ---
 

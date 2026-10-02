@@ -17,17 +17,18 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { neverFlag } from "../src/never-flag.js";
 import { buildHashBlob, normalizeFeedDomain } from "../src/threat-intel.js";
 import { SCAMSNIFFER_KEYS as KV_KEYS } from "../deploy/scamsniffer-refresh.js";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { fetchCodes } from "./code-fetch.js";
 import { creationOf, pool } from "./kit-catalog.js";
 
+// Every list is read at the head commit resolved first, so the recorded commit is the data's.
 const MM_REPO = "MetaMask/eth-phishing-detect";
-const MM_URL = `https://raw.githubusercontent.com/${MM_REPO}/main/src/config.json`;
+const MM_CONFIG = (sha: string) => `https://raw.githubusercontent.com/${MM_REPO}/${sha}/src/config.json`;
 const SS_REPO = "scamsniffer/scam-database";
-const SS_DOMAINS = `https://raw.githubusercontent.com/${SS_REPO}/main/blacklist/domains.json`;
-const SS_ADDRESSES = `https://raw.githubusercontent.com/${SS_REPO}/main/blacklist/address.json`;
+const SS_LIST = (sha: string, file: "domains.json" | "address.json") => `https://raw.githubusercontent.com/${SS_REPO}/${sha}/blacklist/${file}`;
 const DATA = new URL("../src/data/", import.meta.url);
 const CACHE = new URL("../.cache/threat-feeds/", import.meta.url);
 // One definition of the KV keys, shared with the Worker (loader and cron refresh).
@@ -155,16 +156,16 @@ async function headCommit(repo: string): Promise<{ sha: string; date: string }> 
   const res = await fetch(`https://api.github.com/repos/${repo}/commits/main`, { headers: { Accept: "application/vnd.github+json" } });
   if (!res.ok) throw new Error(`${repo} commit lookup: HTTP ${res.status}`);
   const c = (await res.json()) as { sha: string; commit: { committer: { date: string } } };
+  // The SHA becomes part of the list URLs.
+  if (!/^[0-9a-f]{40}$/.test(c.sha)) throw new Error(`${repo} commit lookup: unexpected sha`);
   return { sha: c.sha, date: c.commit.committer.date.slice(0, 10) };
 }
 
 export { normalizeFeedDomain };
 
 async function metamask(): Promise<void> {
-  const [{ body, sha256 }, commit] = await Promise.all([
-    getJson<{ blacklist?: string[]; whitelist?: string[]; fuzzylist?: string[] }>(MM_URL),
-    headCommit(MM_REPO),
-  ]);
+  const commit = await headCommit(MM_REPO);
+  const { body, sha256 } = await getJson<{ blacklist?: string[]; whitelist?: string[]; fuzzylist?: string[] }>(MM_CONFIG(commit.sha));
   const black = (body.blacklist ?? []).map(normalizeFeedDomain);
   const hosts = black.filter((h): h is string => h !== null);
   const skipped = black.length - hosts.length;
@@ -236,9 +237,13 @@ async function forta(): Promise<void> {
 }
 
 async function scamsniffer(upload: boolean): Promise<void> {
-  const [domains, addresses, commit] = await Promise.all([getJson<string[]>(SS_DOMAINS), getJson<string[]>(SS_ADDRESSES), headCommit(SS_REPO)]);
+  const commit = await headCommit(SS_REPO);
+  const [domains, addresses] = await Promise.all([getJson<string[]>(SS_LIST(commit.sha, "domains.json")), getJson<string[]>(SS_LIST(commit.sha, "address.json"))]);
   const hosts = domains.body.map(normalizeFeedDomain).filter((h): h is string => h !== null);
-  const evm = addresses.body.map((a) => String(a).trim()).filter((a) => /^0x[0-9a-fA-F]{40}$/.test(a)).map((a) => a.toLowerCase());
+  const listed = addresses.body.map((a) => String(a).trim()).filter((a) => /^0x[0-9a-fA-F]{40}$/.test(a)).map((a) => a.toLowerCase());
+  // Never flagged, and never fingerprinted: a listed token contract would match every contract sharing its logic.
+  const evm = listed.filter((a) => !neverFlag(a));
+  if (evm.length < listed.length) console.log(`  left out ${listed.length - evm.length} never-flag address(es) (src/never-flag.ts)`);
   mkdirSync(CACHE, { recursive: true });
   const dBlob = buildHashBlob(hosts);
   const aBlob = buildHashBlob(evm);

@@ -54,8 +54,22 @@ export function feedHost(host: string): string {
   return host.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
 }
 
-/** Normalizes a feed entry to a host (punycode, lowercase, no www.); null for paths/invalid. */
+/**
+ * Normalizes a feed entry to a host (punycode, lowercase, no www.); null for anything that is not
+ * a bare host. An entry with userinfo, a port, a path, a query or a fragment (`x@coinbase.com`,
+ * `host:443`, `host?q`, `host#f`) is refused, never reduced to its host: a list could otherwise
+ * flag a legitimate host by wrapping it.
+ */
 export function normalizeFeedDomain(entry: string): string | null {
+  return /[\\@:?#%]/.test(entry) ? null : feedEntryHost(entry);
+}
+
+/**
+ * The host a feed entry names, even inside userinfo, a port, a query or a fragment; null for paths
+ * and invalid entries. Only for redaction (eval/redact.ts), where matching too much is the safe
+ * side: feed sets are built with normalizeFeedDomain.
+ */
+export function feedEntryHost(entry: string): string | null {
   const e = entry.trim();
   if (!e || e.includes("/") || /\s/.test(e)) return null;
   try {

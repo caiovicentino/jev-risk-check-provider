@@ -2,6 +2,16 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## Unreleased (v0.6.2)
+
+- **Feeds supply chain (security review F7):**
+  - A feed entry must be a bare host. An entry with userinfo, a port, a path, a query or a fragment (`x@coinbase.com`, `coinbase.com:443`) is dropped instead of being reduced to the host it wraps. On the current lists this drops one ScamSniffer entry and no MetaMask entry.
+  - The ScamSniffer refresh resolves the upstream commit first and reads both lists at that SHA, so the recorded commit is the data's. When GitHub does not answer, it reads `main` and records the fetch date and no commit.
+  - A refresh in which a list grows by more than 50%, or by more than 100,000 domains or 2,000 addresses, is refused like one in which it halves, and logged.
+  - Addresses x402check never flags are left out of the community address sets (`src/never-flag.ts`): its own `pay_to`, Permit2 and x402's Permit2 proxies, the asset x402 charges in on each EVM network, and the major tokens the simulator values. The manual build also leaves them out of the code fingerprints.
+  - The manual MetaMask and ScamSniffer builds read their lists at the resolved commit too.
+  - The feeds workflow refuses to sign a manifest that changed implausibly since the published one (`scripts/feeds-guard.mjs`, plain node, checked out from the run's commit). The bounds: OFAC addresses −5% or +50%, MetaMask entries ±20%, no date going backwards or more than a day ahead, and a published manifest to compare with. A manual run with `override` publishes after review.
+
 ## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — 2026-10-02
 
 - **Sellers can screen the payer before settling (client):** `x402checkTrustProvider()` implements a provider for the proposed x402 trust-provider extension (x402-foundation/x402#2300). It maps a verified, request-bound verdict on the payer's wallet to PASS / FAIL / UNCERTAIN, never PASS for anything it cannot verify, and returns the attestation as `evidence_uri`. A check that did not complete reports why (`not_checked:<reason>`).

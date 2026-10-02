@@ -4,7 +4,9 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { readFileSync } from "node:fs";
-import { X402CHECK_PAY_TO, X402CHECK_PAYMENT_ASSETS } from "../packages/client/src/guard.js";
+import { getDefaultAsset } from "@x402/evm";
+import { X402_PERMIT2_PROXIES, X402CHECK_PAY_TO, X402CHECK_PAYMENT_ASSETS } from "../packages/client/src/guard.js";
+import { NEVER_FLAG_EVM } from "../src/never-flag.js";
 import { buildAccepts, MAINNET_NETWORKS } from "../deploy/protected.js";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
@@ -28,6 +30,13 @@ test("pay_to: wrangler.toml, the Worker's defaults, the guard's trusted payees a
   assert.deepEqual([...X402CHECK_PAY_TO], [evm, sol]);
   for (const a of buildAccepts({})) assert.equal(a.payTo, a.network.startsWith("solana:") ? sol : evm, a.network);
   assert.ok(read("eval/bazaar.ts").includes(evm));
+});
+
+test("never-flag (src/never-flag.ts): our pay_to, x402's Permit2 proxies and the asset each EVM network is charged in", () => {
+  const evm = /PAY_TO_EVM = "([^"]+)"/.exec(read("deploy/wrangler.toml"))?.[1] as string;
+  assert.ok(NEVER_FLAG_EVM.has(evm.toLowerCase()), "pay_to");
+  for (const proxy of X402_PERMIT2_PROXIES) assert.ok(NEVER_FLAG_EVM.has(proxy.toLowerCase()), proxy);
+  for (const network of MAINNET_NETWORKS) if (network.startsWith("eip155:")) assert.ok(NEVER_FLAG_EVM.has(getDefaultAsset(network).asset.toLowerCase()), network);
 });
 
 test("versions: PROVIDER_VERSION, every package.json, its lockfile, and the MCP server's server.json and VERSION", () => {

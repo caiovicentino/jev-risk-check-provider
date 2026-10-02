@@ -4,8 +4,11 @@ name: feeds
 #
 # build:   regenerate the data with the repository scripts, test it, package it.
 #          Read-only token, no persisted credentials, no dependency install scripts.
-# publish: sign the manifest (Ed25519; the Worker pins the public key) and push it as
-#          the single commit of the `feeds` branch. Runs no dependency code at all.
+# publish: compare the new manifest with the published one and refuse an implausible
+#          change (scripts/feeds-guard.mjs, checked out from this run's commit, never
+#          taken from the artifact), then sign the manifest (Ed25519; the Worker pins the
+#          public key) and push it as the single commit of the `feeds` branch. Runs no
+#          dependency code at all: plain node and the runner's own tools.
 # `main` is never modified. ScamSniffer (GPL) is never published here.
 #
 # Supply chain: every action is pinned to a full commit SHA (the comment names its
@@ -14,7 +17,12 @@ name: feeds
 on:
   schedule:
     - cron: "17 5 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      override:
+        description: "Publish even though the feeds guard refused (only after reviewing the reasons it printed)"
+        type: boolean
+        default: false
 permissions: {}
 concurrency:
   group: feeds
@@ -55,10 +63,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Only the guard, from this run's commit: the artifact comes from a job that ran dependency code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/feeds-guard.mjs
+          sparse-checkout-cone-mode: false
+          path: trusted
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: feeds
           path: feeds-out
+      - name: Refuse an implausible change (compared with the published manifest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FEEDS_GUARD_OVERRIDE: ${{ inputs.override && '1' || '' }}
+        # The API, not the raw CDN, which can serve a stale copy. No published manifest is a refusal.
+        run: |
+          curl -fsS --retry 3 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github.raw" \
+            -o published-manifest.json "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/manifest.json?ref=feeds" \
+            || rm -f published-manifest.json
+          node trusted/scripts/feeds-guard.mjs feeds-out/manifest.json published-manifest.json
       - name: Sign the manifest
         env:
           FEEDS_SIGNING_KEY: ${{ secrets.FEEDS_SIGNING_KEY }}

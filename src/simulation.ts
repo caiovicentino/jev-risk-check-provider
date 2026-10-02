@@ -170,6 +170,10 @@ const KNOWN_VALUE: Record<string, { native: ValueClass; tokens: Record<string, [
     },
   },
 };
+/** Every token contract KNOWN_VALUE values, on any network (lowercase): known-good assets. */
+export function knownValueTokens(): string[] {
+  return [...new Set(Object.values(KNOWN_VALUE).flatMap((c) => Object.keys(c.tokens)))];
+}
 /** A hidden recipient taking at least this share of an asset the sender lost is a drain even when an unvalued token comes back. */
 const MAJORITY_SHARE_NUM = 1n;
 const MAJORITY_SHARE_DEN = 2n;

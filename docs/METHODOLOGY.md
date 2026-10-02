@@ -24,6 +24,7 @@ Evidence is collected by the provider itself. Nothing the caller asserts counts 
 3. **Threat feeds** (`src/threat-intel.ts`):
    - MetaMask eth-phishing-detect domains, matched on the host and its parents down to the registrable domain, with MetaMask's own allowlist applied;
    - ScamSniffer domains (exact host) and EVM addresses, rebuilt into KV by the Worker's cron twice a day.
+   - A feed entry counts only as a bare host: one with userinfo, a port, a path, a query or a fragment (`x@coinbase.com`, `coinbase.com:443`) is dropped, never reduced to the host it wraps. Addresses x402check never flags (`src/never-flag.ts`: its own `pay_to`, Permit2 and x402's Permit2 proxies, the asset x402 charges in on each EVM network, and the major tokens the simulator values) are left out of the ScamSniffer address set and of the code fingerprints built from it.
 4. **On-chain facts** (`src/onchain.ts`). Whether the subject is a contract, its nonce and balance ("unused address"), and its code classification. EIP-7702 delegated accounts are EOAs. Every chain has a primary and a fallback public RPC under one time budget (`src/rpc.ts`).
 5. **Drainer-kit code fingerprints** (`src/code-fingerprint.ts`).
    - **What is classified:** the subject's runtime code, and in a simulated transaction the called contract, recipients and spenders.
@@ -133,9 +134,9 @@ A verifier that checks only the signature accepts a genuine verdict issued for s
 
 | Source | License | In the Worker | Refresh |
 |---|---|---|---|
-| OFAC SDN digital currency addresses | U.S. public data | embedded snapshot | daily workflow → `feeds` branch, Ed25519-signed manifest (publisher key pinned in the Worker) → runtime swap after signature, date, SHA-256, count and shrink checks |
+| OFAC SDN digital currency addresses | U.S. public data | embedded snapshot | daily workflow → a guard against the published manifest (`scripts/feeds-guard.mjs`: no signature when OFAC addresses shrink by more than 5% or grow by more than 50%, MetaMask entries move by more than 20%, or a date goes backwards or runs more than a day ahead) → `feeds` branch, Ed25519-signed manifest (publisher key pinned in the Worker) → runtime swap after signature, date, SHA-256, count and shrink checks |
 | MetaMask eth-phishing-detect | DBAD-1.2 | embedded hash set | same as OFAC |
-| ScamSniffer domains, addresses, code fingerprints | GPL-3.0 | operator KV only, never committed | domains and addresses: the Worker's cron, twice a day (`deploy/scamsniffer-refresh.ts`); code fingerprints: `scripts/update-threat-feeds.ts --scamsniffer --upload`. The public data lags 7 days; `/status` marks the feed stale after 3 days without a refresh |
+| ScamSniffer domains, addresses, code fingerprints | GPL-3.0 | operator KV only, never committed | domains and addresses: the Worker's cron, twice a day (`deploy/scamsniffer-refresh.ts`), both lists read at the upstream commit it resolves first; a refresh in which a list halves, or grows by more than 50% or by more than 100,000 domains or 2,000 addresses, is refused and the previous sets stay; code fingerprints: `scripts/update-threat-feeds.ts --scamsniffer --upload`. The public data lags 7 days; `/status` marks the feed stale after 3 days without a refresh |
 | Forta labelled datasets (phishing contracts created since 2021) | MIT | embedded fingerprint set | static 2023 dataset |
 | Kit watch (x402check's own scan of Ethereum and Base) | the provider's own data; the seeded families are partly derived from ScamSniffer (GPL-3.0) | operator KV only | every minute (Worker cron); families seeded by `scripts/kit-catalog.ts` and `scripts/kit-registry.ts --upload`, backfill with `scripts/hunt-kits.ts` |
 | On-chain state, simulation | — | public JSON-RPC with a fallback endpoint per chain (simulation: Ethereum, Base, Polygon, Arbitrum, Optimism, BSC; on-chain facts also Avalanche and Solana) | live |
