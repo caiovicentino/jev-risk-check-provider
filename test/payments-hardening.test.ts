@@ -386,8 +386,9 @@ test("unpaid, any body gets the challenge (with the reason it would be refused);
   const typo = await handleProtected(req("/v1/risk-check", { wallet: WALLET, contxt: "x" }, { "PAYMENT-SIGNATURE": payment(USER, "0x80") }), claimsEnv(), s, evaluate(s, calls));
   assert.equal(typo.status, 422);
   assert.equal(calls.n, 0);
+  // A credit pack is not a listed service: without an amount it is a 422, never a challenge for a guessed pack.
   const pack = await handleCredits(new Request("https://x402check.xyz/v1/credits", { method: "POST" }), { CREDITS: namespace((st) => new CreditLedger(st)) }, s);
-  assert.equal(pack.status, 402, "no body: the default $1 pack's challenge");
+  assert.equal(pack.status, 422);
 });
 
 test("the Worker: every POST to a paid route is limited (credentialed traffic separately); 429 and preflight carry the headers", async () => {

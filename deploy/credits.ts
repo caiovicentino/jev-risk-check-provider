@@ -24,8 +24,6 @@ export const CREDIT_TOKEN_PREFIX = "x402c_";
 export const CREDIT_CHECK_PRICE = 0.001;
 export const CREDIT_PACK_MIN_USD = 0.1;
 export const CREDIT_PACK_MAX_USD = 100;
-/** The pack bought when the body names no amount (a discovery probe's POST with no body gets this 402). */
-export const CREDIT_PACK_DEFAULT_USD = 1;
 
 export type CreditPricing = { check_usd: string; simulated_check_usd: string; pack_min_usd: string; pack_max_usd: string; endpoint: string };
 export const CREDIT_PRICING: CreditPricing = {
@@ -144,10 +142,12 @@ export async function retryPendingCredits(env: WorkerEnv): Promise<number> {
   return applied;
 }
 
-/** A pack's price from the request body: $0.10–$100 in whole cents ($1 when it names none), else null. */
+/**
+ * A pack's price from the request body: $0.10–$100 in whole cents, else null. The amount is always
+ * named: a credit pack is not a listed service, so a probe without one gets a 422, not a challenge.
+ */
 export function packMicro(body: unknown): number | null {
-  const named = (body as { amount_usd?: unknown } | null)?.amount_usd;
-  const amount = named === undefined ? CREDIT_PACK_DEFAULT_USD : named;
+  const amount = (body as { amount_usd?: unknown } | null)?.amount_usd;
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < CREDIT_PACK_MIN_USD || amount > CREDIT_PACK_MAX_USD) return null;
   const micro = toMicro(amount);
   return micro % 10_000 === 0 ? micro : null;

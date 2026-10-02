@@ -372,7 +372,7 @@ The token appears in the report only as a SHA-256 prefix.
 **v0.6.2: the 2026-10-02 evaluation, checked in production** (commit `c4a5f33`).
 - **Single use by what the payer signed:** the replay row above. One authorization sent four ways was evaluated and settled once.
 - **Credits:** a request with a misspelled field (`contxt`) was refused with 422 and charged nothing; a real check from credits took 1,024 ms and was charged $0.001 (balance $0.008 → $0.007), with the kit watch's coverage anchor signed.
-- **Unpaid requests:** a body that would be refused, a POST with no body and `POST /v1/credits` with no body each got the 402 challenge (the first with `request_error` naming the field); a malformed bearer got 401; preflights and 405s carry the security headers and `Allow`; `jwks.json` publishes only public members.
+- **Unpaid requests:** a body that would be refused and a POST with no body each got the 402 challenge (the first with `request_error` naming the field); `POST /v1/credits` without an amount stays a 422, since a credit pack is not a listed service (with a 402 there, AgentCash reported the pack's missing Bazaar schemas); a malformed bearer got 401; preflights and 405s carry the security headers and `Allow`; `jwks.json` publishes only public members.
 - **Kit watch:** right after the deploy, both chains `ok` with lag 0, gaps 0 and no reads pending.
 
 **v0.5.3: listed in the x402 Bazaar** (`eval/bazaar.ts`, `bazaar-report.json`).

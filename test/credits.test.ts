@@ -96,8 +96,7 @@ test("packs: $0.10 to $100 in whole cents; checks cost $0.001, $0.005 when simul
   assert.equal(packMicro({ amount_usd: 1 }), 1_000_000);
   assert.equal(packMicro({ amount_usd: 0.1 }), 100_000);
   assert.equal(packMicro({ amount_usd: 100 }), 100_000_000);
-  for (const bad of [{ amount_usd: 0.05 }, { amount_usd: 100.01 }, { amount_usd: 1.234 }, { amount_usd: "1" }, { amount_usd: null }]) assert.equal(packMicro(bad), null, JSON.stringify(bad));
-  for (const none of [{}, null]) assert.equal(packMicro(none), 1_000_000, "no amount named: the $1 pack");
+  for (const bad of [{ amount_usd: 0.05 }, { amount_usd: 100.01 }, { amount_usd: 1.234 }, { amount_usd: "1" }, { amount_usd: null }, {}, null]) assert.equal(packMicro(bad), null, JSON.stringify(bad));
   assert.equal(creditCostMicro("/v1/risk-check", { wallet: WALLET }, true), 1000);
   assert.equal(creditCostMicro("/v1/risk-check", { wallet: USER, chain: "base", transaction: { from: USER, to: USER } }, true), 5000);
   assert.equal(creditCostMicro("/v1/risk-check/batch", { requests: [{ wallet: WALLET }, { wallet: WALLET }, { wallet: USER, chain: "base", transaction: { from: USER } }] }, true), 7000);
