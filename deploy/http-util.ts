@@ -160,6 +160,9 @@ export type Admission = { ok: true; id: string; finish: (outcome: PaymentOutcome
  */
 export async function admitPayment(env: WorkerEnv, paymentPayload: unknown): Promise<Admission> {
   const payer = payerOf(paymentPayload);
+  // A payer that cannot be read (a transaction format the decoder does not know yet) cannot be
+  // screened: no service is sold to a wallet that was not screened.
+  if (!payer) return { ok: false, response: json(402, { error: "payment_unrecognized", detail: "the paying wallet could not be read from the payment; nothing was charged" }) };
   if (sanctionedPayer(payer)) return { ok: false, response: json(403, { error: "payer_sanctioned", detail: "the paying wallet is on the OFAC SDN list; nothing was charged" }) };
   const expiry = expiresAt(paymentPayload);
   const now = Math.floor(Date.now() / 1000);

@@ -15,6 +15,19 @@ import type { JevLike } from "../src/jev.js";
 import type { Answer, RiskCheckRequest } from "../src/types.js";
 import { handleProtected, type Stack } from "../deploy/protected.js";
 import type { WorkerEnv } from "../deploy/runtime.js";
+
+/** The payment the mock "verifies": the header's own payload (a payer and a nonce), as a facilitator would read it. */
+function payloadOf(ctx: { adapter?: { getHeader(name: string): string | undefined }; paymentHeader?: string | undefined }): unknown {
+  const header = ctx.paymentHeader ?? ctx.adapter?.getHeader("PAYMENT-SIGNATURE");
+  try {
+    const decoded = JSON.parse(atob(header ?? "")) as { payload?: { authorization?: { from?: string } } };
+    if (decoded.payload?.authorization?.from) return decoded;
+  } catch {
+    // fall through to a default payer
+  }
+  return { payload: { authorization: { from: "0x1111111111111111111111111111111111111111", nonce: "0x01" } } };
+}
+
 /** A PAYMENT-SIGNATURE shaped like x402 v2 (the stack only accepts v2 payments). */
 const PAID_V2 = btoa(JSON.stringify({ x402Version: 2, accepted: { scheme: "exact", network: "eip155:8453" }, payload: { signature: "0x01", authorization: { from: "0x1111111111111111111111111111111111111111", nonce: "0x01" } } }));
 
@@ -110,7 +123,7 @@ function stack(j: JevLike, settles: { n: number }): Stack {
   const deps = { provider: provider(j) };
   const http = {
     processHTTPRequest: async (ctx: { paymentHeader?: string }) =>
-      ctx.paymentHeader ? { type: "payment-verified", paymentPayload: {}, paymentRequirements: {} } : { type: "payment-error", response: { status: 402, headers: {}, body: {} } },
+      ctx.paymentHeader ? { type: "payment-verified", paymentPayload: payloadOf(ctx), paymentRequirements: {} } : { type: "payment-error", response: { status: 402, headers: {}, body: {} } },
     processSettlement: async () => {
       settles.n++;
       return { success: true, headers: {} };

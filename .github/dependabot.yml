@@ -33,6 +33,18 @@ updates:
         update-types: ["version-update:semver-major"]
       # The MCP server links the client from this repository (file:../client).
       - dependency-name: "@x402check/*"
+      # TypeScript 7 is one planned migration across the root, the packages and the Snap: today
+      # @solana/kit 5 (pulled in by @x402/svm) still declares typescript ^5.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # undici 6.x is pinned on purpose: the MCP server's SSRF-safe connector (packages/mcp/src/net.ts)
+      # is built on its API, and 8.x needs Node >= 22.19 while the package supports Node 20.
+      - dependency-name: "undici"
+        update-types: ["version-update:semver-major"]
+      # x402 Solana payers build with @solana/kit 5; a major bump of the client's test kit waits for a
+      # kit-5 test lane and for the decoder to read the newer message versions.
+      - dependency-name: "@solana/kit"
+        update-types: ["version-update:semver-major"]
     groups:
       runtime:
         applies-to: version-updates

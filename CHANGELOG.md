@@ -4,6 +4,21 @@ Each release's full notes and evidence are on the [releases page](https://github
 
 ## Unreleased (v0.6.2)
 
+From a full evaluation on 2026-10-02 (a security review of everything since the 2026-09-30 audit, an operations and cost review, and a black-box run against production):
+
+- **A payment is used once, by what its payer signed (security review F1, high):** the single-use claim was keyed on the payload's JSON spelling, so re-encoding one authorization (key order, hex case, an extra field, base64 padding) made it several payments: each verified and evaluated, and, with a facilitator that confirms duplicates, several verdicts or credit packs for one payment. The claim is now keyed on the payment itself: EIP-3009 network, asset, payer and nonce; Permit2 network, owner and nonce; the Solana message bytes. One settlement transaction also pays for one verdict or pack only, even if a facilitator confirms it twice.
+- **Only x402 v2 payments reach verification (F2):** x402 core reads the payment through the adapter, which now hands over only a v2 `PAYMENT-SIGNATURE` (never `X-PAYMENT`). A payload whose payment or payer cannot be identified is refused (402 `payment_unrecognized`) instead of skipping the claim or the payer's screen (a Solana transaction format the decoder does not read yet, such as v1 messages, is refused rather than sold unscreened).
+- **Payments that cannot settle are not evaluated (F3):**
+  - An authorization must stay valid for 60 s more (it must settle after the evaluation) and for at most 24 hours (the life of its claim): otherwise a 402 before any work.
+  - A payer may have 8 payments in flight at once (429 `payer_busy`), and 5 settlement refusals within an hour hold its payments back (429 `payer_settlement_failures`). Our facilitators' own failures (timeouts, unexpected errors) never count against a payer.
+  - Every POST to a paid route is rate-limited per IP: unpaid traffic at 60 a minute as before, traffic with a well-formed credential (an x402 v2 payment or a `Bearer x402c_…` token) at 300 a minute (`PAID_LIMITER`). The mere presence of a header no longer skips the limit.
+- **A settled credit pack always returns its token (F4):** if the ledger and the retry queue both fail, the response is still a 202 with the token and a reference (the pending credit is logged by the token's hash for reconciliation). Every credit carries a reference, so a retry never credits twice, and settle-then-credit runs to completion if the buyer disconnects.
+- **Only public key members are published (F6):** `jwks.json` and `did.json` carry `kty`, `crv`, `x`, `y`, `kid`, `alg` and `use` only. A configured key carrying private material is refused: the current key reports misconfigured, a next key is not published.
+- **Strict requests:** an unknown field (`contxt`, `Context`) is a 422 naming it, instead of being dropped with its content unanalysed. A mixed-case EVM address must carry a valid EIP-55 checksum. A chain id must be a known one: an EVM chain id, a known Solana cluster, a Bitcoin-family genesis or TRON (`solana:mainnet` and `foo:bar` are refused).
+- **Unpaid, every body gets the challenge:** an unpaid POST to a paid route always answers with the one-item 402 challenge, and a body that would be refused says why in `request_error`. Monitors and catalogs posting placeholder bodies now see a payable endpoint; nothing invalid is ever charged, and with a payment or a token an invalid body is still a 422 before any payment work. `POST /v1/credits` without an amount is the $1 pack.
+- **Headers:** every response carries CORS and the security headers, 429s and preflights included; a 405 on `/v1/credits` says `Allow: GET, POST`; the site's CSP admits Cloudflare's cookieless analytics beacon.
+- **Docs:** the discovery documents state the measured latency (0.7–2 s from credits, about 4 s per call) and that `intent_risk` and `behavioral` are evaluated families present in every verdict.
+- `scripts/deploy.sh` installs without dependency install scripts.
 - **Feeds supply chain (security review F7):**
   - A feed entry must be a bare host. An entry with userinfo, a port, a path, a query or a fragment (`x@coinbase.com`, `coinbase.com:443`) is dropped instead of being reduced to the host it wraps. On the current lists this drops one ScamSniffer entry and no MetaMask entry.
   - The ScamSniffer refresh resolves the upstream commit first and reads both lists at that SHA, so the recorded commit is the data's. When GitHub does not answer, it reads `main` and records the fetch date and no commit.
@@ -14,6 +29,8 @@ Each release's full notes and evidence are on the [releases page](https://github
 
 ## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — 2026-10-02
 
+- **The guard exempts payments to x402check only in USDC (client, security review F5):** the trusted-payee cap (250000 atomic units, $0.25 of USDC) applied to any asset; for an 8-decimal token it was not $0.25. Only the asset x402check's challenge asks for on each network (`X402CHECK_PAYMENT_ASSETS`) is exempt now.
+- **Chain ids as the provider accepts them (client):** `toCaip2` returns null for a namespace or cluster the provider refuses (`solana:mainnet`, `foo:bar`), so the trust provider leaves such a chain out instead of failing the check.
 - **Sellers can screen the payer before settling (client):** `x402checkTrustProvider()` implements a provider for the proposed x402 trust-provider extension (x402-foundation/x402#2300). It maps a verified, request-bound verdict on the payer's wallet to PASS / FAIL / UNCERTAIN, never PASS for anything it cannot verify, and returns the attestation as `evidence_uri`. A check that did not complete reports why (`not_checked:<reason>`).
 - **Freshness anchors in the types (client):** `checks.sanctions.digest`, `checks.kit_watch` (`complete_through`, `gaps`) and `checks.simulation.at_block`, signed since provider 0.6.1; all optional, older attestations still verify.
 - **`x402check_verify_attestation` and check results show the anchors (MCP):** the OFAC release digest and the per-chain block maps, each value only in its expected format.
