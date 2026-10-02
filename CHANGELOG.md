@@ -2,9 +2,9 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## Unreleased (v0.6.2)
+## v0.6.2 — 2026-10-02: the evaluation release
 
-From a full evaluation on 2026-10-02 (a security review of everything since the 2026-09-30 audit, an operations and cost review, and a black-box run against production):
+Deployed from commit `c4a5f33` and checked in production (docs/EVIDENCE.md §7): one payment sent four ways was evaluated and settled once. From a full evaluation on 2026-10-02 (a security review of everything since the 2026-09-30 audit, an operations and cost review, and a black-box run against production):
 
 - **A payment is used once, by what its payer signed (security review F1, high):** the single-use claim was keyed on the payload's JSON spelling, so re-encoding one authorization (key order, hex case, an extra field, base64 padding) made it several payments: each verified and evaluated, and, with a facilitator that confirms duplicates, several verdicts or credit packs for one payment. The claim is now keyed on the payment itself: EIP-3009 network, asset, payer and nonce; Permit2 network, owner and nonce; the Solana message bytes. One settlement transaction also pays for one verdict or pack only, even if a facilitator confirms it twice.
 - **Only x402 v2 payments reach verification (F2):** x402 core reads the payment through the adapter, which now hands over only a v2 `PAYMENT-SIGNATURE` (never `X-PAYMENT`). A payload whose payment or payer cannot be identified is refused (402 `payment_unrecognized`) instead of skipping the claim or the payer's screen (a Solana transaction format the decoder does not read yet, such as v1 messages, is refused rather than sold unscreened).

@@ -332,9 +332,9 @@ Both refusals keep the data in use, so nothing breaks while you look.
 
 ---
 
-## 5. State as of 2026-10-01 (update when it changes)
+## 5. State as of 2026-10-02 (update when it changes)
 
-- **Production:** v0.6.1 (2026-10-01): every attestation signs a freshness anchor per evidence item — the OFAC SDN.XML release (`as_of` + `digest`, the file's SHA-256 as OFAC serves it), the kit watch's coverage (`complete_through` per chain, and `gaps`), the simulated block (`at_block`). v0.6.0, the audit release, was deployed on 2026-09-30 from commit `7d1e3ab` with `scripts/deploy.sh`.
+- **Production:** v0.6.2 (2026-10-02, commit `c4a5f33`, deployed with `scripts/deploy.sh`): the evaluation release. A payment is single-use by what its payer signed (re-encodings included, proven in production with four spellings of one payment), payments are admitted before any work (payer readable and screened, validity window, per-payer in-flight cap and failure hold), every POST to a paid route is rate-limited, requests are strict (unknown fields, EIP-55, known chain ids), unpaid requests always get the 402 challenge, the kit watch retries and queues failed reads and signs `pending`, and the feeds are signed only after a plausibility guard. v0.6.1 (2026-10-01): every attestation signs a freshness anchor per evidence item — the OFAC SDN.XML release (`as_of` + `digest`, the file's SHA-256 as OFAC serves it), the kit watch's coverage (`complete_through` per chain, and `gaps`), the simulated block (`at_block`). v0.6.0, the audit release, was deployed on 2026-09-30 from commit `7d1e3ab` with `scripts/deploy.sh`.
   - Single-use payments, payer screening, a checked attestation key (with next-key rotation), HTTPS only, rate limits, Workers Logs and settlement records;
   - the model canary and the ScamSniffer refresh on the cron;
   - credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;

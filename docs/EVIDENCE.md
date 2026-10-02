@@ -1,4 +1,4 @@
-# Evidence — x402check v0.6 (v0.3.0–v0.6.1)
+# Evidence — x402check v0.6 (v0.3.0–v0.6.2)
 
 **v0.6.0** is the audit release (2026-09-30). It closes paths around the rules rather than adding new ones, and it re-measures the signing guard. It was measured in production on v0.6.0 (Worker commit `7d1e3ab`) on 2026-09-30 (UTC); see the next section.
 
@@ -355,6 +355,7 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run security:v5` on v0.5.1, settling through Coinbase CDP (Worker `08c5a2f6`) | **11/11 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack. Both settlements were sent by CDP signers |
 | `npm run security:v5` on v0.6.0 (commit `7d1e3ab`) | **11/11 PASS** | the same probes; per call 4,716 ms end to end, from credits 664 and 538 ms |
 | `eval/replay.ts` on v0.6.0: three copies of one payment at once | **PASS** | one evaluated and settled; two `409 payment_already_used`; a later copy 409 |
+| `eval/replay.ts` on v0.6.2 (commit `c4a5f33`): four spellings of one payment at once (the original, an exact copy, every JSON key reversed, the nonce's hex upper-cased plus an extra field) | **PASS** | one evaluated and settled on Base (`0x6d7f4ac8…`): the re-spelled copy, which CDP accepted; the other three `409 payment_already_used`; a later copy 402 (the facilitator saw the nonce used). On v0.6.1 each spelling was its own claim (security review F1) |
 
 The `security:v5` probes cover:
 - **the price table:** the discovery document and the 402 carry the seven per-network prices, and none mismatches. Base is offered through EIP-3009, so any wallet can pay it gaslessly;
@@ -367,6 +368,12 @@ The `security:v5` probes cover:
   - a malformed token got 401, and an unknown one 402. Neither ever produced an unpaid evaluation.
 
 The token appears in the report only as a SHA-256 prefix.
+
+**v0.6.2: the 2026-10-02 evaluation, checked in production** (commit `c4a5f33`).
+- **Single use by what the payer signed:** the replay row above. One authorization sent four ways was evaluated and settled once.
+- **Credits:** a request with a misspelled field (`contxt`) was refused with 422 and charged nothing; a real check from credits took 1,024 ms and was charged $0.001 (balance $0.008 → $0.007), with the kit watch's coverage anchor signed.
+- **Unpaid requests:** a body that would be refused, a POST with no body and `POST /v1/credits` with no body each got the 402 challenge (the first with `request_error` naming the field); a malformed bearer got 401; preflights and 405s carry the security headers and `Allow`; `jwks.json` publishes only public members.
+- **Kit watch:** right after the deploy, both chains `ok` with lag 0, gaps 0 and no reads pending.
 
 **v0.5.3: listed in the x402 Bazaar** (`eval/bazaar.ts`, `bazaar-report.json`).
 - **Payments:** a per-call check and a one-item batch were paid through CDP, and each payment carried the `bazaar` discovery extension (method POST). The transactions are in the report.
