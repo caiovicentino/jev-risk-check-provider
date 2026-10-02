@@ -7,13 +7,15 @@ This is the complete rulebook for turning a request into a signed verdict: the e
 | Field | Meaning | Trust |
 |---|---|---|
 | `wallet` | The counterparty (the subject), as an EVM, Solana, Bitcoin-family or Tron address, optionally in CAIP-10 form | the subject of the verdict |
-| `chain` | CAIP-2 or alias (`base`, `solana`…) | must agree with CAIP-10 and `payment.network` (else 422) |
+| `chain` | A known CAIP-2 id or alias (`base`, `solana`…) | must agree with CAIP-10 and `payment.network` (else 422); an unknown id is refused, never half-checked |
 | `domain` | The site or origin involved | analysed by the provider |
 | `context` | Content the agent acted on (page text, tool output, instructions) | input to the model; never trusted as a claim. Private keys, seed phrases and credit tokens are redacted before the model sees it |
 | `payment` | The x402 payment being made (`pay_to`, `amount`, `asset`, `network`) | bound into the attestation |
 | `interaction` | `token_approval`, `nft_approval`, `permit_signature`, `native_transfer`… | decides which rules apply |
 | `transaction` | EVM `{from, to, value, data}` to simulate (needs an `eip155` chain) | simulated by the provider |
 | `screening`, `authorization` | The caller's own screening result or pre-authorization | **asserted**: recorded, can only raise risk |
+
+Any other field is refused (422 naming it): a misspelled `context` must not leave its content unanalysed while the verdict answers a different request. A mixed-case EVM `wallet` must carry a valid EIP-55 checksum.
 
 ## 2. Evidence, in order
 

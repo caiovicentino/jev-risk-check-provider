@@ -35,14 +35,18 @@ Plain HTTP is never served: a page gets a 301 to HTTPS and an API call a 403, be
 
 ## Request flow (protected routes)
 
-1. **Validate first.** Read the body (≤ 64 KiB), parse it, validate it (`src/validate.ts`). Invalid input gets `422 {error, field[, index]}` or `413` and is never priced.
+1. **Validate first.** Read the body (≤ 64 KiB), parse it, validate it (`src/validate.ts`): an unknown field, a mixed-case EVM address with a bad EIP-55 checksum or an unknown chain id is invalid too. With a payment or a credit token, invalid input gets `422 {error, field[, index]}` or `413` before any payment work. Unpaid, it gets the one-item `402` challenge with the reason in `request_error` (monitors and catalogs see a payable endpoint). Invalid input is never charged.
 2. **Every evaluation is paid; there is no free tier.**
    - **Price:** the x402 price is unit × units, 1 unit per evaluation, so a batch of *n* costs *n*. `adapter.getBody()` exposes the validated body to the SDK's dynamic price.
    - **Unpaid request:** it gets the `402` challenge with the accepted options.
-   - **Paid request:** verify → screen the payer → claim the payment → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed`, no attestation is returned, and the claim is released so the payer can retry.
-   - **Only x402 v2** payloads are processed; anything else gets the v2 challenge.
-   - **A payer on the OFAC SDN list** gets `403 payer_sanctioned`, before any evaluation or settlement.
-   - **Single use:** a payment is claimed once, when it verifies (`PaymentClaim`, one Durable Object per payload, kept 24 h). A copy gets `409 payment_already_used`; a claim store that cannot be reached refuses the payment (`503`, no charge).
+   - **Paid request:** verify → admit (`admitPayment` in `http-util.ts`) → evaluate → **settle** → release. If the evaluation cannot be produced, nothing is settled (`503`, no charge). If settlement fails, the response is `402 payment_settlement_failed`, no attestation is returned, and the claim is released so the payer can retry.
+   - **Only x402 v2** payloads are processed: the adapter hands x402 core only a v2 `PAYMENT-SIGNATURE` (never `X-PAYMENT`); anything else gets the v2 challenge.
+   - **Admission**, before any work:
+     - the payer must be readable (`402 payment_unrecognized` otherwise) and not on the OFAC SDN list (`403 payer_sanctioned`);
+     - the authorization must stay valid for 60 s more and at most 24 h (`402 authorization_expires_too_soon` / `authorization_valid_too_long`);
+     - the payer may have 8 payments in flight (`429 payer_busy`), and 5 settlement refusals in an hour hold it back (`429 payer_settlement_failures`; facilitator timeouts and errors never count);
+     - **single use:** the payment is claimed once by what its payer signed (EIP-3009: network, asset, payer, nonce; Permit2: network, owner, nonce; Solana: the message bytes), however the JSON is spelled. A copy gets `409 payment_already_used`; a claim store that cannot be reached refuses the payment (`503`, no charge).
+   - **One transaction, one purchase:** after settlement the transaction is claimed too; a facilitator confirming one transaction for two payments releases nothing the second time (`402 payment_settlement_reused`).
    - **The attestation key:** on x402check.xyz, a missing or mismatched key pair makes every paid route answer `503 attestation_key_unavailable` (no charge).
    - Every settlement is recorded in KV (`st:<network>:<tx>`, 400 days) for reconciliation against the chain.
 3. **Facilitator routing** (`paymentRouting` in `protected.ts`, recomputed every 10 minutes). For each network the router picks, in order:
@@ -69,7 +73,7 @@ Plain HTTP is never served: a page gets a 301 to HTTPS and an API call a 403, be
    - **Storage:** the token is shown once. Only its SHA-256, the ledger's name, is stored.
 6. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet on a local host only; on x402check.xyz it is ignored and logged, because testnet USDC is free.
 7. **Outages:** a facilitator's `/supported` has 5 s and verify/settle 30 s. A network whose facilitator is down leaves the 402 challenge, a failed stack build is never cached, and identity documents and the site never wait for the payment stack.
-8. **Rate limit:** unpaid, unauthenticated requests to paid routes, and `/status`, are limited to 60 a minute per IP (`UNPAID_LIMITER`).
+8. **Rate limits:** every POST to a paid route is limited per IP. Unpaid requests (and ones whose credential is malformed), and `/status`, get 60 a minute (`UNPAID_LIMITER`); requests with a well-formed credential (an x402 v2 payment or a `Bearer x402c_…` token) get 300 a minute (`PAID_LIMITER`). Every response, 429s and preflights included, carries CORS and the security headers.
 
 ## Secrets and variables
 
