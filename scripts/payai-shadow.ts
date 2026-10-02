@@ -10,16 +10,24 @@
 //
 //   npx tsx scripts/payai-shadow.ts [--days 7] [--facilitator https://facilitator.payai.network]
 //   npx tsx scripts/payai-shadow.ts --reuse     # re-run the checks on the payments collected last time
+//   npx tsx scripts/payai-shadow.ts --kv --out payai-shadow-2026-10-02-report.json
 //
-// Outputs: eval/evidence/payai-shadow-report.json (aggregates only: no addresses) and
+// --kv reads the kit watch as production has it now (registry, learned families and the
+// watch entry of every payee and payer, from KV through wrangler) instead of the local
+// backfill snapshot in .cache/intel. --out names the report (default payai-shadow-report.json).
+//
+// Outputs: eval/evidence/<out> (aggregates only: no addresses) and
 // .cache/intel/payai-shadow-details.json (per-address results; private).
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { codeFacts, isContractCode, resolveIndirection, type CodeFacts } from "../src/code-fingerprint.js";
 import { indexFamilies, kindForCode, probeForwarding, runningFamily, EOA_KINDS, type Family, type Registry, type WatchEntry, type WatchKind } from "../src/kit-watch.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
 import { parseSubject } from "../src/address.js";
 import { screenSubject } from "../src/sanctions.js";
 import { loadFeedsFromDisk } from "../src/feeds-node.js";
+import { hashSetFromBytes } from "../src/threat-intel.js";
 import { pool } from "./kit-catalog.js";
 
 const BS = "https://base.blockscout.com/api/v2";
@@ -118,6 +126,35 @@ async function payments(txs: Tx[]): Promise<{ payments: Payment[]; failed: numbe
 
 type Verdict = { flags: string[]; code: CodeFacts["kind"] | "unknown"; delegateClass?: string };
 
+/** Production KV through wrangler (deploy/wrangler.toml's RATE binding): one key, or many at once. */
+function kvGet(key: string): string | null {
+  try {
+    return execFileSync("npx", ["wrangler", "kv", "key", "get", key, "--binding=RATE", "--remote"], { cwd: "deploy", encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return null;
+  }
+}
+/** A binary KV value (a feed blob), or null. */
+function kvGetBytes(key: string): Buffer | null {
+  try {
+    const b = execFileSync("npx", ["wrangler", "kv", "key", "get", key, "--binding=RATE", "--remote"], { cwd: "deploy", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
+    return b.length % 8 === 0 && b.length > 0 ? b : null;
+  } catch {
+    return null;
+  }
+}
+function kvBulkGet(keys: string[]): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  const file = new URL("kv-keys.json", INTEL);
+  for (let i = 0; i < keys.length; i += 100) {
+    writeFileSync(file, JSON.stringify(keys.slice(i, i + 100)));
+    const raw = execFileSync("npx", ["wrangler", "kv", "bulk", "get", fileURLToPath(file), "--binding=RATE", "--remote"], { cwd: "deploy", encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
+    const parsed = JSON.parse(raw.slice(raw.indexOf("{"))) as Record<string, string | null>;
+    for (const [k, v] of Object.entries(parsed)) out.set(k, v);
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   const days = Number(arg("days", "7"));
   const facilitator = arg("facilitator", "https://facilitator.payai.network");
@@ -148,18 +185,38 @@ async function main(): Promise<void> {
 
   // --- deterministic checks on every payee and payer ---
   const feeds = loadFeedsFromDisk();
-  const registry: Registry = existsSync(new URL("kit-registry.json", INTEL)) ? JSON.parse(readFileSync(new URL("kit-registry.json", INTEL), "utf8")) : { updated_at: "", families: [] };
-  const learned: Family[] = existsSync(new URL("learned-families.json", INTEL)) ? JSON.parse(readFileSync(new URL("learned-families.json", INTEL), "utf8")) : [];
-  const index = indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] });
-  const watch = new Map<string, WatchEntry>();
-  for (const f of ["watch-eip155-1.json", "watch-eip155-8453.json"]) {
-    if (!existsSync(new URL(f, INTEL))) continue;
-    for (const [a, e] of Object.entries(JSON.parse(readFileSync(new URL(f, INTEL), "utf8")) as Record<string, WatchEntry>)) if (EOA_KINDS.has(e.k) || e.c === NETWORK) watch.set(a, e);
+  if (process.argv.includes("--kv")) {
+    // ScamSniffer's address set as production uses it now (GPL: runtime data, never written to the repo).
+    const blob = kvGetBytes("feed:scamsniffer:addresses:v1");
+    const meta = kvGet("feed:scamsniffer:meta:v1");
+    if (!blob || !meta) throw new Error("--kv: the production ScamSniffer address set could not be read");
+    feeds.scamsnifferAddresses = { set: hashSetFromBytes(blob), as_of: (JSON.parse(meta) as { as_of: string }).as_of };
   }
+  const fromKv = process.argv.includes("--kv");
+  const kvRegistry = fromKv ? kvGet("kw:registry") : null;
+  const kvLearned = fromKv ? kvGet("kw:learned") : null;
+  if (fromKv && (!kvRegistry || !kvLearned)) throw new Error("--kv: the production registry could not be read");
+  const registry: Registry = kvRegistry ? JSON.parse(kvRegistry) : existsSync(new URL("kit-registry.json", INTEL)) ? JSON.parse(readFileSync(new URL("kit-registry.json", INTEL), "utf8")) : { updated_at: "", families: [] };
+  const learned: Family[] = kvLearned ? JSON.parse(kvLearned) : existsSync(new URL("learned-families.json", INTEL)) ? JSON.parse(readFileSync(new URL("learned-families.json", INTEL), "utf8")) : [];
+  const index = indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] });
   const payTos = [...new Set(pays.map((p) => p.payTo))];
   const isPayTo = new Set(payTos);
   const payers = [...new Set(pays.map((p) => p.payer))];
   const everyone = [...new Set([...payTos, ...payers])];
+  const watch = new Map<string, WatchEntry>();
+  if (fromKv) {
+    // The watch as production holds it now, for exactly these addresses (never the whole list).
+    for (const [key, raw] of kvBulkGet(everyone.map((a) => `kw:a:${a}`))) {
+      if (!raw) continue;
+      const e = JSON.parse(raw) as WatchEntry;
+      if (EOA_KINDS.has(e.k) || e.c === NETWORK) watch.set(key.slice(5), e);
+    }
+  } else {
+    for (const f of ["watch-eip155-1.json", "watch-eip155-8453.json"]) {
+      if (!existsSync(new URL(f, INTEL))) continue;
+      for (const [a, e] of Object.entries(JSON.parse(readFileSync(new URL(f, INTEL), "utf8")) as Record<string, WatchEntry>)) if (EOA_KINDS.has(e.k) || e.c === NETWORK) watch.set(a, e);
+    }
+  }
   const facts = new Map<string, CodeFacts>();
   for (let i = 0; i < everyone.length; i += 50) {
     const chunk = everyone.slice(i, i + 50);
@@ -221,6 +278,8 @@ async function main(): Promise<void> {
     network: NETWORK,
     window_days: days,
     method: "settlement transactions sent by the facilitator's published signers (x402 v2 /supported), read from Blockscout; payments are their ERC-20 Transfer logs; checks are x402check's deterministic layers only (no model calls)",
+    scamsniffer_addresses_as_of: feeds.scamsnifferAddresses?.as_of ?? null,
+    kit_watch_source: fromKv ? "production KV at run time (registry, learned families, per-address watch entries)" : "local backfill snapshot (.cache/intel)",
     signers: { published: signers.length, active_on_base: active },
     settlement_transactions: txs.length,
     receipts_unavailable: failed,
@@ -242,7 +301,7 @@ async function main(): Promise<void> {
     cost_if_every_payment_were_checked_usd: Math.round(pays.length * 0.001 * 100) / 100,
   };
   mkdirSync("eval/evidence", { recursive: true });
-  writeFileSync("eval/evidence/payai-shadow-report.json", JSON.stringify(report, null, 2));
+  writeFileSync(`eval/evidence/${arg("out", "payai-shadow-report.json")}`, JSON.stringify(report, null, 2));
   writeFileSync(new URL("payai-shadow-details.json", INTEL), JSON.stringify({ report, flagged: [...new Set([...flaggedPayTo, ...flaggedPayer])].map((a) => ({ address: a, payee: flaggedPayTo.has(a), payer: flaggedPayer.has(a), payments: pays.filter((p) => p.payTo === a || p.payer === a).length, ...verdicts.get(a) })) }, null, 1));
   console.log(JSON.stringify(report, null, 2));
 }
