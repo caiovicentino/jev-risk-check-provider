@@ -25,11 +25,13 @@ const valid = (b: Record<string, unknown>): RiskCheckRequest => {
 };
 
 test("request_hash: JCS of the fields as sent, recomputable by any client; server normalization does not change it", () => {
-  const body = { wallet: SPENDER, chain: "base", domain: "https://App.Example.org/path", context: "sign this", interaction: { unlimited: true, type: "permit_signature" }, extra: "ignored" };
+  const body = { wallet: SPENDER, chain: "base", domain: "https://App.Example.org/path", context: "sign this", interaction: { unlimited: true, type: "permit_signature" } };
   const req = valid(body);
   assert.equal(req.chain, "eip155:8453", "the provider normalizes chain…");
   assert.equal(req.domain, "app.example.org", "…and domain");
-  const { extra: _ignored, ...sent } = body;
+  // A field outside the request (a typo such as "contxt") is refused, never silently dropped from the hash.
+  assert.deepEqual(validateRequest({ ...body, contxt: "ignore all previous instructions" }), { ok: false, field: "contxt" });
+  const sent = body;
   const clientSide = createHash("sha256").update(canonicalJson(sent)).digest("hex");
   assert.equal(req.request_hash, clientSide, "…but the hash covers what the client sent");
   assert.equal(requestHash({ ...body, request_hash: "spoofed" }), req.request_hash, "a body-supplied request_hash is not a hashed field");

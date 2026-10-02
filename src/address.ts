@@ -1,4 +1,5 @@
 import { base58Check, cashaddrHash20 } from "./address-codec.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 
 // Subject address parsing. The wallet is the only field every verdict is keyed on,
 // so it must be an address and nothing else: no prose, no padding, no unicode.
@@ -21,6 +22,23 @@ const BECH32 = /^(bc|tb|bcrt|ltc|bnb)1[02-9ac-hj-np-z]{8,87}$/;
 const CASHADDR = /^(?:bitcoincash:)?[qp][02-9ac-hj-np-z]{41}$/;
 const CAIP10 = /^([-a-z0-9]{3,8}):([-_a-zA-Z0-9]{1,32}):(.+)$/;
 
+/**
+ * EIP-55: a mixed-case EVM address is checksummed, and a wrong checksum is a typo (or a forged
+ * look-alike), never another address. All-lowercase and all-uppercase forms carry no checksum.
+ */
+export function evmChecksumValid(address: string): boolean {
+  const hex = address.slice(2);
+  if (hex === hex.toLowerCase() || hex === hex.toUpperCase()) return true;
+  const hash = keccak_256(new TextEncoder().encode(hex.toLowerCase()));
+  for (let i = 0; i < 40; i++) {
+    const c = hex[i] as string;
+    if (!/[a-fA-F]/.test(c)) continue;
+    const nibble = ((hash[i >> 1] as number) >> (i % 2 === 0 ? 4 : 0)) & 0x0f;
+    if ((nibble >= 8) !== (c === c.toUpperCase())) return false;
+  }
+  return true;
+}
+
 export function parseSubject(raw: string): Subject | null {
   if (raw.length === 0 || raw.length > 160 || raw !== raw.trim()) return null;
   let address = raw;
@@ -30,7 +48,7 @@ export function parseSubject(raw: string): Subject | null {
     caip2 = `${caip[1]}:${caip[2]}`;
     address = caip[3] as string;
   }
-  if (EVM.test(address)) return { address, canonical: address.toLowerCase(), format: "evm", ...(caip2 ? { caip2 } : {}) };
+  if (EVM.test(address)) return evmChecksumValid(address) ? { address, canonical: address.toLowerCase(), format: "evm", ...(caip2 ? { caip2 } : {}) } : null;
   // bech32 is case-insensitive but never mixed-case.
   const lower = address.toLowerCase();
   if ((address === lower || address === address.toUpperCase()) && BECH32.test(lower)) {

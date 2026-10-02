@@ -88,9 +88,16 @@ function validateTransaction(raw: unknown): NonNullable<RiskCheckRequest["transa
 }
 
 /** Validates and normalizes one request. chain → CAIP-2, domain → hostname. */
+/** The request's fields: exactly those `request_hash` covers. Anything else is refused, never ignored. */
+const REQUEST_FIELDS = new Set(["wallet", "chain", "domain", "context", "aud", "screening", "authorization", "payment", "interaction", "transaction"]);
+
 export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invalid {
   if (!body || typeof body !== "object" || Array.isArray(body)) return invalid("body");
   const obj = body as Record<string, unknown>;
+  // A misspelled field ("contxt", "Context") would otherwise be dropped: its content never analysed,
+  // and the verdict silently answering a different request than the caller meant.
+  const unknown = Object.keys(obj).find((k) => !REQUEST_FIELDS.has(k));
+  if (unknown !== undefined) return invalid(unknown.length <= 64 ? unknown : "body");
   const subject = typeof obj.wallet === "string" ? parseSubject(obj.wallet) : null;
   if (typeof obj.wallet !== "string" || !subject) return invalid("wallet");
   // A CAIP-10 wallet's chain must be a canonical one too ("eip155:0008453" is refused).

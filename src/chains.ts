@@ -24,11 +24,22 @@ export function normalizeChain(raw: string): Chain | null {
   if (!v || v.length > 64 || v !== raw) return null;
   const alias = ALIASES.get(v.toLowerCase()); // a Map: no prototype keys ("constructor", "__proto__")
   if (alias) return { input: v, caip2: alias };
-  if (CAIP2.test(v)) {
-    // One spelling per chain: "eip155:08453" would miss every table keyed by "eip155:8453"
-    // while x402 still pays on chain 8453.
-    if (v.startsWith("eip155:") && !/^eip155:(?:0|[1-9]\d{0,19})$/.test(v)) return null;
-    return { input: v, caip2: v };
-  }
+  if (CAIP2.test(v) && knownCaip2(v)) return { input: v, caip2: v };
   return null;
+}
+
+const SOLANA_REFERENCES = new Set([SOLANA_MAINNET, SOLANA_DEVNET, "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z"]);
+
+/**
+ * A CAIP-2 id the API can act on: an EVM chain id in its one canonical spelling ("eip155:08453"
+ * would miss every table keyed by "eip155:8453" while x402 still pays on chain 8453), a known
+ * Solana cluster, a Bitcoin-family genesis (bip122) or TRON. Anything else ("solana:mainnet",
+ * "foo:bar") is refused: it would silently skip every chain-keyed check.
+ */
+function knownCaip2(v: string): boolean {
+  if (v.startsWith("eip155:")) return /^eip155:(?:0|[1-9]\d{0,19})$/.test(v);
+  if (v.startsWith("solana:")) return SOLANA_REFERENCES.has(v);
+  if (v.startsWith("bip122:")) return /^bip122:[0-9a-f]{32}$/.test(v);
+  if (v.startsWith("tron:")) return /^tron:0x[0-9a-f]{8}$/.test(v);
+  return false;
 }
