@@ -19,6 +19,9 @@ import { normalizeChain } from "../src/chains.js";
 import { parseSubject as clientParseSubject } from "../packages/client/src/subject.js";
 import { toCaip2 } from "../packages/client/src/normalize.js";
 
+/** A string as a literal inside a RegExp. */
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const json = (path: string) => JSON.parse(read(path)) as Record<string, any>;
 const usd = (n: number) => formatUsd(toMicro(n));
@@ -51,7 +54,7 @@ test("versions: PROVIDER_VERSION, every package.json, its lockfile, and the MCP 
   const server = json("packages/mcp/server.json");
   assert.equal(server.version, mcp.version);
   for (const p of server.packages as Array<{ version: string }>) assert.equal(p.version, mcp.version);
-  assert.match(read("packages/mcp/src/version.ts"), new RegExp(`VERSION = "${mcp.version.replace(/\./g, "\\.")}"`));
+  assert.match(read("packages/mcp/src/version.ts"), new RegExp(`VERSION = "${escapeRegExp(mcp.version)}"`));
   // In the repository the MCP server builds against the client next to it; publishing pins a range.
   assert.equal(mcp.dependencies["@x402check/client"], "file:../client");
 });
@@ -140,7 +143,7 @@ test("the client parses addresses and chains as the provider does", () => {
 test("docs agree with the code and with each other (audit docev-11)", async () => {
   const minor = PROVIDER_VERSION.split(".").slice(0, 2).join(".");
   // The evidence document and the MCP server's methodology text name the running API version.
-  assert.match(read("docs/EVIDENCE.md").split("\n")[0] as string, new RegExp(`v${minor.replace(".", "\\.")}\\b`), "EVIDENCE.md's title names the current version");
+  assert.match(read("docs/EVIDENCE.md").split("\n")[0] as string, new RegExp(`v${escapeRegExp(minor)}\\b`), "EVIDENCE.md's title names the current version");
   const { API_VERSION, METHODOLOGY } = await import("../packages/mcp/src/methodology.js");
   assert.equal(API_VERSION, minor, "packages/mcp/src/methodology.ts API_VERSION");
   assert.doesNotMatch(METHODOLOGY, /API v0\.[0-4]\b/);

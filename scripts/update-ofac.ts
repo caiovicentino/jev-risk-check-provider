@@ -12,12 +12,13 @@ const SOURCE = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPrevi
 const OUT = new URL("../src/data/ofac-sdn.ts", import.meta.url);
 
 function decodeEntities(s: string): string {
+  // &amp; last: "&amp;lt;" is the text "&lt;", never "<".
   return s
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
     .trim();
 }
 

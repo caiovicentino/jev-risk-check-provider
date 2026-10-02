@@ -60,7 +60,7 @@ function fakeFetch(opts: { commit?: false | string; domains?: string[]; addresse
     calls.push(url);
     if (url.endsWith("/domains.json")) return new Response(stream(JSON.stringify(opts.domains ?? DOMAINS), 997));
     if (url.endsWith("/address.json")) return new Response(JSON.stringify(opts.addresses ?? ADDRESSES));
-    if (url.includes("api.github.com")) return opts.commit === false ? new Response("rate limited", { status: 403 }) : Response.json({ sha: opts.commit ?? SHA, commit: { committer: { date: "2026-09-29T12:00:00Z" } } });
+    if (new URL(url).hostname === "api.github.com") return opts.commit === false ? new Response("rate limited", { status: 403 }) : Response.json({ sha: opts.commit ?? SHA, commit: { committer: { date: "2026-09-29T12:00:00Z" } } });
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
   return Object.assign(impl, { calls });

@@ -159,9 +159,11 @@ export function didWebDocumentUrl(did: string): string | null {
   if (typeof did !== "string") return null;
   const m = DID_WEB.exec(did);
   if (!m) return null;
-  const hostPort = (m[1] as string).replace(/%3a/i, ":");
-  const host = hostPort.split(":")[0] as string;
-  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)) return null;
+  const hostPort = (m[1] as string).replace(/%3a/gi, ":");
+  // A host and at most one numeric port: anything else names no did:web document.
+  const hp = /^([^:]+)(?::(\d{1,5}))?$/.exec(hostPort);
+  const host = hp?.[1] ?? "";
+  if (!hp || !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)) return null;
   const path = m[2] ? `${(m[2] as string).slice(1).split(":").join("/")}/did.json` : ".well-known/did.json";
   return `https://${hostPort}/${path}`;
 }
