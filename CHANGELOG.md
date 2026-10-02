@@ -2,6 +2,10 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/client` (next release, unpublished)
+
+- **Sellers can screen the payer before settling:** `x402checkTrustProvider()` implements a provider for the proposed x402 trust-provider extension (x402-foundation/x402#2300). It maps a verified, request-bound verdict on the payer's wallet to PASS / FAIL / UNCERTAIN, never PASS for anything it cannot verify, and returns the attestation as `evidence_uri`.
+
 ## v0.6.1 — 2026-10-01: freshness anchors
 
 Every signed evidence item now carries the freshness anchor of its kind, the shape discussed in x402-foundation/x402#2300 (each evidence kind brings its own clock instead of one watermark for all). All new fields are optional and additive: verifiers keep accepting older attestations.

@@ -19,6 +19,8 @@ export { toCaip2, normalizeHost, CHAIN_ALIASES } from "./normalize.js";
 export { normalizeEvidence, isSafeId } from "./evidence.js";
 export { requestHash, canonicalJson, REQUEST_HASH_FIELDS } from "./request-hash.js";
 export { X402CHECK_KEY_THUMBPRINTS } from "./keys.js";
+export { x402checkTrustProvider } from "./trust-provider.js";
+export type { TrustDecision, TrustEvaluation, TrustProviderConfig, TrustQuery, X402checkTrustProviderOptions } from "./trust-provider.js";
 export type { SafeEvidence } from "./evidence.js";
 export type { Action, Interpretation, InterpretOptions } from "./interpret.js";
 export { sameSubject, parseSubject } from "./subject.js";

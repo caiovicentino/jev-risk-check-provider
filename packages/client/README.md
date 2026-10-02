@@ -202,6 +202,21 @@ On real inputs (`eval/solana-guard.ts`: 1 real x402 payment and 3 constructed ca
 - It protects against a misled agent, not against code that reaches the key another way. For that, custody-level enforcement (a co-signer) is planned.
 - On Solana, nothing is simulated: the guard reads the instructions instead. On-chain facts about Solana counterparties come from mainnet.
 
+## Sellers: screen the payer before settling (x402 trust-provider extension)
+
+The [trust-provider extension](https://github.com/x402-foundation/x402/pull/2300) (a proposal) lets a seller's `onBeforeSettle` ask trust providers about a payment before it settles. `x402checkTrustProvider()` makes x402check one of them: it screens the payer's wallet (the OFAC SDN list, phishing and drainer lists, the kit watch of drainer infrastructure) and maps the verified, request-bound verdict to a decision.
+
+```ts
+import { x402checkTrustProvider } from "@x402check/client";
+
+const providers = [x402checkTrustProvider({ creditToken: process.env.X402CHECK_CREDIT_TOKEN })];
+// allow → PASS · warn → UNCERTAIN · block → FAIL (reason_code: the hard-block category, e.g. sanctioned_address)
+// An attestation that does not verify, or a failed lookup → UNCERTAIN, never PASS.
+// evidence_uri: the attestation itself, as data:application/jose,<compact JWS>.
+```
+
+The types follow the extension's draft (`x402-trust-query-v0.1`, `x402-trust-evaluation-v0.1`) and will follow its schema as it settles.
+
 ## The fail-closed policy (`interpret`)
 
 | Input | Action |
