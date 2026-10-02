@@ -1,8 +1,11 @@
-// Production probe for single-use payments (v0.6.0). One check is paid per call; the moment the
-// paid request goes out, two exact copies of it (same PAYMENT-SIGNATURE) go out too, so all three
-// verify before anything settles. Exactly one may be evaluated and settled; the other two must
-// get 409 payment_already_used. A copy sent after settlement must be refused as well (the
-// facilitator then sees the authorization as used: 402, or the claim store: 409).
+// Production probe for single-use payments (v0.6.0; re-encoded copies since v0.6.2). One check is
+// paid per call; the moment the paid request goes out, copies of its payment go out too, so all
+// verify before anything settles: an exact copy, one with every JSON key in reverse order, and one
+// with the nonce's hex upper-cased plus an extra field (the same signed authorization, spelled
+// differently). Exactly one request may be evaluated and settled. The others must not be: 409
+// payment_already_used from the claim (the exact and the reordered copies must get exactly that),
+// or a 402 from a facilitator that refuses the re-spelled payload. A copy sent after settlement
+// must be refused as well (the facilitator sees the authorization as used: 402, or the claim: 409).
 //
 //   X402CHECK_BASE=https://x402check.xyz PAY_NETWORK=eip155:8453 npx tsx eval/replay.ts
 //
@@ -24,6 +27,19 @@ async function outcome(who: string, res: Response): Promise<Outcome> {
   return { who, status: res.status, error, settled: receipt?.success === true, ...(receipt?.transaction ? { transaction: receipt.transaction } : {}) };
 }
 
+/** The same signed payment, spelled differently: what single use must still recognise. */
+function respelled(header: string): Array<[string, string]> {
+  const decoded = JSON.parse(Buffer.from(header, "base64").toString("utf8")) as Record<string, unknown> & { payload?: { authorization?: Record<string, unknown> } };
+  const reverse = (v: unknown): unknown => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).reverse().map(([k, x]) => [k, reverse(x)])) : v);
+  const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64");
+  const out: Array<[string, string]> = [["copy (exact)", header], ["copy (keys reordered)", encode(reverse(decoded))]];
+  const auth = decoded.payload?.authorization;
+  if (auth && typeof auth.nonce === "string") {
+    out.push(["copy (hex case, extra field)", encode({ ...decoded, payload: { ...decoded.payload, authorization: { ...auth, nonce: `0x${auth.nonce.slice(2).toUpperCase()}` } }, note: "respelled" })]);
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   let signature: string | null = null;
   const copies: Array<Promise<Outcome>> = [];
@@ -34,7 +50,7 @@ async function main(): Promise<void> {
     const header = sent.get("payment-signature");
     if (header && !signature) {
       signature = header;
-      for (const who of ["copy 1", "copy 2"]) copies.push(send(header).then((r) => outcome(who, r)));
+      for (const [who, copy] of respelled(header)) copies.push(send(copy).then((r) => outcome(who, r)));
     }
     return fetch(input, init);
   }) as typeof fetch;
@@ -48,9 +64,12 @@ async function main(): Promise<void> {
 
   const winners = concurrent.filter((o) => o.status === 200 && o.settled);
   const losers = concurrent.filter((o) => o !== winners[0]);
+  const claimed = (o: Outcome) => o.status === 409 && o.error === "payment_already_used";
   const pass =
     winners.length === 1 &&
-    losers.every((o) => o.status === 409 && o.error === "payment_already_used" && !o.settled) &&
+    losers.every((o) => !o.settled && (claimed(o) || o.status === 402)) &&
+    // The spellings any facilitator accepts must be stopped by the claim itself.
+    losers.filter((o) => ["original", "copy (exact)", "copy (keys reordered)"].includes(o.who)).every(claimed) &&
     (later.status === 402 || later.status === 409) &&
     !later.settled;
   const report = {
@@ -64,7 +83,7 @@ async function main(): Promise<void> {
   };
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   writeFileSync(`${EVAL_EVIDENCE_DIR}/replay-report.json`, JSON.stringify(report, null, 2));
-  console.log(pass ? "PASS  one evaluation and one settlement for three copies; the late copy was refused" : "FAIL  see the outcomes above");
+  console.log(pass ? `PASS  one evaluation and one settlement for ${concurrent.length} spellings of one payment; the late copy was refused` : "FAIL  see the outcomes above");
   if (!pass) process.exit(1);
 }
 
