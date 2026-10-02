@@ -199,17 +199,37 @@ Reading:
 
 ### PayAI shadow (`scripts/payai-shadow.ts`)
 
-- **Method:** PayAI publishes its EVM settlement signers (x402 v2 `/supported`). Every transaction they sent on Base from 2026-09-22 to 2026-09-29 was read from Blockscout, and the ERC-20 Transfer logs of their receipts are the payments.
+- **Method:** PayAI publishes its EVM settlement signers (x402 v2 `/supported`). Every transaction they sent on Base in the window was read from Blockscout, and the ERC-20 Transfer logs of their receipts are the payments.
 - **Checks replayed:** x402check's deterministic layers, on every payee and payer: OFAC, ScamSniffer addresses, the kit watch, and the code each address runs, with a forwarding probe on every delegated payee. No model calls.
 
-| | |
+| Base | 2026-09-22 → 09-29 | 2026-09-25 → 10-02 (`payai-shadow-2026-10-02-report.json`) |
+|---|---|---|
+| Settlement transactions (2 of 15 published signers active on Base) | 3,487 | 4,335 (60 receipts unreadable) |
+| USDC payments | 3,132 · $709.48 · median $0.01 · p99 $3.77 | 3,813 · $1,109.31 · median $0.01 · p99 $5 |
+| Payees / payers | 207 / 226 (24 / 20 EIP-7702-delegated) | 213 / 255 (34 / 32 EIP-7702-delegated; all 34 delegated payees probed, none forwards) |
+| Top 10 payees' share of payments | 59% | 55% (top 10 payers: 55%; 93 payers paid once) |
+| Payees listed in the x402 Bazaar | — | 38 of 213, receiving 34% of payments |
+| Intelligence | local snapshot of 2026-09-29 | production at run time: the kit watch's registry, learned families and each address's watch entry, ScamSniffer as of 2026-10-02 |
+| **Flagged payees / payers** | **0 / 0** | **0 / 0** |
+| Cost of checking every payment at $0.001 | $3.13 for the week | $3.81 for the week |
+
+The second week's busiest payees are mostly one payer paying one service hundreds of times for fractions of a cent (monitors and test loops; x402check's own probes were 90 of the payments).
+
+**Solana, 2026-09-25 → 10-02** (`scripts/payai-shadow-solana.ts`, `payai-shadow-solana-2026-10-02-report.json`). Every signature of PayAI's two published Solana fee payers was counted; a public RPC serves a few transactions a second, so a seeded random sample (seed 402) was read in full, and each USDC `transferChecked` in it is a payment (authority → destination owner).
+
+| Solana | |
 |---|---|
-| Settlement transactions (2 of 15 published signers active on Base) | 3,487 |
-| USDC payments | 3,132 · $709.48 · median $0.01 · p99 $3.77 |
-| Payees / payers | 207 / 226 (24 payees and 20 payers are EIP-7702-delegated EOAs) |
-| Top 10 payees' share of payments | 59% |
-| **Flagged payees / payers** | **0 / 0** |
-| Cost of checking every payment at $0.001 | $3.13 for the week |
+| Transactions (both fee payers active) | 20,925, rising: 5,830 on 10-01 alone |
+| Sample read | 2,893 of 3,000 drawn (107 the RPC never served); 97.3% carry a USDC payment |
+| Payments in the sample | 2,816 · $46.67 · median $0.0015 · p90 $0.01 · p99 $0.29 |
+| Estimate for the week | ≈ 20,400 payments, ≈ $340 |
+| Payees / payers in the sample | 57 / 92; the top 10 payees take 95% of the payments |
+| **OFAC-listed payees / payers in the sample** | **0 / 0** |
+| Cost of checking every payment at $0.001 | ≈ $20 for the week |
+
+On Solana the deterministic screen is the OFAC SDN list only: ScamSniffer's address list and the kit watch are EVM. The other networks PayAI settles were nearly idle in the same week: 29 settlements on Arbitrum, 8 on Avalanche and 2 on Polygon.
+
+Reading, after two weeks: PayAI settles about 24,000 payments a week worth about $1,450, most of them sub-cent payments from a few repeat payers, and no deterministic layer flagged a payee or payer. Screening all of it would cost about $24 a week; what that buys today is a signed record that each payer and payee was screened against a named OFAC release, not detections.
 
 Reading: PayAI's Base traffic in that week was small and clean by every deterministic layer. The shadow measures the base rate a facilitator would pay to rule out the rare bad payee. It does not measure a detection.
 

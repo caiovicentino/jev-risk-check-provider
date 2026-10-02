@@ -1,0 +1,55 @@
+{
+  "timestamp": "2026-10-02T17:48:36.728Z",
+  "facilitator": "https://facilitator.payai.network",
+  "network": "eip155:8453",
+  "window_days": 7,
+  "method": "settlement transactions sent by the facilitator's published signers (x402 v2 /supported), read from Blockscout; payments are their ERC-20 Transfer logs; checks are x402check's deterministic layers only (no model calls)",
+  "scamsniffer_addresses_as_of": "2026-10-02",
+  "kit_watch_source": "production KV at run time (registry, learned families, per-address watch entries)",
+  "signers": {
+    "published": 15,
+    "active_on_base": 2
+  },
+  "settlement_transactions": 4335,
+  "receipts_unavailable": 60,
+  "payments": 3813,
+  "usdc_payments": 3813,
+  "usdc_volume": 1109.31,
+  "usdc_amount_quantiles": {
+    "p10": 0.001,
+    "p50": 0.01,
+    "p90": 0.1,
+    "p99": 5
+  },
+  "payees": {
+    "distinct": 213,
+    "code": {
+      "eoa": 168,
+      "eip7702_delegated": 34,
+      "contract:delegating": 5,
+      "contract:tiny": 5,
+      "contract:logic": 1
+    },
+    "top10_share_of_payments": 0.551
+  },
+  "payers": {
+    "distinct": 255,
+    "code": {
+      "eoa": 211,
+      "eip7702_delegated": 32,
+      "contract:delegating": 4,
+      "contract:tiny": 7,
+      "contract:logic": 1
+    }
+  },
+  "flags": {
+    "payees_flagged": 0,
+    "payee_flags": {},
+    "payers_flagged": 0,
+    "payer_flags": {},
+    "payments_to_flagged_payees": 0,
+    "payments_from_flagged_payers": 0,
+    "delegated_payees_probed": 34
+  },
+  "cost_if_every_payment_were_checked_usd": 3.81
+}

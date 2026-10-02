@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-10-02T19:55:19.555Z",
+  "facilitator": "https://facilitator.payai.network",
+  "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+  "window_days": 7,
+  "method": "every signature of the facilitator's published Solana fee payers (x402 v2 /supported) in the window, counted; a seeded random sample of the successful ones read in full; payments are their USDC transferChecked instructions (authority → destination owner); every sampled payer and payee screened against the OFAC SDN list (no model calls)",
+  "signers": {
+    "published": 2,
+    "active": 2
+  },
+  "signatures": {
+    "total": 20925,
+    "successful": 20925
+  },
+  "sample": {
+    "seed": 402,
+    "drawn": 3000,
+    "read": 2893,
+    "unreadable": 107,
+    "with_usdc_payment": 2816,
+    "usdc_payments": 2816
+  },
+  "sample_usdc_volume": 46.67,
+  "usdc_amount_quantiles": {
+    "p10": 0.001,
+    "p50": 0.001472,
+    "p90": 0.01,
+    "p99": 0.294001
+  },
+  "estimate_for_window": {
+    "usdc_payments": 20368,
+    "usdc_volume": 338,
+    "note": "the sample's payment share and mean amount applied to every successful signature of the window"
+  },
+  "payees_in_sample": {
+    "distinct": 57,
+    "top10_share_of_payments": 0.951
+  },
+  "payers_in_sample": {
+    "distinct": 92
+  },
+  "flags": {
+    "ofac_listed_payees": 0,
+    "ofac_listed_payers": 0,
+    "payments_involving_listed": 0
+  },
+  "cost_if_every_payment_were_checked_usd": 20.37
+}
