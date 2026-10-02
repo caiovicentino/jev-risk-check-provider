@@ -2,6 +2,12 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.3 — 2026-10-02
+
+- **A credit pack still needs its amount:** v0.6.2 answered `POST /v1/credits` without an amount with the $1 pack's 402. The credit pack is deliberately not a listed Bazaar service, so that challenge carries no discovery schemas, and AgentCash flagged the route (`SCHEMA_INPUT_MISSING`, `SCHEMA_OUTPUT_MISSING`). Without an amount it is a 422 again; the check routes keep answering every unpaid body with their challenge. AgentCash reports 3 paid routes and no warnings, and x402scan re-registered 3 of 3.
+- **The first CodeQL findings (code scanning is on since 2026-10-02):** `didWebDocumentUrl` (client) decodes every `%3A` and accepts only a host with at most one numeric port; the OFAC script decodes `&amp;` last; tests escape regex metacharacters fully. Two alerts were false positives and are dismissed with the reason.
+- **CI:** `actions/checkout` 7.0.1, `setup-node` 7.0.0, `upload-artifact` 7.0.1 and `download-artifact` 8.0.1 (pins verified against the release tags); a manual feeds run passed the new guard with them. Dependabot skips the majors that need planned migrations (TypeScript 7, undici, `@solana/kit`, the Snap's MetaMask toolchain and Jest).
+
 ## v0.6.2 — 2026-10-02: the evaluation release
 
 Deployed from commit `c4a5f33` and checked in production (docs/EVIDENCE.md §7): one payment sent four ways was evaluated and settled once. From a full evaluation on 2026-10-02 (a security review of everything since the 2026-09-30 audit, an operations and cost review, and a black-box run against production):
@@ -15,7 +21,7 @@ Deployed from commit `c4a5f33` and checked in production (docs/EVIDENCE.md §7):
 - **A settled credit pack always returns its token (F4):** if the ledger and the retry queue both fail, the response is still a 202 with the token and a reference (the pending credit is logged by the token's hash for reconciliation). Every credit carries a reference, so a retry never credits twice, and settle-then-credit runs to completion if the buyer disconnects.
 - **Only public key members are published (F6):** `jwks.json` and `did.json` carry `kty`, `crv`, `x`, `y`, `kid`, `alg` and `use` only. A configured key carrying private material is refused: the current key reports misconfigured, a next key is not published.
 - **Strict requests:** an unknown field (`contxt`, `Context`) is a 422 naming it, instead of being dropped with its content unanalysed. A mixed-case EVM address must carry a valid EIP-55 checksum. A chain id must be a known one: an EVM chain id, a known Solana cluster, a Bitcoin-family genesis or TRON (`solana:mainnet` and `foo:bar` are refused).
-- **Unpaid, every body gets the challenge:** an unpaid POST to a paid route always answers with the one-item 402 challenge, and a body that would be refused says why in `request_error`. Monitors and catalogs posting placeholder bodies now see a payable endpoint; nothing invalid is ever charged, and with a payment or a token an invalid body is still a 422 before any payment work. `POST /v1/credits` still needs its amount (a credit pack is not a listed service).
+- **Unpaid, every body gets the challenge:** an unpaid POST to a paid route always answers with the one-item 402 challenge, and a body that would be refused says why in `request_error`. Monitors and catalogs posting placeholder bodies now see a payable endpoint; nothing invalid is ever charged, and with a payment or a token an invalid body is still a 422 before any payment work. `POST /v1/credits` without an amount is the $1 pack (reverted in v0.6.3).
 - **Headers:** every response carries CORS and the security headers, 429s and preflights included; a 405 on `/v1/credits` says `Allow: GET, POST`; the site's CSP admits Cloudflare's cookieless analytics beacon.
 - **Docs:** the discovery documents state the measured latency (0.7–2 s from credits, about 4 s per call) and that `intent_risk` and `behavioral` are evaluated families present in every verdict.
 - `scripts/deploy.sh` installs without dependency install scripts.

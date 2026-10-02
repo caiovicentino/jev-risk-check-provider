@@ -1,4 +1,4 @@
-# Evidence — x402check v0.6 (v0.3.0–v0.6.2)
+# Evidence — x402check v0.6 (v0.3.0–v0.6.3)
 
 **v0.6.0** is the audit release (2026-09-30). It closes paths around the rules rather than adding new ones, and it re-measures the signing guard. It was measured in production on v0.6.0 (Worker commit `7d1e3ab`) on 2026-09-30 (UTC); see the next section.
 
@@ -369,7 +369,7 @@ The `security:v5` probes cover:
 
 The token appears in the report only as a SHA-256 prefix.
 
-**v0.6.2: the 2026-10-02 evaluation, checked in production** (commit `c4a5f33`).
+**v0.6.2: the 2026-10-02 evaluation, checked in production** (commit `c4a5f33`; the credits line below is v0.6.3).
 - **Single use by what the payer signed:** the replay row above. One authorization sent four ways was evaluated and settled once.
 - **Credits:** a request with a misspelled field (`contxt`) was refused with 422 and charged nothing; a real check from credits took 1,024 ms and was charged $0.001 (balance $0.008 → $0.007), with the kit watch's coverage anchor signed.
 - **Unpaid requests:** a body that would be refused and a POST with no body each got the 402 challenge (the first with `request_error` naming the field); `POST /v1/credits` without an amount stays a 422, since a credit pack is not a listed service (with a 402 there, AgentCash reported the pack's missing Bazaar schemas); a malformed bearer got 401; preflights and 405s carry the security headers and `Allow`; `jwks.json` publishes only public members.
