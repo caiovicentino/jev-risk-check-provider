@@ -38,6 +38,20 @@ export const SCAN_ENDPOINTS: Record<string, readonly string[]> = {
   "eip155:8453": ["https://mainnet.base.org", "https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com"],
 };
 
+/**
+ * The kit watch's code and storage reads (eth_getCode, eth_getStorageAt, in batches of up to 50),
+ * healthiest first: each endpoint is sent only what the ones before it left unanswered. In the ops
+ * review of 2026-10-02, publicnode and Base's official RPC answered 429 to 12–18% of calls and
+ * dRPC 500 to 48% (its keyless plan refuses any batch of more than 3 calls), so BlastAPI leads.
+ */
+export const READ_ENDPOINTS: Record<string, readonly string[]> = {
+  "eip155:1": ["https://eth-mainnet.public.blastapi.io", "https://ethereum-rpc.publicnode.com", "https://mainnet.gateway.tenderly.co", "https://eth.drpc.org"],
+  "eip155:8453": ["https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com", "https://mainnet.base.org"],
+};
+
+/** Keyless tiers that refuse a whole JSON-RPC batch of more calls than this. */
+export const BATCH_LIMITS: Record<string, number> = { "https://eth.drpc.org": 3, "https://mainnet.base.org": 10, "https://mainnet.gateway.tenderly.co": 10 };
+
 /** An operator override (one URL) takes the primary slot; the defaults remain as fallbacks. */
 export function endpointsFor(network: string, defaults: Record<string, readonly string[]>, override?: Record<string, string>): string[] {
   const list = [...(defaults[network] ?? [])];

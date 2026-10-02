@@ -84,6 +84,19 @@ test("coverageOf reads the cron's cursor per chain, with the recorded gaps", () 
   assert.deepEqual(coverageOf({ updated_at: "", chains: { "eip155:1": chain(0) } }), { complete_through: {} }, "a chain that never completed a run has no clock");
 });
 
+test("the coverage clock states the reads still queued and every hole, uncapped (provider 0.6.2)", async () => {
+  const queued = kitWatch(async () => ({ complete_through: { "eip155:1": 23500000, "eip155:8453": 36000005 }, gaps: { "eip155:1": 37 }, pending: { "eip155:8453": 4 } }));
+  const base = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: queued }).evaluate(valid({ wallet: USER, chain: "base" }));
+  assert.deepEqual(signedChecks(base.result.jws).kit_watch, { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:8453": 36000005 }, pending: { "eip155:8453": 4 } }, "coverage through the clock is not claimed whole while reads wait");
+  assert.deepEqual(base.result.evidence?.kit_watch?.pending, { "eip155:8453": 4 });
+  const anyChain = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, kitWatch: queued }).evaluate(valid({ wallet: USER }));
+  assert.deepEqual([signedChecks(anyChain.result.jws).kit_watch?.gaps, signedChecks(anyChain.result.jws).kit_watch?.pending], [{ "eip155:1": 37 }, { "eip155:8453": 4 }]);
+  // The stats keep the last 10 skipped ranges; the signed count is every hole recorded.
+  const ranges = Array.from({ length: 10 }, (_, i) => ({ from: i, to: i + 1, at: "" }));
+  const eth = { cursor: 23500000, head: 23500002, last_run: "", scanned_blocks: 1, flagged: {}, delegates: 0, gaps: ranges, gaps_total: 37, pending: 3 };
+  assert.deepEqual(coverageOf({ updated_at: "", chains: { "eip155:1": eth } }), { complete_through: { "eip155:1": 23500000 }, gaps: { "eip155:1": 37 }, pending: { "eip155:1": 3 } });
+});
+
 /** eth_simulateV1 stub: the simulated block carries `number` (or not), and moves nothing. */
 function rpc(number?: string): typeof fetch {
   return (async (_url: string, init: RequestInit) => {

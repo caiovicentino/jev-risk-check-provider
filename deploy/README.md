@@ -153,11 +153,14 @@ npx tsx scripts/hunt-kits.ts --chain eip155:1 --upload-all  # watchlist, delegat
 ```
 
 - **Each run:**
+  - it first retries the code reads that failed on earlier runs (`kw:pending:<chain>`, up to 100 a run), and evaluates each one it can now read with its original block;
   - it scans from `kw:cursor:<chain>` to the head, minus a few confirmations: up to 15 Ethereum blocks and 90 Base blocks per run, in segments of 10;
   - it writes new entries (`kw:a:<address>`, one-year TTL), the delegate verdicts and the families it learned;
   - it takes a 30-second lease (`kw:lease`), so overlapping runs skip.
-- **Lag:** a chain more than 6 hours behind skips ahead, and the gap is recorded. `/status` → `data.kit_watch` shows the lag, the gaps and the counts per kind.
-- **RPCs:** blocks come from `SCAN_ENDPOINTS` (`src/rpc.ts`): the BlastAPI and Tenderly public gateways for Ethereum, and Base's official RPC. The endpoints that serve paid evaluations are only the last fallback, so the scan's ~20 GB a day cannot rate-limit a check.
+- **Failed reads:** a code read that no endpoint answers is queued in `kw:pending:<chain>` (one KV value per chain, at most 500 reads, written at most once a run). A read a day old, or pushed out of a full queue, is abandoned and counted as a gap. Attestations sign the queued reads as `checks.kit_watch.pending`.
+- **KV writes:** at most 200 watch entries per chain per run, and 25,000 a UTC day across both chains. The last 5,000 of the day's budget go only to kit contracts and labelled delegations, and the most severe kinds are always written first.
+- **Lag:** a chain more than 6 hours behind skips ahead, and the gap is recorded. `/status` → `data.kit_watch` shows per chain the lag, the gaps (every hole ever recorded), `pending_reads`, the day's `writes_today` and `dropped_today`, and the counts per kind. A chain with 50 or more queued reads is `degraded`.
+- **RPCs:** blocks come from `SCAN_ENDPOINTS` (`src/rpc.ts`): the BlastAPI and Tenderly public gateways for Ethereum, and Base's official RPC. The endpoints that serve paid evaluations are only the last fallback, so the scan's ~20 GB a day cannot rate-limit a check. Each request asks for about 2 MB of block JSON (the batch follows the size of the blocks just fetched), and each batch is dropped once its creations and authorizations are taken, to keep the cron's peak memory under the isolate's 128 MB (batches of 10 full blocks reached 231 MB on 2026-10-01). Code reads go to `READ_ENDPOINTS`, BlastAPI first; each endpoint gets only what the ones before it left unanswered, and one that fails is tried last for the rest of the run.
 - **Refreshing the families:** re-run the catalog and the registry when ScamSniffer or Forta change. Families learned from behaviour (`kw:learned`) are kept.
 
 ## Deploy, validate, roll back

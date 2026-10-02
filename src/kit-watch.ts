@@ -120,7 +120,14 @@ const MAX_AUTHORIZATIONS_PER_SCAN = 1000;
 const MAX_FLAGGED_PER_DELEGATE = 100;
 
 export type Creation = { address: string; deployer: string; tx: string; block: number };
-export type Authorization = { delegate: string; tx: string; block: number; raw: RawAuthorization };
+export type Authorization = {
+  delegate: string;
+  tx: string;
+  block: number;
+  raw: RawAuthorization;
+  /** The signer once recovered ("" when the signature does not recover): kept with a queued read, so it is recovered once. */
+  authority?: string;
+};
 export type RawAuthorization = { chainId: string; address: string; nonce: string; yParity?: string; v?: string; r: string; s: string };
 type RawTx = { hash: string; from: string; to?: string | null; nonce: string; type?: string; authorizationList?: RawAuthorization[] };
 export type RawBlock = { number: string; timestamp: string; transactions: Array<RawTx | string> };
@@ -146,11 +153,63 @@ export function blockActivity(block: RawBlock, chain: WatchChain): { creations: 
         const chainId = Number.parseInt(a.chainId, 16);
         // 0 = valid on every chain. The protocol skips anything else silently.
         if (chainId !== 0 && chainId !== CHAIN_IDS[chain]) continue;
-        authorizations.push({ delegate: a.address.toLowerCase(), tx: tx.hash, block: number, raw: a });
+        authorizations.push({ delegate: a.address.toLowerCase(), tx: tx.hash, block: number, raw: rawAuthorization(a) });
       }
     }
   }
   return { creations, authorizations };
+}
+
+/** The fields recovery needs, copied: nothing else of the block body stays referenced. */
+function rawAuthorization(a: RawAuthorization): RawAuthorization {
+  return { chainId: a.chainId, address: a.address, nonce: a.nonce, ...(a.yParity !== undefined ? { yParity: a.yParity } : {}), ...(a.v !== undefined ? { v: a.v } : {}), r: a.r, s: a.s };
+}
+
+/**
+ * What a scan evaluates: its blocks' top-level creations and EIP-7702 authorizations, and the
+ * blocks' times. It is small, so each block body can be dropped as soon as it has been added.
+ */
+export type Activity = { blocks: number; creations: Creation[]; authorizations: Authorization[]; blockTime: Map<number, number>; signatures: Set<string> };
+
+export function newActivity(): Activity {
+  return { blocks: 0, creations: [], authorizations: [], blockTime: new Map(), signatures: new Set() };
+}
+
+export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: WatchChain): Activity {
+  for (const b of blocks) {
+    const found = blockActivity(b, chain);
+    act.creations.push(...found.creations);
+    // The same signed authorization repeated (a replay inside the attacker's own transaction) is one authorization.
+    for (const a of found.authorizations) {
+      const key = `${a.raw.r}|${a.raw.s}`;
+      if (act.signatures.has(key) || act.authorizations.length >= MAX_AUTHORIZATIONS_PER_SCAN) continue;
+      act.signatures.add(key);
+      act.authorizations.push(a);
+    }
+    act.blockTime.set(Number.parseInt(b.number, 16), Number.parseInt(b.timestamp, 16));
+    act.blocks++;
+  }
+  return act;
+}
+
+/**
+ * Activity whose evaluation a failed read blocked, after the RPC's own retries: a creation whose
+ * code could not be read, or an authorization whose delegate or authority could not be. The caller
+ * queues it, and a later run evaluates it as if it had been read on time (`rescanPending`).
+ */
+export type PendingRead = {
+  creation?: Creation;
+  authorization?: Authorization;
+  /** The block's time (unix seconds): what an entry records as first seen. */
+  t: number;
+  /** When the read first failed (unix seconds). */
+  q: number;
+};
+
+/** An authorization's signer, recovered at most once (recovery is the scan's main CPU cost). */
+async function signerOf(a: Authorization): Promise<string | null> {
+  a.authority ??= (await authorityOf(a.raw)) ?? "";
+  return a.authority || null;
 }
 
 /** The EOA that signed an authorization; null when the signature does not recover. */
@@ -218,6 +277,8 @@ export type ScanResult = {
   entries: Array<{ address: string; entry: WatchEntry }>;
   /** Families the scan learned (auto-forwarding delegates): the caller adds them to the registry. */
   learned: Family[];
+  /** What failed reads kept the scan from evaluating: the caller queues it for a later run. */
+  pending: PendingRead[];
   stats: { blocks: number; creations: number; authorizations: number; delegates_new: number; probes: number; kit_contracts: number; flagged_authorities: number; degraded: number };
 };
 
@@ -226,31 +287,43 @@ const MAX_PROBES_PER_DELEGATE = 3;
 
 /** Scans already-fetched blocks: classifies new contracts and every delegate authorized in them. */
 export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<ScanResult> {
+  return scanActivity(addBlocks(newActivity(), blocks, deps.chain), deps);
+}
+
+/**
+ * Evaluates queued reads with their original blocks, transactions and times, as if they had been
+ * read on time. What still cannot be read comes back in `pending` with its original queue time.
+ */
+export async function rescanPending(pending: readonly PendingRead[], deps: ScanDeps): Promise<ScanResult> {
+  const act = newActivity();
+  const queuedAt = new Map<Creation | Authorization, number>();
+  for (const p of pending) {
+    const item = p.creation ?? p.authorization;
+    if (!item) continue;
+    queuedAt.set(item, p.q);
+    act.blockTime.set(item.block, p.t);
+    if (p.creation) act.creations.push(p.creation);
+    else if (p.authorization) act.authorizations.push(p.authorization);
+  }
+  return scanActivity(act, deps, (item) => queuedAt.get(item));
+}
+
+/** Classifies an activity's new contracts and every delegate authorized in it. */
+export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (item: Creation | Authorization) => number | undefined = () => undefined): Promise<ScanResult> {
   const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
   const maxProbes = deps.maxProbes ?? 12;
   const entries: ScanResult["entries"] = [];
   const learned: Family[] = [];
-  const stats: ScanResult["stats"] = { blocks: blocks.length, creations: 0, authorizations: 0, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0, degraded: 0 };
-  const creations: Creation[] = [];
-  const authorizations: Authorization[] = [];
-  const blockTime = new Map<number, number>();
-  const seenSignatures = new Set<string>();
-  for (const b of blocks) {
-    const act = blockActivity(b, deps.chain);
-    creations.push(...act.creations);
-    // The same signed authorization repeated (a replay inside the attacker's own transaction) is one authorization.
-    for (const a of act.authorizations) {
-      const key = `${a.raw.r}|${a.raw.s}`;
-      if (seenSignatures.has(key) || authorizations.length >= MAX_AUTHORIZATIONS_PER_SCAN) continue;
-      seenSignatures.add(key);
-      authorizations.push(a);
-    }
-    blockTime.set(Number.parseInt(b.number, 16), Number.parseInt(b.timestamp, 16));
-  }
-  stats.creations = creations.length;
-  stats.authorizations = authorizations.length;
+  const pending: PendingRead[] = [];
+  const { creations, authorizations, blockTime } = act;
+  const stats: ScanResult["stats"] = { blocks: act.blocks, creations: creations.length, authorizations: authorizations.length, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0, degraded: 0 };
   const seenAt = (block: number) => blockTime.get(block) ?? now();
   const isGuarded = (f: CodeFacts) => !!f.fingerprint && (deps.guarded?.has(f.fingerprint) ?? false);
+  // Code that could not be read is unknown, never "no code": what it blocked is handed back.
+  const defer = (item: { creation: Creation } | { authorization: Authorization }) => {
+    const it = "creation" in item ? item.creation : item.authorization;
+    pending.push({ ...item, t: seenAt(it.block), q: queuedAt(it) ?? now() });
+  };
 
   const reprobeDue = (v: DelegateVerdict | undefined) => !!v && v.class === "not_forwarding" && (v.probes ?? 0) < MAX_PROBES_PER_DELEGATE && now() - v.at > REPROBE_AFTER_S;
 
@@ -263,7 +336,6 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
     const codes = await deps.call(chunk.map((a) => ({ method: "eth_getCode", params: [a, "latest"] }))).catch(() => [] as unknown[]);
     chunk.forEach((a, k) => {
       if (typeof codes[k] === "string") facts.set(a, codeFacts(codes[k] as string));
-      // Code that could not be read is unknown, never "no code": it is retried when seen again.
       else stats.degraded++;
     });
   }
@@ -272,7 +344,11 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
   if (created.size) await resolveIndirection(created, deps.call).catch(() => undefined);
   for (const c of creations) {
     const f = facts.get(c.address);
-    if (!f || isGuarded(f)) continue;
+    if (!f) {
+      defer({ creation: c });
+      continue;
+    }
+    if (isGuarded(f)) continue;
     const family = familyOf(deps.families, f) ?? familyOf(deps.families, f.implementation_fingerprint ? { fingerprint: f.implementation_fingerprint, ...(f.implementation_skeleton ? { skeleton: f.implementation_skeleton } : {}) } : undefined);
     if (!family) continue;
     const t = seenAt(c.block);
@@ -289,11 +365,16 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
   const byDelegate = new Map<string, Authorization[]>();
   for (const a of authorizations) if (a.delegate !== ZERO) byDelegate.set(a.delegate, [...(byDelegate.get(a.delegate) ?? []), a]);
   for (const [delegate, auths] of byDelegate) {
+    // The authorizations evaluated per delegate, and queued when a failed read blocks them.
+    const scope = auths.slice(0, MAX_FLAGGED_PER_DELEGATE);
     let verdict = deps.delegates.get(delegate);
     if (!verdict) {
       const f = facts.get(delegate);
-      // Its code could not be read this time: no verdict is cached, so it is classified when seen again.
-      if (!f) continue;
+      // Its code could not be read: no verdict is cached, and its authorizations wait for the read.
+      if (!f) {
+        for (const a of scope) defer({ authorization: a });
+        continue;
+      }
       stats.delegates_new++;
       const family = f && !isGuarded(f) ? familyOf(deps.families, f) : undefined;
       verdict = family ? { class: family.class, family: family.id, at: now(), bytes: f.bytes, code_kind: f.kind } : { class: "unprobed", at: now(), bytes: f.bytes, code_kind: f.kind };
@@ -303,7 +384,14 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
     }
     const probeDue = (verdict.class === "unprobed" || reprobeDue(verdict)) && stats.probes < maxProbes;
     if (probeDue) {
-      const authority = await firstDelegatedAuthority(auths, delegate, deps.call);
+      const found = await firstDelegatedAuthority(auths, delegate, deps.call);
+      // No authority could be read: an unprobed delegate's authorizations wait for the read.
+      if (found === "unread" && verdict.class === "unprobed") {
+        stats.degraded++;
+        for (const a of scope) defer({ authorization: a });
+        continue;
+      }
+      const authority = found === "unread" ? null : found;
       if (authority) {
         stats.probes++;
         const probe = await probeForwarding(deps.simulate, authority.address);
@@ -340,8 +428,8 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
     const kind: WatchKind = verdict.class === "poisoner" ? "poisoner_delegation" : verdict.class === "sweeper" ? "sweeper_delegation" : "forwarding_delegation";
     // Only authorities whose account delegates to it right now: a stale or replayed authorization flags no one.
     const recovered: Array<{ address: string; auth: Authorization }> = [];
-    for (const a of auths.slice(0, MAX_FLAGGED_PER_DELEGATE)) {
-      const authority = await authorityOf(a.raw);
+    for (const a of scope) {
+      const authority = await signerOf(a);
       if (authority && !recovered.some((r) => r.address === authority)) recovered.push({ address: authority, auth: a });
     }
     if (!recovered.length) continue;
@@ -351,6 +439,7 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
       const code = codes[i];
       if (typeof code !== "string") {
         stats.degraded++;
+        defer({ authorization: auth });
         return;
       }
       if (code.toLowerCase() !== designator) return;
@@ -358,20 +447,24 @@ export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<Sc
       entries.push({ address, entry: { k: kind, c: deps.chain, f: verdict?.family ?? "", t: seenAt(auth.block), b: auth.block, x: auth.tx, d: delegate } });
     });
   }
-  return { entries, learned, stats };
+  return { entries, learned, pending, stats };
 }
 
-/** The first authority (in block order) whose code still designates `delegate`: only it can be probed. */
-async function firstDelegatedAuthority(auths: Authorization[], delegate: string, call: BatchCall): Promise<{ address: string; auth: Authorization } | null> {
+/**
+ * The first authority (in block order) whose code still designates `delegate`: only it can be
+ * probed. "unread" when none does and a read failed (the one that failed may be it).
+ */
+async function firstDelegatedAuthority(auths: Authorization[], delegate: string, call: BatchCall): Promise<{ address: string; auth: Authorization } | null | "unread"> {
   const candidates: Array<{ address: string; auth: Authorization }> = [];
   for (const auth of auths.slice(0, 4)) {
-    const address = await authorityOf(auth.raw);
+    const address = await signerOf(auth);
     if (address) candidates.push({ address, auth });
   }
   if (!candidates.length) return null;
   const codes = await call(candidates.map((c) => ({ method: "eth_getCode", params: [c.address, "latest"] }))).catch(() => [] as unknown[]);
   const designator = `0xef0100${delegate.slice(2)}`;
-  return candidates.find((_, i) => typeof codes[i] === "string" && (codes[i] as string).toLowerCase() === designator) ?? null;
+  const found = candidates.find((_, i) => typeof codes[i] === "string" && (codes[i] as string).toLowerCase() === designator);
+  return found ?? (candidates.some((_, i) => typeof codes[i] !== "string") ? "unread" : null);
 }
 
 /** Merges a scan's entries into one per address, keeping the earliest sighting and the strongest kind. */
@@ -396,11 +489,14 @@ export const KIND_RANK: Record<WatchKind, number> = {
 
 /** Evaluation-time access to the kit watch (deploy/kit-watch.ts in production). */
 /**
- * The watch's coverage clock (since provider 0.6.1): per chain, the last block the scan completed
- * (`complete_through`), and how many skipped ranges it recorded after outages (`gaps`, only when
- * any). Aggregates only: nothing about what the watchlist holds.
+ * The watch's coverage clock (since provider 0.6.1), per chain: the last block the scan read
+ * (`complete_through`); the holes it ever recorded below it, each range skipped after an outage
+ * and each code read abandoned after a day of retries (`gaps`, only when any); and the code reads
+ * from scanned blocks still queued for retry (`pending`, since 0.6.2, only when any). Coverage
+ * through `complete_through` is unbroken only when neither is present. Aggregates only: nothing
+ * about what the watchlist holds.
  */
-export type KitWatchCoverage = { complete_through: Record<string, number>; gaps?: Record<string, number> };
+export type KitWatchCoverage = { complete_through: Record<string, number>; gaps?: Record<string, number>; pending?: Record<string, number> };
 
 export type KitWatchLookup = {
   families(): Promise<FamilyIndex>;

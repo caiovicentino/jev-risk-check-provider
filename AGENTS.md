@@ -56,7 +56,7 @@ One agent may hold several roles in one session. Know which lane you are working
 | **Lead agent** | Direction (`docs/STRATEGY.md`), releases (`CHANGELOG.md`, tags, GitHub releases), this file. | Sets priorities, splits work across the roles, verifies, and reports to the owner in **Brazilian Portuguese with correct accents**. | Every session. | Work verified in production, docs updated, the owner told plainly what changed and what is pending. |
 | **Provider & Worker** | `src/` (provider core, scoring, landing, validation), `deploy/` (Worker, paid flow), `test/`. | Builds the API and the site. | Any code change. | All suites green (§3.1), deployed, `/healthz` shows the new version. |
 | **Payments & Economics** | `deploy/pricing.ts`, the routing in `deploy/protected.ts`, `deploy/credits.ts`, `deploy/cdp.ts`. | Maintains prices, facilitator routing (CDP, PayAI, Dexter) and prepaid credits. Watches margins. | Fee changes, facilitator incidents, pricing work. | `/status` → `payments` shows every margin above 0, and `facilitators` are all ok. |
-| **Intelligence** | Kit watch (`src/kit-watch*.ts`, `deploy/kit-watch.ts`, the per-minute cron), feeds (`scripts/update-*.ts`, `scripts/publish-feeds.ts`, `scripts/feeds-guard.mjs`, `.github/workflows/feeds.yml`, `deploy/scamsniffer-refresh.ts`, `src/never-flag.ts`), code sets (`scripts/kit-*.ts`, `hunt-kits.ts`, `legit-corpus.ts`). | Owns detection data: our own watch, lists and fingerprints. | The cron runs every minute and feeds refresh daily; also on new threat intel. | `/status` → `kit_watch` has lag 0 and gaps 0. Every code set passed the collision gate. |
+| **Intelligence** | Kit watch (`src/kit-watch*.ts`, `deploy/kit-watch.ts`, the per-minute cron), feeds (`scripts/update-*.ts`, `scripts/publish-feeds.ts`, `scripts/feeds-guard.mjs`, `.github/workflows/feeds.yml`, `deploy/scamsniffer-refresh.ts`, `src/never-flag.ts`), code sets (`scripts/kit-*.ts`, `hunt-kits.ts`, `legit-corpus.ts`). | Owns detection data: our own watch, lists and fingerprints. | The cron runs every minute and feeds refresh daily; also on new threat intel. | `/status` → `kit_watch` is `ok`, with lag 0, gaps 0 and `pending_reads` near 0. Every code set passed the collision gate. |
 | **Evidence & Research** | `eval/`, `eval/evidence/*-report.json`, `docs/EVIDENCE.md`, `docs/METHODOLOGY.md`. | Measures, and publishes negative results too. Runs the paid production probes. | Every release that changes behaviour, and every public claim. | Numbers reproducible from the report, with Wilson CIs and externally grounded labels. |
 | **SDK & MCP** | `packages/client` (`@x402check/client`, including the signing guard), `packages/mcp` (`@x402check/mcp`), `packages/mcp/server.json`, `scripts/publish-npm.sh`, `scripts/sync-decoders.mjs`. | Typed client, attestation verifier, **signing guard**, and the MCP server for agents. | API changes that affect clients, and releases. | Published on npm, installable with `npx`, and listed in the MCP Registry. |
 | **Distribution & Ecosystem** | Catalog listings (§2.5), `deploy/discovery.ts` (Bazaar declaration, `/openapi.json`), `src/landing.ts`, `README.md`, upstream threads (§2.6), `docs/DISTRIBUTION.md` (drafts). | Keeps x402check wherever agents and their developers look. | After discovery-affecting changes, and weekly. | Each catalog shows current prices and endpoints (§3.5). |
@@ -108,7 +108,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | System | Detail |
 |---|---|
 | Cloudflare | Worker `x402check`, deployed with `scripts/deploy.sh` (§3.2), using the wrangler pinned exactly in the root `devDependencies`. Workers Logs (`[observability]`) keep only the Worker's own error lines: invocation logs are off, so no request header (bearer token, `PAYMENT-SIGNATURE`) is stored. Zone settings (2026-09-30): minimum TLS 1.2, DNSSEC on (registrar: Cloudflare), CAA for the CAs Cloudflare issues with, SPF `v=spf1 -all` and DMARC `p=reject` (the domain sends no mail). Wrangler's OAuth token can only read the zone: zone changes need a zone-scoped API token from the owner. The zone is on the Free plan and Workers is on the **Paid** plan, which the cron needs (~250 ms of CPU per run, `cpu_ms = 30000`). |
-| KV `RATE` | Kit watch (`kw:a:*`, `kw:delegates:*`, `kw:registry`, `kw:learned`, `kw:stats`, `kw:lease`, `kw:cursor:*`), the ScamSniffer blobs (GPL, runtime only), settlement records (`st:<network>:<tx>`, kept 400 days, for reconciling against the chain), and credits queued after a ledger failure (`pc:<settlement>`, applied by the cron; they hold the token's SHA-256, never the token). |
+| KV `RATE` | Kit watch (`kw:a:*`, `kw:delegates:*`, `kw:registry`, `kw:learned`, `kw:stats`, `kw:lease`, `kw:cursor:*`, and `kw:pending:*`: code reads queued for a retry, at most 500 per chain; the watch writes at most 25,000 entries a UTC day), the ScamSniffer blobs (GPL, runtime only), settlement records (`st:<network>:<tx>`, kept 400 days, for reconciling against the chain), and credits queued after a ledger failure (`pc:<settlement>`, applied by the cron; they hold the token's SHA-256, never the token). |
 | Durable Object `CREDITS` | `CreditLedger`: one per credit token, named by the token's SHA-256. |
 | Durable Object `PAYMENT_CLAIMS` | `PaymentClaim` (migration `v4`). One object per payment, named by the SHA-256 of what the payer signed (EIP-3009: network, asset, payer, nonce; Permit2: network, owner, nonce; Solana: the message bytes), never by the JSON spelling: each payment is single-use and kept 24 h. One per settlement transaction (`tx|network|hash`): a transaction pays once. One per payer (`payer:<address>`): at most 8 payments in flight, and 5 settlement refusals an hour hold the payer back. |
 | Rate limit `UNPAID_LIMITER` | 60 requests a minute per IP for unpaid requests to paid routes (or ones whose credential is malformed) and for `/status`. |
@@ -159,7 +159,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 
 | Cadence | What runs | Watch |
 |---|---|---|
-| Every minute | Kit watch cron: new Ethereum and Base blocks, EIP-7702 delegations, kit deployments. The same cron applies queued credits (`pc:*`). | `/status` → `kit_watch` has `lag_blocks` near 0, `gaps` 0, and no `stale` |
+| Every minute | Kit watch cron: new Ethereum and Base blocks, EIP-7702 delegations, kit deployments. The same cron applies queued credits (`pc:*`). | `/status` → `kit_watch` is `ok` (not `stale` or `degraded`): `lag_blocks` near 0, `gaps` 0, `pending_reads` near 0 |
 | Every 10 min per isolate | Facilitator routing: `/supported`, PayAI's `/pricing`, CDP reachability | `/status` → `payments`, `facilitators` |
 | Daily at 05:17 UTC | `feeds.yml`: OFAC and MetaMask refresh → guard → `feeds` branch → the Worker refreshes in the background | `/status` → `refresh`; a failed run with `feeds guard` errors is a refused change (§3.13) |
 | Every push to `main` | `ci.yml` | The GitHub Actions status |
@@ -258,11 +258,12 @@ Each paid probe spends from the probe payer to our own `pay_to`, or from its pre
 
 ### 3.8 Kit watch incidents
 
-When `lag_blocks` grows, `gaps` > 0, or a chain shows `error`:
+When `lag_blocks` grows, `gaps` > 0, `pending_reads` stays high (a chain is `degraded` from 50), `dropped_today` grows, or a chain shows `error`:
 - check `npx wrangler tail` and CPU time (Workers Paid);
-- check the scan RPC endpoints (`src/kit-watch-rpc.ts`).
+- check the scan and read RPC endpoints (`SCAN_ENDPOINTS`, `READ_ENDPOINTS` and `BATCH_LIMITS` in `src/rpc.ts`);
+- a queued read is retried for a day, then counted in `gaps`; the daily write budget resets at 00:00 UTC.
 
-Never print or publish watchlist addresses.
+Never print or publish watchlist addresses, and never the queued reads (`kw:pending:*`).
 
 ### 3.9 Traffic analytics
 

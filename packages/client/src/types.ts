@@ -254,10 +254,12 @@ export interface KitWatchEvidence {
   /** When the watch last scanned. */
   as_of: string;
   status: "hit" | "clear" | "unavailable";
-  /** The coverage clock: per chain (CAIP-2), the last block the scan completed (since provider 0.6.1). */
+  /** The coverage clock: per chain (CAIP-2), the last block the scan read (since provider 0.6.1). */
   complete_through?: Record<string, number>;
-  /** Per chain, skipped ranges the scan recorded after outages, only when any (since provider 0.6.1). */
+  /** Per chain, every hole recorded (ranges skipped after outages; since 0.6.2 also reads abandoned after a day), only when any (since provider 0.6.1). */
   gaps?: Record<string, number>;
+  /** Per chain, code reads from scanned blocks still queued for retry, only when any (since provider 0.6.2). Coverage through `complete_through` is unbroken only without `gaps` and `pending`. */
+  pending?: Record<string, number>;
   hits?: KitWatchHit[];
 }
 
@@ -314,8 +316,8 @@ export interface AttestationChecks {
   feeds?: string[];
   /** v0.3; `at_block`: the block whose state was simulated (since provider 0.6.1). */
   simulation?: { status: string; network?: string; findings?: string[]; at_block?: number };
-  /** The kit watch, when consulted: scan clock, status and coverage clock (since provider 0.6.1). */
-  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number>; gaps?: Record<string, number> };
+  /** The kit watch, when consulted: scan clock, status and coverage clock (since provider 0.6.1; `pending` since 0.6.2). */
+  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number>; gaps?: Record<string, number>; pending?: Record<string, number> };
   /** Question set, or "skipped" (e.g. deterministic sanctions verdict). */
   model: string;
   /** The model revision that answered, signed (since provider 0.6.0). */

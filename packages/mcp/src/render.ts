@@ -183,7 +183,7 @@ function safePayment(value: unknown): unknown {
 }
 
 /** The provider-verified checks, as identifiers, dates and networks. */
-/** A per-chain block map (`complete_through`, `gaps`): network → non-negative integer, else NOT_SHOWN. */
+/** A per-chain count map (`complete_through`, `gaps`, `pending`): network → non-negative integer, else NOT_SHOWN. */
 function blockMap(value: unknown): unknown {
   if (!isRecord(value)) return NOT_SHOWN;
   const entries = Object.entries(value);
@@ -211,7 +211,7 @@ function safeChecks(value: unknown): unknown {
                 ? typeof x === "string" && ARTIFACT_DIGEST.test(x)
                   ? x
                   : NOT_SHOWN
-                : k === "complete_through" || k === "gaps"
+                : k === "complete_through" || k === "gaps" || k === "pending"
                   ? blockMap(x)
                   : wordValue(x),
           ]),

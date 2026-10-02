@@ -276,13 +276,14 @@ async function kitWatchEvidence(
 }
 
 /** The coverage clock for these chains (the ones the verdict consulted); nothing when unknown. */
-async function coverageFor(kw: KitWatchLookup, chains: readonly string[]): Promise<Pick<KitWatchEvidence, "complete_through" | "gaps">> {
+async function coverageFor(kw: KitWatchLookup, chains: readonly string[]): Promise<Pick<KitWatchEvidence, "complete_through" | "gaps" | "pending">> {
   const coverage = kw.coverage ? await kw.coverage().catch(() => undefined) : undefined;
   if (!coverage) return {};
   const pick = (m: Record<string, number> | undefined) => Object.fromEntries(chains.filter((c) => typeof m?.[c] === "number").map((c) => [c, m?.[c] as number]));
   const through = pick(coverage.complete_through);
   const gaps = pick(coverage.gaps);
-  return { ...(Object.keys(through).length ? { complete_through: through } : {}), ...(Object.keys(gaps).length ? { gaps } : {}) };
+  const pending = pick(coverage.pending);
+  return { ...(Object.keys(through).length ? { complete_through: through } : {}), ...(Object.keys(gaps).length ? { gaps } : {}), ...(Object.keys(pending).length ? { pending } : {}) };
 }
 
 type Verdict = { score: number; tier: RiskTier; categories: string[]; model: string; model_id?: string | undefined };
@@ -576,6 +577,7 @@ export class Provider {
               status: kitWatch.status,
               ...(kitWatch.complete_through ? { complete_through: kitWatch.complete_through } : {}),
               ...(kitWatch.gaps ? { gaps: kitWatch.gaps } : {}),
+              ...(kitWatch.pending ? { pending: kitWatch.pending } : {}),
             },
           }
         : {}),
