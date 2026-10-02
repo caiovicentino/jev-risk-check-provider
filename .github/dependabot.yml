@@ -51,6 +51,9 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jest"
         update-types: ["version-update:semver-major"]
+      # Even their minor releases now pull in snaps-sdk 12 (PR #16's lockfile could not install):
+      # the Snap's test packages wait for the same migration.
+      - dependency-name: "@metamask/snaps-*"
     groups:
       runtime:
         applies-to: version-updates
