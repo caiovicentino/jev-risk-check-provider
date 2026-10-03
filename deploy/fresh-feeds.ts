@@ -7,8 +7,14 @@
 //   - matches the manifest (SHA-256 of every file, exact entry counts),
 //   - has not shrunk sharply against the list currently in use.
 // Anything else keeps the current list (at worst, the snapshot embedded at deploy).
-// A cold isolate waits briefly for the first refresh; every attestation states the
-// list date it used.
+//
+// OFAC comes first, and fast: the last verified release is kept in KV (`feed:ofac:v1`: the
+// signed manifest, its signature and the snapshot, re-verified on every load, so KV is never
+// trusted on its own), written once per release by whichever isolate verifies it first. A new
+// isolate loads it with one KV read before anything else, and the network refresh fetches
+// OFAC before the larger MetaMask list. A paid request on a cold isolate waits up to 2.5 s for
+// a current OFAC list (warm isolates never wait); past that it proceeds on the list it has, and
+// every attestation states the list date it used.
 import { hashSetFromBytes, feedHost, type LoadedFeed } from "../src/threat-intel.js";
 import { artifactDigest, sanctionsListMeta, setSanctionsList, type SanctionsRow } from "../src/sanctions.js";
 import type { ExecutionContext, WorkerEnv } from "./runtime.js";
@@ -21,7 +27,10 @@ export const DEFAULT_FEEDS_URL = "https://raw.githubusercontent.com/caiovicentin
 export const FEEDS_PUBLIC_KEY = "EYQvAYHDsXkqLXXmItsBqtgZc3nZxR2bK8uBevilQRw";
 const OK_INTERVAL_MS = 60 * 60 * 1000;
 const RETRY_INTERVAL_MS = 10 * 60 * 1000;
-const COLD_START_WAIT_MS = 400;
+/** A paid request on a cold isolate waits at most this long for a current OFAC list. */
+const COLD_START_WAIT_MS = 2500;
+/** The last verified OFAC release, for new isolates: { manifest, sig, ofac } as published. */
+export const OFAC_KV_KEY = "feed:ofac:v1";
 const MIN_METAMASK_RATIO = 0.9;
 const MIN_OFAC_RATIO = 0.8;
 const MAX_ALLOWLIST = 500;
@@ -38,10 +47,20 @@ export type FreshMetamask = LoadedFeed & { allow: ReadonlySet<string>; entries: 
 export type FreshState = { metamask?: FreshMetamask; checked_at?: string; generated_at?: string; error?: string };
 export type Baseline = { metamaskAsOf: string; metamaskEntries: number; ofacRows: number };
 
+export type FeedsKv = { get(key: string): Promise<string | null>; put(key: string, value: string): Promise<void> };
+type OfacBundle = { manifest: string; sig: string; ofac: string };
+
 let state: FreshState = {};
 let lastAttempt = 0;
 let lastOk = false;
-let firstRefresh: Promise<unknown> | null = null;
+/** Resolves once this isolate screens against a current OFAC list (from KV or the network). */
+let ofacReady: Promise<void> | null = null;
+let ofacCurrent = false;
+let markOfacReady: (() => void) | null = null;
+/** The release KV holds, once read (null: none). */
+let kvRead: Promise<string | null> | null = null;
+/** Set once a cold wait ran out: this isolate then stops waiting (a down network must not slow every check). */
+let coldWaitOver = false;
 
 export function freshFeeds(): FreshState {
   return state;
@@ -86,15 +105,96 @@ async function get(base: string, name: string, fetchImpl: typeof fetch): Promise
   return res.arrayBuffer();
 }
 
-/** Fetches, verifies and applies newer feeds. Exported for tests (inject fetch, key and baselines). */
-export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: typeof fetch = (input, init) => fetch(input, init), publicKey = FEEDS_PUBLIC_KEY): Promise<FreshState> {
-  const [manifestBytes, sig] = await Promise.all([get(base, "manifest.json", fetchImpl), get(base, "manifest.sig", fetchImpl)]);
-  if (!(await verifyManifest(manifestBytes, new TextDecoder().decode(sig), publicKey))) throw new Error("manifest: signature invalid");
-  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as Manifest;
-  if (manifest.format !== 1) throw new Error(`unknown feeds format ${manifest.format}`);
+/** A published OFAC snapshot checked against its signed manifest entry: what setSanctionsList takes. */
+async function verifiedOfac(of: NonNullable<Manifest["ofac"]>, json: ArrayBuffer, embedded: Baseline): Promise<{ rows: SanctionsRow[]; meta: { source: string; publish_date: string; digest?: string } }> {
+  if ((await sha256Hex(json)) !== of.json_sha256) throw new Error("ofac: checksum mismatch");
+  const parsed = JSON.parse(new TextDecoder().decode(json)) as { meta?: { source?: unknown; sha256?: unknown }; rows?: unknown };
+  const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+  const valid = rows.every((r): r is SanctionsRow => Array.isArray(r) && r.length === 4 && typeof r[0] === "string" && r[0].length > 0 && r[0].length <= 128 && typeof r[1] === "string" && typeof r[2] === "number" && typeof r[3] === "string");
+  if (!valid || rows.length !== of.addresses) throw new Error("ofac: malformed rows");
+  if (rows.length < Math.max(embedded.ofacRows, sanctionsListMeta().addresses) * MIN_OFAC_RATIO) throw new Error(`ofac: ${rows.length} addresses is a large shrink`);
+  // The SDN.XML digest, from the signed manifest and the checksummed snapshot: both must agree when both say.
+  const fromManifest = artifactDigest(of.xml_sha256);
+  const fromSnapshot = artifactDigest(parsed.meta?.sha256);
+  if (fromManifest && fromSnapshot && fromManifest !== fromSnapshot) throw new Error("ofac: source digest mismatch");
+  const digest = fromManifest ?? fromSnapshot;
+  return { rows: rows as SanctionsRow[], meta: { source: typeof parsed.meta?.source === "string" ? parsed.meta.source : "OFAC SDN", publish_date: of.publish_date, ...(digest ? { digest } : {}) } };
+}
+
+/**
+ * The last verified OFAC release kept in KV, verified again (signature with the pinned key,
+ * checksum, rows) and applied when newer than the list in use. Returns the release date KV
+ * holds, or null when it holds none. Exported for tests.
+ */
+export async function loadOfacFromKv(kv: FeedsKv, embedded: Baseline, publicKey = FEEDS_PUBLIC_KEY): Promise<string | null> {
+  const raw = await kv.get(OFAC_KV_KEY);
+  if (!raw) return null;
+  const bundle = JSON.parse(raw) as Partial<OfacBundle>;
+  if (typeof bundle.manifest !== "string" || typeof bundle.sig !== "string" || typeof bundle.ofac !== "string") throw new Error("kv ofac: malformed bundle");
+  if (!(await verifyManifest(new TextEncoder().encode(bundle.manifest).buffer, bundle.sig, publicKey))) throw new Error("kv ofac: signature invalid");
+  const manifest = JSON.parse(bundle.manifest) as Manifest;
+  const of = manifest.ofac;
+  if (manifest.format !== 1 || !of || !saneDate(of.publish_date)) throw new Error("kv ofac: no plausible release");
+  if (of.publish_date > sanctionsListMeta().publish_date) {
+    const verified = await verifiedOfac(of, new TextEncoder().encode(bundle.ofac).buffer, embedded);
+    setSanctionsList(verified.rows, verified.meta);
+  }
+  return of.publish_date;
+}
+
+export type RefreshOptions = {
+  /** Where the last verified OFAC release is kept for new isolates. */
+  kv?: FeedsKv | undefined;
+  /** The release KV holds (null: none), once this isolate has read it. */
+  kvDate?: (() => Promise<string | null>) | undefined;
+  /** Called once the OFAC step is over, whatever its outcome. */
+  onOfac?: (() => void) | undefined;
+};
+
+/** Fetches, verifies and applies newer feeds, OFAC first. Exported for tests (inject fetch, key, baselines and KV). */
+export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: typeof fetch = (input, init) => fetch(input, init), publicKey = FEEDS_PUBLIC_KEY, opts: RefreshOptions = {}): Promise<FreshState> {
+  let manifest: Manifest;
+  let manifestText: string;
+  let sigText: string;
+  try {
+    const [manifestBytes, sig] = await Promise.all([get(base, "manifest.json", fetchImpl), get(base, "manifest.sig", fetchImpl)]);
+    sigText = new TextDecoder().decode(sig);
+    if (!(await verifyManifest(manifestBytes, sigText, publicKey))) throw new Error("manifest: signature invalid");
+    manifestText = new TextDecoder().decode(manifestBytes);
+    manifest = JSON.parse(manifestText) as Manifest;
+    if (manifest.format !== 1) throw new Error(`unknown feeds format ${manifest.format}`);
+  } catch (err) {
+    opts.onOfac?.();
+    throw err;
+  }
   const next: FreshState = { ...state, checked_at: new Date().toISOString(), generated_at: manifest.generated_at };
   delete next.error;
   const errors: string[] = [];
+
+  // OFAC first: it is small, and it is what a paid request on a cold isolate waits for.
+  const of = manifest.ofac;
+  try {
+    if (of && saneDate(of.publish_date)) {
+      const newer = of.publish_date > sanctionsListMeta().publish_date;
+      // KV is written once per release, and only forward: when it holds nothing or an older release
+      // (a stale CDN copy of the manifest never overwrites a newer one).
+      const held = opts.kv ? await (opts.kvDate?.() ?? Promise.resolve(null)) : null;
+      const kvBehind = !!opts.kv && (held === null || of.publish_date > held);
+      if (newer || kvBehind) {
+        const json = await get(base, "ofac-sdn.json", fetchImpl);
+        const verified = await verifiedOfac(of, json, embedded);
+        if (newer) setSanctionsList(verified.rows, verified.meta);
+        if (kvBehind && opts.kv) {
+          await opts.kv.put(OFAC_KV_KEY, JSON.stringify({ manifest: manifestText, sig: sigText, ofac: new TextDecoder().decode(json) } satisfies OfacBundle));
+          kvRead = Promise.resolve(of.publish_date);
+        }
+      }
+    } else if (of) errors.push("ofac: implausible date");
+  } catch (err) {
+    errors.push(String(err instanceof Error ? err.message : err));
+  } finally {
+    opts.onOfac?.();
+  }
 
   const mm = manifest.metamask;
   const current = state.metamask ?? { as_of: embedded.metamaskAsOf, entries: embedded.metamaskEntries };
@@ -113,44 +213,44 @@ export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: 
     }
   } else if (mm && !saneDate(mm.as_of)) errors.push("metamask: implausible date");
 
-  const of = manifest.ofac;
-  const ofacNow = sanctionsListMeta();
-  if (of && saneDate(of.publish_date) && of.publish_date > ofacNow.publish_date) {
-    try {
-      const json = await get(base, "ofac-sdn.json", fetchImpl);
-      if ((await sha256Hex(json)) !== of.json_sha256) throw new Error("ofac: checksum mismatch");
-      const parsed = JSON.parse(new TextDecoder().decode(json)) as { meta?: { source?: unknown; sha256?: unknown }; rows?: unknown };
-      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-      const valid = rows.every((r): r is SanctionsRow => Array.isArray(r) && r.length === 4 && typeof r[0] === "string" && r[0].length > 0 && r[0].length <= 128 && typeof r[1] === "string" && typeof r[2] === "number" && typeof r[3] === "string");
-      if (!valid || rows.length !== of.addresses) throw new Error("ofac: malformed rows");
-      if (rows.length < Math.max(embedded.ofacRows, ofacNow.addresses) * MIN_OFAC_RATIO) throw new Error(`ofac: ${rows.length} addresses is a large shrink`);
-      // The SDN.XML digest, from the signed manifest and the checksummed snapshot: both must agree when both say.
-      const fromManifest = artifactDigest(of.xml_sha256);
-      const fromSnapshot = artifactDigest(parsed.meta?.sha256);
-      if (fromManifest && fromSnapshot && fromManifest !== fromSnapshot) throw new Error("ofac: source digest mismatch");
-      const digest = fromManifest ?? fromSnapshot;
-      setSanctionsList(rows as SanctionsRow[], { source: typeof parsed.meta?.source === "string" ? parsed.meta.source : "OFAC SDN", publish_date: of.publish_date, ...(digest ? { digest } : {}) });
-    } catch (err) {
-      errors.push(String(err instanceof Error ? err.message : err));
-    }
-  } else if (of && !saneDate(of.publish_date)) errors.push("ofac: implausible date");
   state = errors.length ? { ...next, error: errors.join("; ").slice(0, 300) } : next;
   if (errors.length) throw new Error(state.error);
   return state;
 }
 
 /**
- * Starts a refresh when one is due, in the background. Returns a promise the caller
- * may briefly await on a cold isolate (so the first screen uses the newest verified
- * list when it is quickly available); it never rejects.
+ * Starts a refresh when one is due, in the background, and, on a new isolate, the load of the
+ * last verified OFAC release from KV first. Returns a promise that never rejects.
  */
-export function maybeRefreshFeeds(env: WorkerEnv, ctx: ExecutionContext | undefined, embedded: Baseline): Promise<void> {
+export function maybeRefreshFeeds(env: WorkerEnv, ctx: ExecutionContext | undefined, embedded: Baseline, inject: { fetchImpl?: typeof fetch; publicKey?: string } = {}): Promise<void> {
   const base = env.FEEDS_URL ?? DEFAULT_FEEDS_URL;
   if (base === "off" || !ctx) return Promise.resolve();
+  const kv = env.RATE && typeof env.RATE.put === "function" ? (env.RATE as FeedsKv) : undefined;
+  if (!ofacReady) {
+    // A new isolate: current once KV yields a verified release, or once the network's OFAC step is over.
+    ofacReady = new Promise<void>((resolve) => {
+      markOfacReady = resolve;
+    }).then(() => {
+      ofacCurrent = true;
+    });
+    kvRead = kv
+      ? loadOfacFromKv(kv, embedded, inject.publicKey).then(
+          (date) => {
+            if (date) markOfacReady?.();
+            return date;
+          },
+          (err: unknown) => {
+            console.error(`feeds: the OFAC release in KV was not used (${String(err instanceof Error ? err.message : err).slice(0, 120)})`);
+            return null;
+          },
+        )
+      : Promise.resolve(null);
+    ctx.waitUntil(kvRead);
+  }
   const now = Date.now();
   if (now - lastAttempt < (lastOk ? OK_INTERVAL_MS : RETRY_INTERVAL_MS)) return Promise.resolve();
   lastAttempt = now;
-  const run = refreshFeeds(base, embedded).then(
+  const run = refreshFeeds(base, embedded, inject.fetchImpl, inject.publicKey, { kv, kvDate: () => kvRead ?? Promise.resolve(null), onOfac: () => markOfacReady?.() }).then(
     () => {
       lastOk = true;
     },
@@ -160,13 +260,21 @@ export function maybeRefreshFeeds(env: WorkerEnv, ctx: ExecutionContext | undefi
     },
   );
   ctx.waitUntil(run);
-  if (!firstRefresh) firstRefresh = run;
   return run;
 }
 
-/** On a cold isolate, wait up to COLD_START_WAIT_MS for the first refresh. */
+/**
+ * A paid request on a cold isolate waits up to COLD_START_WAIT_MS for a current OFAC list;
+ * a warm isolate never waits. Past the wait it proceeds on the list it has (the attestation
+ * states its date), says so once, and the isolate stops waiting.
+ */
 export async function awaitColdStart(): Promise<void> {
-  if (!firstRefresh) return;
-  const first = firstRefresh;
-  await Promise.race([first, new Promise((r) => setTimeout(r, COLD_START_WAIT_MS))]);
+  if (!ofacReady || ofacCurrent || coldWaitOver) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = await Promise.race([ofacReady.then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), COLD_START_WAIT_MS)))]);
+  clearTimeout(timer);
+  if (timedOut && !coldWaitOver) {
+    coldWaitOver = true;
+    console.warn(`feeds: a paid check went ahead on the ${sanctionsListMeta().publish_date} OFAC list after waiting ${COLD_START_WAIT_MS} ms for a current one`);
+  }
 }
