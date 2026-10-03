@@ -5,7 +5,11 @@
 #   1. the working tree is clean (no staged, unstaged or untracked files);
 #   2. HEAD is the tip of main on GitHub (asked with git ls-remote, so a stale local
 #      origin/main cannot pass);
-#   3. the `ci` workflow's push run for that commit on main completed successfully.
+#   3. the `ci` workflow's push run for that commit on main completed successfully;
+#   4. the OFAC snapshot embedded in the Worker is not older than the published feeds release
+#      (a new isolate screens against it until its first refresh lands): otherwise run
+#      `npx tsx scripts/sync-embedded-feeds.ts`, commit and push first. SKIP_FEEDS_CHECK=1
+#      skips this, for an emergency only.
 # Then it installs the locked dependencies (npm ci without install scripts, as the feeds workflow does) and runs `wrangler deploy`
 # from deploy/ with GIT_COMMIT=<short SHA> (for /healthz), tagging the Cloudflare Worker
 # version with the same commit.
@@ -52,6 +56,12 @@ echo "deploy: $head is main on GitHub and passed CI ($url)"
 
 # The dependency tree exactly as locked, as CI built it.
 npm ci --ignore-scripts --no-audit --no-fund
+
+# 4. The embedded OFAC snapshot is the published release (or newer).
+if [ "${SKIP_FEEDS_CHECK:-}" != "1" ]; then
+  npx --no -- tsx scripts/sync-embedded-feeds.ts --check \
+    || die "the embedded OFAC snapshot is not current: run npx tsx scripts/sync-embedded-feeds.ts, commit, push and wait for CI (SKIP_FEEDS_CHECK=1 skips this, in an emergency only)"
+fi
 
 short=$(git rev-parse --short=12 HEAD)
 cd deploy
