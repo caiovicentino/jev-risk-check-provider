@@ -1,4 +1,4 @@
-import { base58Check, cashaddrHash20 } from "./address-codec.js";
+import { base58Check, base58Kind, cashaddrHash20 } from "./address-codec.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
 // Subject address parsing. The wallet is the only field every verdict is keyed on,
@@ -39,7 +39,35 @@ export function evmChecksumValid(address: string): boolean {
   return true;
 }
 
+/** The CAIP-2 namespaces an address can belong to. */
+export type Namespace = "eip155" | "solana" | "tron" | "bip122";
+
+/**
+ * The CAIP-2 namespace an address's own format belongs to: EVM → eip155, a 32-byte base58 key →
+ * solana, TRON's base58check → tron, the UTXO chains' formats (base58check, bech32, cashaddr) →
+ * bip122. Null when the format belongs to none the API serves (an XRP or BNB Beacon address).
+ */
+export function addressNamespace(subject: Pick<Subject, "format" | "canonical">): Namespace | null {
+  if (subject.format === "evm") return "eip155";
+  if (subject.format === "bech32") return /^(bc|tb|bcrt|ltc)1/.test(subject.canonical) ? "bip122" : null;
+  if (subject.format === "cashaddr") return "bip122";
+  const kind = base58Kind(subject.canonical);
+  return kind === "solana" ? "solana" : kind === "tron" ? "tron" : kind === "utxo" ? "bip122" : null;
+}
+
+/** Whether a chain (CAIP-2) can hold this address: its namespace must be the address's own. */
+export function chainFits(subject: Pick<Subject, "format" | "canonical">, caip2: string): boolean {
+  return addressNamespace(subject) === caip2.slice(0, caip2.indexOf(":"));
+}
+
 export function parseSubject(raw: string): Subject | null {
+  const subject = parseAddress(raw);
+  // A CAIP-10 id whose chain cannot hold its address ("solana:…:0x…") names nothing: refused,
+  // never screened without the chain-keyed checks.
+  return subject && (!subject.caip2 || chainFits(subject, subject.caip2)) ? subject : null;
+}
+
+function parseAddress(raw: string): Subject | null {
   if (raw.length === 0 || raw.length > 160 || raw !== raw.trim()) return null;
   let address = raw;
   let caip2: string | undefined;

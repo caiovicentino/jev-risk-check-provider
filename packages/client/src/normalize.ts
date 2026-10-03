@@ -46,7 +46,8 @@ export function toCaip2(chain: string): string | null {
   if (alias) return alias;
   // "eip155:08453" is chain 8453 to x402: canonicalized, as the provider accepts only canonical ids.
   const evm = /^eip155:0*(\d{1,20})$/.exec(v);
-  if (evm) return `eip155:${BigInt(evm[1] as string)}`;
+  // Chain id 0 names no EVM chain: refused, as by the provider.
+  if (evm) return BigInt(evm[1] as string) === 0n ? null : `eip155:${BigInt(evm[1] as string)}`;
   return CAIP2.test(v) && knownCaip2(v) ? v : null;
 }
 

@@ -37,7 +37,8 @@ const SOLANA_REFERENCES = new Set([SOLANA_MAINNET, SOLANA_DEVNET, "solana:4uhcVJ
  * "foo:bar") is refused: it would silently skip every chain-keyed check.
  */
 function knownCaip2(v: string): boolean {
-  if (v.startsWith("eip155:")) return /^eip155:(?:0|[1-9]\d{0,19})$/.test(v);
+  // Chain id 0 names no EVM chain (EIP-155 ids start at 1).
+  if (v.startsWith("eip155:")) return /^eip155:[1-9]\d{0,19}$/.test(v);
   if (v.startsWith("solana:")) return SOLANA_REFERENCES.has(v);
   if (v.startsWith("bip122:")) return /^bip122:[0-9a-f]{32}$/.test(v);
   if (v.startsWith("tron:")) return /^tron:0x[0-9a-f]{8}$/.test(v);

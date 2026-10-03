@@ -12,6 +12,9 @@ test("EVM: case-insensitive, CAIP-10 prefix stripped", () => {
   assert.ok(sameSubject(EVM, `eip155:1:${EVM}`));
   assert.ok(sameSubject(`eip155:8453:${EVM}`, `eip155:1:${EVM.toUpperCase().replace("0X", "0x")}`));
   assert.ok(!sameSubject(EVM, "0x0000000000000000000000000000000000000001"));
+  // A chain that cannot hold the address names nothing ("solana:…:0x…"): never the same subject.
+  assert.ok(!sameSubject(EVM, `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:${EVM}`));
+  assert.ok(!sameSubject(`eip155:8453:${EVM}`, `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:${EVM}`));
 });
 
 test("base58 (Solana, Tron): case-SENSITIVE", () => {

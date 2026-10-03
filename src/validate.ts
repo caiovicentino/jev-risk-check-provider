@@ -1,4 +1,4 @@
-import { parseSubject } from "./address.js";
+import { chainFits, evmChecksumValid, parseSubject } from "./address.js";
 import { normalizeChain } from "./chains.js";
 import { requestHash } from "./jws.js";
 import { normalizeHost } from "./domain-analysis.js";
@@ -21,6 +21,17 @@ function optionalString(obj: Record<string, unknown>, key: string, max: number):
   return v;
 }
 
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Whether every string in a JSON value is well-formed Unicode (no lone surrogate). */
+function wellFormed(v: unknown, depth = 0): boolean {
+  if (depth > 64) return false;
+  if (typeof v === "string") return !LONE_SURROGATE.test(v);
+  if (Array.isArray(v)) return v.every((x) => wellFormed(x, depth + 1));
+  if (v && typeof v === "object") return Object.entries(v).every(([k, x]) => !LONE_SURROGATE.test(k) && wellFormed(x, depth + 1));
+  return true;
+}
+
 function isInvalid(v: unknown): v is Invalid {
   return typeof v === "object" && v !== null && (v as { ok?: unknown }).ok === false;
 }
@@ -37,11 +48,14 @@ function validatePayment(raw: unknown): PaymentBinding | Invalid {
     out.network = chain.caip2;
   }
   if (p.pay_to !== undefined) {
-    if (typeof p.pay_to !== "string" || !parseSubject(p.pay_to)) return invalid("payment.pay_to");
-    out.pay_to = p.pay_to;
+    const payTo = typeof p.pay_to === "string" ? parseSubject(p.pay_to) : null;
+    if (!payTo) return invalid("payment.pay_to");
+    // The payment's network must be able to hold its pay_to (an EVM network, a Solana pay_to: refused).
+    if (out.network && !chainFits(payTo, out.network)) return invalid("payment.pay_to");
+    out.pay_to = p.pay_to as string;
   }
   if (p.amount !== undefined) {
-    if (typeof p.amount !== "string" || !/^\d{1,78}$/.test(p.amount)) return invalid("payment.amount");
+    if (typeof p.amount !== "string" || !/^\d{1,78}$/.test(p.amount) || BigInt(p.amount) >= 2n ** 256n) return invalid("payment.amount");
     out.amount = p.amount;
   }
   if (p.asset !== undefined) {
@@ -70,7 +84,8 @@ function validateTransaction(raw: unknown): NonNullable<RiskCheckRequest["transa
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return invalid("transaction");
   const t = raw as Record<string, unknown>;
   if (Object.keys(t).some((k) => !["from", "to", "value", "data"].includes(k))) return invalid("transaction");
-  const evm = (v: unknown) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
+  // An EVM address, with a valid EIP-55 checksum when mixed-case (as the subject's).
+  const evm = (v: unknown) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) && evmChecksumValid(v);
   if (!evm(t.from)) return invalid("transaction.from");
   if (t.to !== undefined && !evm(t.to)) return invalid("transaction.to");
   let value: string | undefined;
@@ -98,6 +113,9 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
   // and the verdict silently answering a different request than the caller meant.
   const unknown = Object.keys(obj).find((k) => !REQUEST_FIELDS.has(k));
   if (unknown !== undefined) return invalid(unknown.length <= 64 ? unknown : "body");
+  // Every string must be well-formed Unicode: a lone surrogate cannot be canonicalized (RFC 8785),
+  // so a client could never recompute request_hash.
+  if (!wellFormed(obj)) return invalid("body");
   const subject = typeof obj.wallet === "string" ? parseSubject(obj.wallet) : null;
   if (typeof obj.wallet !== "string" || !subject) return invalid("wallet");
   // A CAIP-10 wallet's chain must be a canonical one too ("eip155:0008453" is refused).
@@ -107,6 +125,8 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
   if (obj.chain !== undefined) {
     const chain = typeof obj.chain === "string" ? normalizeChain(obj.chain) : null;
     if (!chain) return invalid("chain");
+    // A chain that cannot hold the wallet ({wallet: 0x…, chain: "solana"}) would skip every chain-keyed check.
+    if (!chainFits(subject, chain.caip2)) return invalid("chain");
     // A CAIP-10 wallet carries its own chain; a disagreeing `chain` would let the caller
     // pick which chain's on-chain facts are consulted.
     if (subject.caip2 && subject.caip2 !== chain.caip2) return invalid("chain");
@@ -173,6 +193,9 @@ export function validateBatch(body: unknown): Valid<RiskCheckRequest[]> | BatchI
   if (!body || typeof body !== "object" || !Array.isArray((body as { requests?: unknown }).requests)) {
     return { ok: false, status: 422, body: { error: "invalid_request", field: "requests" } };
   }
+  // A batch carries `requests` only: anything else is refused, as in a single request.
+  const extra = Object.keys(body).find((k) => k !== "requests");
+  if (extra !== undefined) return { ok: false, status: 422, body: { error: "invalid_request", field: extra.length <= 64 ? extra : "body" } };
   const raw = (body as { requests: unknown[] }).requests;
   if (raw.length === 0) return { ok: false, status: 422, body: { error: "invalid_request", field: "requests" } };
   if (raw.length > MAX_BATCH) return { ok: false, status: 413, body: { error: "batch_too_large", max: MAX_BATCH } };

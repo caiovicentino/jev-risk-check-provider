@@ -155,3 +155,20 @@ export function hash20Of(format: "evm" | "base58" | "bech32" | "cashaddr", canon
   if (format === "bech32") return bech32Hash20(canonical);
   return cashaddrHash20(canonical);
 }
+
+/**
+ * What a base58 string is, by its decoded shape: a 32-byte key (Solana), a checksummed TRON
+ * (version 0x41) or UTXO-chain address (BTC, LTC, DOGE, DASH, BCH legacy, ZEC t-addr), or an XRP
+ * address (its own alphabet). Null for anything else.
+ */
+export function base58Kind(input: string): "solana" | "tron" | "utxo" | "xrp" | null {
+  const raw = base58Decode(input);
+  if (raw && raw.length === 32) return "solana";
+  const btc = checkedDecode(raw);
+  if (raw && btc.checksummed && btc.valid) return raw.length === 25 && raw[0] === 0x41 ? "tron" : "utxo";
+  if (input.startsWith("r")) {
+    const xrp = checkedDecode(base58Decode(input, { index: XRP_INDEX, zero: "r" }));
+    if (xrp.checksummed && xrp.valid) return "xrp";
+  }
+  return null;
+}

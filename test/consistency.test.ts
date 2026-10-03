@@ -124,13 +124,20 @@ test("the client parses addresses and chains as the provider does", () => {
     "not an address",
     "",
     "0x123",
+    // A CAIP-10 chain must be able to hold its address.
+    "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178",
+    "eip155:1:9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "eip155:8453:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+    "bip122:000000000019d6689c085ae165831e93:0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178",
+    "tron:0x2b6653dc:TJCnKsPa7y5okkXvQAidZBzqx3QyQ6sxMW",
+    "bip122:000000000019d6689c085ae165831e93:1BoatSLRHtKNngkdXEeobR76b53LETtpyT",
   ];
   for (const s of subjects) {
     const a = parseSubject(s);
     const b = clientParseSubject(s);
     assert.deepEqual(b && { canonical: b.canonical, caip2: b.caip2 }, a && { canonical: a.canonical, caip2: a.caip2 }, s);
   }
-  const chains = ["base", "Base", "eip155:8453", "ethereum", "eip155:1", "polygon", "arbitrum", "optimism", "bsc", "avalanche", "sei", "monad", "solana", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", "base-sepolia", "bitcoin", "tron", "bip122:000000000019d6689c085ae165831e93", "tron:0x2b6653dc", "solana:mainnet", "foo:bar", "cosmos:cosmoshub-4", "foo", ""];
+  const chains = ["base", "Base", "eip155:8453", "ethereum", "eip155:1", "polygon", "arbitrum", "optimism", "bsc", "avalanche", "sei", "monad", "solana", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", "base-sepolia", "bitcoin", "tron", "bip122:000000000019d6689c085ae165831e93", "tron:0x2b6653dc", "solana:mainnet", "foo:bar", "cosmos:cosmoshub-4", "eip155:0", "foo", ""];
   for (const c of chains) assert.equal(toCaip2(c), normalizeChain(c)?.caip2 ?? null, c);
   // Deliberate differences: the client canonicalizes a zero-padded chain id before sending (the
   // provider refuses it), and leaves checksums (EIP-55, base58check) to the provider, which refuses
