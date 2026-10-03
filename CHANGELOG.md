@@ -2,7 +2,7 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## Unreleased (v0.6.4)
+## v0.6.4 — 2026-10-03: the second evaluation
 
 From a second full evaluation on 2026-10-03 (an independent security review of everything in v0.6.2–v0.6.3, a black-box run against production, and an operations review):
 
