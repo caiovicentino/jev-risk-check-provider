@@ -21,7 +21,7 @@ Any other field is refused (422 naming it): a misspelled `context` must not leav
 
 Evidence is collected by the provider itself. Nothing the caller asserts counts as evidence.
 
-1. **OFAC SDN screen** (`src/sanctions.ts`). Exact match on the canonical address, then on the 20-byte hash it encodes, so the same key in another encoding matches (BCH legacy ↔ cashaddr, BTC P2PKH ↔ P2WPKH, TRX ↔ EVM). Checksums are enforced. A listing is final: score 0, tier critical, and no model call. Scope: direct listing only.
+1. **OFAC SDN screen** (`src/sanctions.ts`). Exact match on the canonical address, then on the 20-byte hash it encodes, so the same key in another encoding matches (BCH legacy ↔ cashaddr, BTC P2PKH ↔ P2WPKH, TRX ↔ EVM). Checksums are enforced. OFAC's declared currency (`Digital Currency Address - <TICKER>`) is never used to pick a chain or to filter entries: the list labels a TRON address XBT and Bitcoin/Omni addresses USDT, so the address's own format decides (`test/sanctions-labels.test.ts`). A listing is final: score 0, tier critical, and no model call. Scope: direct listing only.
 2. **Domain analysis** (`src/domain-analysis.ts`). Public-suffix-aware parsing, punycode and homoglyph detection, typosquats of brands (7 or more characters), brand plus lure keyword, and an official domain used as a subdomain of another site.
 3. **Threat feeds** (`src/threat-intel.ts`):
    - MetaMask eth-phishing-detect domains, matched on the host and its parents down to the registrable domain, with MetaMask's own allowlist applied;
