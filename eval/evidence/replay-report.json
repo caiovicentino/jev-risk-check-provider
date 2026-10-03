@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-10-02T15:18:33.842Z",
+  "timestamp": "2026-10-03T15:02:37.124Z",
   "base": "https://x402check.xyz",
-  "payment_signature_sha256": "28d4f2f1b0a24df9",
+  "payment_signature_sha256": "529f8fa7bb4aeec2",
   "concurrent": [
     {
       "who": "original",
@@ -11,9 +11,10 @@
     },
     {
       "who": "copy (exact)",
-      "status": 409,
-      "error": "payment_already_used",
-      "settled": false
+      "status": 200,
+      "error": null,
+      "settled": true,
+      "transaction": "0x025e9691ca58dab1c43499bbe59908976172c5fcc4c1e4b7f14fb6be026d5321"
     },
     {
       "who": "copy (keys reordered)",
@@ -23,10 +24,9 @@
     },
     {
       "who": "copy (hex case, extra field)",
-      "status": 200,
-      "error": null,
-      "settled": true,
-      "transaction": "0x6d7f4ac88ae0cc785dd670b8e38d7e0741dae9155000c816fc63f6a00fa23a96"
+      "status": 409,
+      "error": "payment_already_used",
+      "settled": false
     }
   ],
   "after_settlement": {
