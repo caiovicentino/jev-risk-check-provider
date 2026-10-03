@@ -7,8 +7,8 @@ import assert from "node:assert";
 import { privateKeyToAccount } from "viem/accounts";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
-import { indexFamilies, mergeEntries, rescanPending, scanBlocks, type DelegateVerdict, type Family, type PendingRead, type RawAuthorization, type RawBlock, type ScanDeps, type SimulateCall, type WatchEntry } from "../src/kit-watch.js";
-import { coverageOf, DAILY_WRITE_BUDGET, kitWatchStatus, KW, PENDING_MAX, runKitWatch, type ChainStats, type KitWatchStats } from "../deploy/kit-watch.js";
+import { addBlocks, indexFamilies, mergeEntries, newActivity, rescanPending, scanActivity, scanBlocks, type DelegateVerdict, type Family, type PendingRead, type RawAuthorization, type RawBlock, type ScanDeps, type SimulateCall, type WatchEntry } from "../src/kit-watch.js";
+import { COVERAGE_V, coverageOf, DAILY_WRITE_BUDGET, kitWatchStatus, KW, LEASE_MS, LEGACY_DROPPED_READS, PENDING_MAX, runKitWatch, type ChainStats, type KitWatchStats } from "../deploy/kit-watch.js";
 import type { KVNamespace } from "../deploy/runtime.js";
 
 const hex20 = (n: number) => n.toString(16).padStart(40, "0");
@@ -217,8 +217,8 @@ test("cron: a read that still fails is queued (one KV write), signed as pending,
   assert.deepEqual([eth.cursor, eth.pending, eth.degraded], [114, 1, 1], "the cursor moves on; the read waits in the queue");
   assert.equal(kv.data.has(KW.address(KIT_ADDRESS)), false);
   assert.deepEqual(kv.puts.filter((k) => k.startsWith("kw:pending:")), [KW.pending("eip155:1")], "one write for the queue, none per address");
-  // The coverage clock does not claim unbroken coverage while the read waits.
-  assert.deepEqual(coverageOf(down), { complete_through: { "eip155:1": 114, "eip155:8453": 502 }, pending: { "eip155:1": 1 } });
+  // The coverage clock does not claim complete coverage while the read waits (it is pending, not a hole).
+  assert.deepEqual(coverageOf(down), { complete_through: { "eip155:1": 114, "eip155:8453": 502 }, pending: { "eip155:1": 1 }, unbroken_since: { "eip155:1": 100, "eip155:8453": 500 } });
 
   const log: string[] = [];
   const up = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ blocks: kitCreation, code: (a) => (a === KIT_ADDRESS ? DRAINER : "0x"), log }), now: T + 60_000 })) as KitWatchStats;
@@ -256,12 +256,14 @@ test("cron: the queue is bounded; a read a day old or pushed out is abandoned an
 test("cron: every skipped range is counted, past the last 10 the stats keep", async () => {
   const kv = seeded();
   const ranges = Array.from({ length: 10 }, (_, i) => ({ from: i * 10, to: i * 10 + 5, at: "" }));
-  const eth: ChainStats = { cursor: 1000, head: 1000, last_run: "", scanned_blocks: 1, flagged: {}, delegates: 0, gaps: ranges, gaps_total: 12 };
+  const eth: ChainStats = { cursor: 1000, head: 1000, last_run: "", scanned_blocks: 1, flagged: {}, delegates: 0, gaps: ranges, gaps_total: 12, coverage_v: COVERAGE_V, unbroken_since: 900 };
   kv.data.set(KW.stats, JSON.stringify({ updated_at: "", chains: { "eip155:1": eth } }));
   kv.data.set(KW.cursor("eip155:8453"), String(0x10000 - 20));
   const st = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 0x10000 }), now: T })) as KitWatchStats;
   assert.deepEqual([st.chains["eip155:1"]?.gaps.length, st.chains["eip155:1"]?.gaps_total], [10, 13]);
   assert.deepEqual(coverageOf(st).gaps, { "eip155:1": 13 }, "the signed count is the real one, not the list's length");
+  // Unbroken coverage restarts after the skipped range.
+  assert.equal(st.chains["eip155:1"]?.unbroken_since, 0x10000 - 2 - 1800 + 1);
 });
 
 test("cron: watch-entry writes stay within a daily budget shared by both chains; when it is tight, the most severe kinds go first", async () => {
@@ -281,6 +283,10 @@ test("cron: watch-entry writes stay within a daily budget shared by both chains;
   // Spent: nothing more today. Yesterday's writes do not count.
   const spent = await run(DAILY_WRITE_BUDGET);
   assert.deepEqual([spent.kv.data.has(KW.address(KIT_ADDRESS)), spent.eth.writes_today, spent.eth.dropped_today], [false, 0, 2]);
+  // An entry the caps leave out is a hole: counted, and unbroken coverage restarts after its block.
+  assert.deepEqual([roomy.eth.gaps_total, roomy.eth.unbroken_since], [0, 100]);
+  assert.deepEqual([tight.eth.gaps_total, tight.eth.unbroken_since], [1, 101]);
+  assert.deepEqual([spent.eth.gaps_total, spent.eth.unbroken_since], [2, 101]);
   assert.equal((await run(DAILY_WRITE_BUDGET, "2026-10-01")).eth.writes_today, 2);
   // /status: the day's counts per chain; a new UTC day starts at zero.
   type View = { chains: Record<string, Record<string, unknown>> };
@@ -288,4 +294,160 @@ test("cron: watch-entry writes stay within a daily budget shared by both chains;
   assert.deepEqual([today.chains["eip155:1"]?.writes_today, today.chains["eip155:1"]?.dropped_today, today.chains["eip155:1"]?.status], [1, 1, "ok"]);
   const tomorrow = kitWatchStatus({ updated_at: new Date(T + 86_400_000).toISOString(), chains: { "eip155:1": tight.eth } }, T + 86_400_000) as View;
   assert.deepEqual([tomorrow.chains["eip155:1"]?.writes_today, tomorrow.chains["eip155:1"]?.dropped_today], [0, 0]);
+});
+
+// --- provider 0.6.4: the lease, the block batch, honest coverage, the authorization key ---
+
+test("cron lease: held for the whole run, so a concurrent run skips; released by the run's last write, after a throw too; a dead run's lease lapses", async () => {
+  const kv = seeded();
+  const stub = chainStub({});
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const gated = (async (url: string, init: RequestInit) => {
+    await gate;
+    return stub(url, init);
+  }) as unknown as typeof fetch;
+  const first = runKitWatch({ RATE: kv }, { fetchImpl: gated, now: T });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(kv.data.get(KW.lease), String(T), "the lease is taken before any RPC");
+  // 90 s later the first run is still going (a cron placed far from its RPCs): the second one skips.
+  assert.equal(await runKitWatch({ RATE: kv }, { fetchImpl: stub, now: T + 90_000 }), null);
+  open();
+  const done = (await first) as KitWatchStats;
+  assert.equal(done.lease_released, T, "released by the stats it writes last");
+  assert.ok(await runKitWatch({ RATE: kv }, { fetchImpl: stub, now: T + 95_000 }), "a finished run's lease is free at once");
+
+  // A throw after the lease is taken still releases it.
+  const broken = seeded();
+  broken.data.set(KW.learned, "{}");
+  await assert.rejects(runKitWatch({ RATE: broken }, { fetchImpl: stub, now: T }));
+  assert.equal((JSON.parse(broken.data.get(KW.stats) as string) as KitWatchStats).lease_released, T);
+  broken.data.set(KW.learned, "[]");
+  assert.ok(await runKitWatch({ RATE: broken }, { fetchImpl: stub, now: T + 1_000 }));
+
+  // A run that died holds its lease until it lapses.
+  const dead = seeded();
+  dead.data.set(KW.lease, String(T - 60_000));
+  assert.equal(await runKitWatch({ RATE: dead }, { fetchImpl: stub, now: T }), null);
+  assert.ok(await runKitWatch({ RATE: dead }, { fetchImpl: stub, now: T - 60_000 + LEASE_MS }));
+});
+
+test("cron: each chain's block batch carries over to its next run (no extra KV write)", async () => {
+  const kv = seeded();
+  const sizes: number[] = [];
+  const stub = chainStub({});
+  const logging = (async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Req | Req[];
+    if (Array.isArray(req) && req[0]?.method === "eth_getBlockByNumber") sizes.push(req.length);
+    return stub(url, init);
+  }) as unknown as typeof fetch;
+  const first = (await runKitWatch({ RATE: kv }, { fetchImpl: logging, now: T })) as KitWatchStats;
+  assert.equal(sizes[0], 2, "a first run starts small");
+  assert.equal(first.chains["eip155:1"]?.block_batch, 10, "small blocks grow the batch to the endpoints' limit");
+  const writes = kv.puts.length;
+  sizes.length = 0;
+  await runKitWatch({ RATE: kv }, { fetchImpl: logging, now: T + 60_000 });
+  assert.equal(sizes[0], 10, "the next run starts where the last one left off");
+  assert.equal(kv.puts.length - writes, writes, "the same writes per run as before");
+});
+
+test("coverage: stats from before 0.6.4 are migrated once: the reads dropped before 0.6.2 are holes, and unbroken coverage starts with the new code", async () => {
+  const kv = seeded();
+  const old: ChainStats = { cursor: 1000, head: 1002, last_run: "", scanned_blocks: 5000, flagged: {}, delegates: 0, gaps: [], gaps_total: 0, degraded: 9_884 };
+  kv.data.set(KW.stats, JSON.stringify({ updated_at: "", chains: { "eip155:1": old } }));
+  const st = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 1010 }), now: T })) as KitWatchStats;
+  const eth = st.chains["eip155:1"] as ChainStats;
+  assert.deepEqual([eth.gaps_total, eth.unbroken_since, eth.coverage_v], [LEGACY_DROPPED_READS["eip155:1"], 1001, COVERAGE_V]);
+  // A chain with no earlier stats has no legacy holes; its coverage starts with its first block.
+  assert.deepEqual([st.chains["eip155:8453"]?.gaps_total, st.chains["eip155:8453"]?.unbroken_since], [0, 500]);
+  assert.deepEqual(coverageOf(st), { complete_through: { "eip155:1": 1008, "eip155:8453": 589 }, gaps: { "eip155:1": 9_884 }, unbroken_since: { "eip155:1": 1001, "eip155:8453": 500 } });
+  // Once only.
+  const again = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 1010 }), now: T + 60_000 })) as KitWatchStats;
+  assert.deepEqual([again.chains["eip155:1"]?.gaps_total, again.chains["eip155:1"]?.unbroken_since], [9_884, 1001]);
+  // /status states where unbroken coverage starts.
+  const view = kitWatchStatus(again, Date.parse(again.updated_at)) as { chains: Record<string, Record<string, unknown>> };
+  assert.equal(view.chains["eip155:1"]?.unbroken_since, 1001);
+});
+
+test("coverage: a queued read abandoned after a day is a hole, and unbroken coverage restarts after its block", async () => {
+  const kv = seeded();
+  const nowS = T / 1000;
+  const eth: ChainStats = { cursor: 99, head: 101, last_run: "", scanned_blocks: 50, flagged: {}, delegates: 0, gaps: [], gaps_total: 0, unbroken_since: 50, coverage_v: COVERAGE_V };
+  kv.data.set(KW.stats, JSON.stringify({ updated_at: "", chains: { "eip155:1": eth } }));
+  const stale: PendingRead = { creation: { address: addr(0x31), deployer: addr(0x32), tx: "0x31", block: 95 }, t: 0x6000, q: nowS - 90_000 };
+  kv.data.set(KW.pending("eip155:1"), JSON.stringify([stale]));
+  const st = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({}), now: T })) as KitWatchStats;
+  assert.deepEqual([st.chains["eip155:1"]?.gaps_total, st.chains["eip155:1"]?.abandoned, st.chains["eip155:1"]?.unbroken_since], [1, 1, 96]);
+});
+
+test("scan: authorizations past the per-scan bound are counted as holes, never silently dropped", async () => {
+  const delegate = addr(0x500);
+  const tuples: RawAuthorization[] = Array.from({ length: 1001 }, (_, i) => ({ chainId: "0x1", address: delegate, nonce: `0x${i.toString(16)}`, yParity: "0x0", r: `0x${(i + 1).toString(16).padStart(64, "0")}`, s: `0x${"11".repeat(32)}` }));
+  const block: RawBlock = { number: "0x40", timestamp: "0x7000", transactions: [{ hash: "0xf1", from: addr(0x501), to: addr(0x501), nonce: "0x0", type: "0x4", authorizationList: tuples }] };
+  const act = addBlocks(newActivity(), [block], "eip155:1");
+  assert.deepEqual([act.authorizations.length, act.dropped, act.droppedBlock], [1000, 1, 0x40]);
+  const res = await scanActivity(act, { chain: "eip155:1", call: reading({ [delegate]: "0x" }), simulate: noSim, families: indexFamilies(null), delegates: new Map(), now: () => 1 });
+  assert.deepEqual(res.holes, { count: 1, block: 0x40 });
+});
+
+test("scan: a decoy reusing a real authorization's (r, s) for another delegate does not hide the real delegation (security review M2)", async () => {
+  const dSweep = addr(0xd5);
+  const dDecoy = addr(0xd6);
+  const me = signer.address.toLowerCase();
+  const families = indexFamilies({ updated_at: "", families: [fam("sweeper-z", "sweeper", kitCode(0x52, 97))] });
+  const real = await auth(dSweep);
+  const decoy: RawAuthorization = { ...real, address: dDecoy };
+  const block: RawBlock = { number: "0x50", timestamp: "0x7100", transactions: [{ hash: "0xe1", from: addr(0x777), to: addr(0x777), nonce: "0x0", type: "0x4", authorizationList: [decoy, real] }] };
+  const call = reading({ [dSweep]: kitCode(0x5a, 5), [dDecoy]: "0x", [me]: `0xef0100${dSweep.slice(2)}` });
+  const res = await scanBlocks([block], { chain: "eip155:1", call, simulate: noSim, families, delegates: new Map(), now: () => 1 });
+  assert.deepEqual(mergeEntries(res.entries).get(me), { k: "sweeper_delegation", c: "eip155:1", f: "sweeper-z", t: 0x7100, b: 0x50, x: "0xe1", d: dSweep }, "the victim is flagged");
+  // The same tuple repeated is still one authorization.
+  const replay: RawBlock = { ...block, transactions: [{ hash: "0xe2", from: addr(0x777), to: addr(0x777), nonce: "0x1", type: "0x4", authorizationList: [real, { ...real, nonce: "0x00", yParity: "0x00" }] }] };
+  assert.equal(addBlocks(newActivity(), [replay], "eip155:1").authorizations.length, 1);
+});
+
+test("scan: a delegate that could not be probed (budget spent, simulation down) leaves its authorizations queued with their first queue time", async () => {
+  const dFwd = addr(0xd7);
+  const me = signer.address.toLowerCase();
+  const fwdCode = `0x6080604052${"63aabbccdd17".repeat(20)}00`;
+  const block: RawBlock = { number: "0x60", timestamp: "0x7200", transactions: [{ hash: "0xe3", from: me, to: dFwd, nonce: "0x2", type: "0x4", authorizationList: [await auth(dFwd)] }] };
+  const delegates = new Map<string, DelegateVerdict>();
+  const deps = (simulate: SimulateCall, maxProbes: number, now: number): ScanDeps => ({ chain: "eip155:1", call: reading({ [dFwd]: fwdCode, [me]: `0xef0100${dFwd.slice(2)}` }), simulate, families: indexFamilies(null), delegates, maxProbes, now: () => now });
+  const noBudget = await scanBlocks([block], deps(forwarding, 0, 4_000_000));
+  assert.equal(delegates.get(dFwd)?.class, "unprobed");
+  assert.deepEqual([noBudget.pending.length, noBudget.stats.deferred], [1, 1], "not dropped: it waits for a probe");
+  const down = await rescanPending(noBudget.pending, deps(noSim, 6, 4_000_060));
+  assert.deepEqual([down.pending.length, down.pending[0]?.q, down.entries.length], [1, 4_000_000, 0], "simulation down: still waiting, with its first queue time");
+  const up = await rescanPending(down.pending, deps(forwarding, 6, 4_000_120));
+  assert.deepEqual([up.pending.length, mergeEntries(up.entries).get(me)?.k], [0, "forwarding_delegation"]);
+});
+
+test("scan: past the per-delegate bound, a threat's authorizations wait for a later scan instead of being dropped", async () => {
+  const dPoison = addr(0xd8);
+  const me = signer.address.toLowerCase();
+  const families = indexFamilies({ updated_at: "", families: [fam("poisoner-y", "poisoner", kitCode(0x53, 96))] });
+  const list = await Promise.all(Array.from({ length: 101 }, async (_, nonce) => {
+    const a = await signer.signAuthorization({ address: dPoison as `0x${string}`, chainId: 1, nonce });
+    return { chainId: "0x1", address: dPoison, nonce: `0x${nonce.toString(16)}`, yParity: `0x${(a.yParity ?? 0).toString(16)}`, r: a.r, s: a.s } as RawAuthorization;
+  }));
+  const block: RawBlock = { number: "0x70", timestamp: "0x7300", transactions: [{ hash: "0xe4", from: me, to: me, nonce: "0x3", type: "0x4", authorizationList: list }] };
+  const deps: ScanDeps = { chain: "eip155:1", call: reading({ [dPoison]: kitCode(0x5b, 6), [me]: `0xef0100${dPoison.slice(2)}` }), simulate: noSim, families, delegates: new Map(), now: () => 5_000_000 };
+  const first = await scanBlocks([block], deps);
+  assert.equal(mergeEntries(first.entries).get(me)?.k, "poisoner_delegation");
+  assert.deepEqual([first.pending.length, first.stats.deferred], [1, 1], "the 101st waits, it is not dropped");
+  const later = await rescanPending(first.pending, deps);
+  assert.deepEqual([later.pending.length, mergeEntries(later.entries).get(me)?.k], [0, "poisoner_delegation"]);
+});
+
+test("cron: a queued read the run could not evaluate is not counted as recovered", async () => {
+  const kv = seeded();
+  const nowS = T / 1000;
+  const dFwd = addr(0xd9);
+  const me = signer.address.toLowerCase();
+  kv.data.set(KW.delegates("eip155:1"), JSON.stringify({ [dFwd]: { class: "unprobed", at: nowS - 100, bytes: 120, code_kind: "tiny" } }));
+  const queued: PendingRead = { authorization: { delegate: dFwd, tx: "0xe5", block: 95, raw: await auth(dFwd) }, t: 0x6000, q: nowS - 100 };
+  kv.data.set(KW.pending("eip155:1"), JSON.stringify([queued]));
+  // The chain stub answers no simulation: the delegate cannot be probed this run.
+  const st = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ code: (a) => (a === me ? `0xef0100${dFwd.slice(2)}` : "0x") }), now: T })) as KitWatchStats;
+  assert.deepEqual([st.chains["eip155:1"]?.recovered, st.chains["eip155:1"]?.pending], [0, 1]);
 });

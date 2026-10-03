@@ -276,6 +276,8 @@ test("cron: scans from the cursor, writes watch entries, cursor and stats; a lea
   assert.equal(entry.k, "poisoner_delegation");
   assert.equal(stats.chains["eip155:1"]?.cursor, 99 + 15); // seeded by kw:cursor, then kept in the stats
   assert.equal(stats.chains["eip155:1"]?.flagged.poisoner_delegation, 1);
+  // A run in progress (its lease taken 5 s ago, not released yet) keeps a second run out.
+  kv.data.set(KW.lease, String(1_005_000));
   assert.equal(await runKitWatch(env, { fetchImpl, now: 1_010_000 }), null); // lease held
   // Lookups: EOA kinds on any chain, contract kinds only where they were seen.
   kv.data.set(KW.address(PAYEE), JSON.stringify({ k: "drainer_kit_contract", c: "eip155:1", f: "kit", t: 1 }));

@@ -1,4 +1,4 @@
-import { addBlocks, EOA_KINDS, indexFamilies, KIND_RANK, newActivity, rescanPending, scanActivity, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchCoverage, type KitWatchLookup, type PendingRead, type Registry, type ScanDeps, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
+import { addBlocks, authorizationKey, EOA_KINDS, indexFamilies, KIND_RANK, newActivity, rescanPending, scanActivity, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchCoverage, type KitWatchLookup, type PendingRead, type Registry, type ScanDeps, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
 import type { WorkerEnv } from "./runtime.js";
 
@@ -47,6 +47,26 @@ const PENDING_RETRY_PER_RUN = 100;
 export const PENDING_DEGRADED = 50;
 /** The cron runs every minute: stats older than 3 minutes mean the watch has stalled. */
 const KIT_WATCH_STALE_S = 180;
+/**
+ * A run holds the lease from its start until the stats it writes last record its release. A run
+ * that finds the lease held skips; a lease never released (a run that died) lapses after this.
+ * Runs take up to ~90 s when the cron is placed far from the RPC endpoints, so it is minutes, not
+ * the cron's cadence.
+ */
+export const LEASE_MS = 5 * 60 * 1000;
+/** Watch-entry reads and writes issued together (they are independent): wall time, not KV operations. */
+const WRITE_CHUNK = 50;
+/**
+ * The coverage accounting the stats follow (provider 0.6.4): every hole counted, and the start of
+ * the current unbroken coverage kept. Stats from before it are migrated once (`scanChain`).
+ */
+export const COVERAGE_V = 2;
+/**
+ * Code reads that failed before v0.6.2 and were dropped, never re-read: `degraded_reads` froze at
+ * these values at the v0.6.2 deploy (2026-10-02 15:15 UTC; no read failed after it). They are holes
+ * below `complete_through`, counted once when a chain's earlier stats are migrated.
+ */
+export const LEGACY_DROPPED_READS: Record<WatchChain, number> = { "eip155:1": 9_884, "eip155:8453": 2_090 };
 
 type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag: number };
 const PLAN: Record<WatchChain, ChainPlan> = {
@@ -66,8 +86,18 @@ export type ChainStats = {
   delegates: number;
   /** The last 10 ranges skipped after outages. */
   gaps: Array<{ from: number; to: number; at: string }>;
-  /** Every hole ever recorded: each range skipped (the list above keeps the last 10) and each read abandoned. */
+  /**
+   * Every hole ever recorded: each range skipped (the list above keeps the last 10), each read
+   * abandoned, each activity dropped past a bound, each watch entry the write caps left out, and
+   * (from the migration) the reads dropped before v0.6.2.
+   */
   gaps_total?: number;
+  /** The first block of the current unbroken coverage: every hole moves it past itself (since 0.6.4). */
+  unbroken_since?: number;
+  /** The coverage accounting these stats follow (COVERAGE_V); absent before 0.6.4. */
+  coverage_v?: number;
+  /** The block batch the scan last measured for this chain, so a run starts where the last one left off. */
+  block_batch?: number;
   /** Code reads that failed after the RPC's retries, each queued for a later run. */
   degraded?: number;
   /** Reads queued now, recovered from the queue, and abandoned (a day old, or the queue full). */
@@ -82,7 +112,8 @@ export type ChainStats = {
   dropped_today?: number;
   error?: string;
 };
-export type KitWatchStats = { updated_at: string; chains: Partial<Record<WatchChain, ChainStats>> };
+/** `lease_released`: the lease (its start time) the run that wrote these stats held and released. */
+export type KitWatchStats = { updated_at: string; chains: Partial<Record<WatchChain, ChainStats>>; lease_released?: number };
 
 /** Every hole in a chain's coverage (stats from before 0.6.2 have only the list). */
 export function gapCount(c: Pick<ChainStats, "gaps" | "gaps_total">): number {
@@ -94,49 +125,70 @@ async function readJson<T>(env: WorkerEnv, key: string, fallback: T): Promise<T>
   return raw ? (JSON.parse(raw) as T) : fallback;
 }
 
-const pendingKey = (p: PendingRead) => (p.creation ? `c:${p.creation.address}` : `a:${p.authorization?.raw.r}|${p.authorization?.raw.s}`);
+/** One queue entry per read: a creation by its address, an authorization by its whole signed tuple. */
+const pendingKey = (p: PendingRead) => (p.creation ? `c:${p.creation.address}` : p.authorization ? `a:${authorizationKey(p.authorization.raw)}` : "");
+const blockOf = (p: PendingRead) => (p.creation ?? p.authorization)?.block ?? -1;
+
+/** What a run reads for a chain before scanning it, in the run's one round of KV reads. */
+type ChainInputs = { delegatesRaw: string | null; queueRaw: string | null };
 
 /** One chain: queued reads, then cursor → scan → watchlist, delegates, learned families. */
-async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyIndex, stats: KitWatchStats, opts: { fetchImpl?: typeof fetch | undefined; now: number }): Promise<Family[]> {
+async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyIndex, stats: KitWatchStats, inputs: ChainInputs, opts: { fetchImpl?: typeof fetch | undefined; now: number }): Promise<Family[]> {
   const kv = env.RATE;
   if (!kv) return [];
   const plan = PLAN[chain];
-  const rpc = kitWatchRpc(chain, { timeoutMs: 15000, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
+  const prev: ChainStats = stats.chains[chain] ?? { cursor: 0, head: 0, last_run: "", scanned_blocks: 0, flagged: {}, delegates: 0, gaps: [] };
+  // The block batch starts where the last run's measurement left it.
+  const rpc = kitWatchRpc(chain, { timeoutMs: 15000, blockBatch: prev.block_batch, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
   const nowS = Math.floor(opts.now / 1000);
   const today = new Date(opts.now).toISOString().slice(0, 10);
-  const prev: ChainStats = stats.chains[chain] ?? { cursor: 0, head: 0, last_run: "", scanned_blocks: 0, flagged: {}, delegates: 0, gaps: [] };
   const head = (await rpc.head()) - plan.confirmations;
   // The cursor lives in the stats (one write per run); kw:cursor:<chain> only seeds it (backfill upload).
   const stored = prev.cursor > 0 ? prev.cursor : Number((await kv.get(KW.cursor(chain))) ?? Number.NaN);
   let from = Number.isFinite(stored) ? stored + 1 : head - plan.start + 1;
+
+  // Coverage is reported, never implied: every hole is counted, and the start of the current
+  // unbroken coverage moves past it. Stats from before this accounting are migrated once: the reads
+  // dropped before v0.6.2 become holes, and unbroken coverage starts with this run's first block.
+  const migrating = prev.coverage_v !== COVERAGE_V;
+  let holes = gapCount(prev) + (migrating && prev.scanned_blocks > 0 ? LEGACY_DROPPED_READS[chain] : 0);
+  let unbrokenSince = migrating ? from : (prev.unbroken_since ?? from);
+  const hole = (count: number, block: number) => {
+    if (count <= 0) return;
+    holes += count;
+    unbrokenSince = Math.max(unbrokenSince, block + 1);
+  };
   let gaps = prev.gaps;
-  let holes = gapCount(prev);
-  // Too far behind (an outage): skip ahead and record the gap; coverage is reported, not implied.
+  // Too far behind (an outage): skip ahead and record the gap.
   if (head - from > plan.maxLag) {
     gaps = [...gaps, { from, to: head - plan.maxLag, at: new Date(opts.now).toISOString() }].slice(-10);
-    holes++;
+    hole(1, head - plan.maxLag);
     from = head - plan.maxLag + 1;
   }
   const to = Math.min(head, from + plan.perRun - 1);
-  const delegates = new Map(Object.entries(await readJson<Record<string, DelegateVerdict>>(env, KW.delegates(chain), {})));
+  const delegates = new Map(Object.entries(inputs.delegatesRaw ? (JSON.parse(inputs.delegatesRaw) as Record<string, DelegateVerdict>) : {}));
   const delegatesBefore = JSON.stringify([...delegates]);
   const deps: ScanDeps = { chain, call: rpc.call, simulate: rpc.simulate, families, delegates, maxProbes: 6, now: () => nowS };
   const learned: Family[] = [];
   const entries: ScanResult["entries"] = [];
 
   // Reads that failed on earlier runs come first: a day-old one is abandoned, the rest are retried.
-  const queueBefore = (await kv.get(KW.pending(chain))) ?? "[]";
+  const queueBefore = inputs.queueRaw ?? "[]";
   const queued = JSON.parse(queueBefore) as PendingRead[];
   let queue = queued.filter((p) => nowS - p.q <= PENDING_TTL_S);
-  let abandoned = queued.length - queue.length;
+  const expired = queued.filter((p) => nowS - p.q > PENDING_TTL_S);
+  for (const p of expired) hole(1, blockOf(p));
+  let abandoned = expired.length;
   let recovered = 0;
   if (queue.length) {
     const retry = queue.slice(0, PENDING_RETRY_PER_RUN);
     const res = await rescanPending(retry, deps);
     entries.push(...res.entries);
     learned.push(...res.learned);
-    recovered = retry.length - res.pending.length;
+    // Recovered: only what this run evaluated; anything it could not is back in the queue.
+    recovered = Math.max(0, retry.length - new Set(res.pending.map(pendingKey)).size);
     queue = [...queue.slice(retry.length), ...res.pending];
+    hole(res.holes.count, res.holes.block);
   }
 
   let scanned = 0;
@@ -151,6 +203,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     scanned += act.blocks;
     degraded += res.stats.degraded;
     queue.push(...res.pending);
+    hole(res.holes.count, res.holes.block);
   }
   // One entry per read; a full queue gives way at its oldest reads.
   const seen = new Set<string>();
@@ -163,6 +216,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   if (queue.length > PENDING_MAX) {
     const oldest = new Set([...queue].sort((a, b) => a.q - b.q).slice(0, queue.length - PENDING_MAX));
     abandoned += oldest.size;
+    for (const p of oldest) hole(1, blockOf(p));
     queue = queue.filter((p) => !oldest.has(p));
   }
 
@@ -178,26 +232,48 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   let writes = prev.day === today ? (prev.writes_today ?? 0) : 0;
   let handled = 0;
   let dropped = 0;
-  for (const [address, entry] of ordered) {
-    const left = DAILY_WRITE_BUDGET - otherWrites - writes;
-    if (handled >= MAX_WRITES_PER_CHAIN || left <= 0 || (left <= RESERVED_WRITES && KIND_RANK[entry.k] < RESERVED_MIN_RANK)) {
-      dropped++;
-      continue;
+  // An entry the caps leave out is a hole too: a verdict on that address would not see it.
+  const drop = (entry: WatchEntry) => {
+    dropped++;
+    hole(1, entry.b ?? to);
+  };
+  // Most severe first, in chunks read and written together. Within a chunk the budget is checked
+  // as if every entry wrote, so it is never exceeded; KV operations stay one read per entry handled
+  // and one write per entry written.
+  for (let i = 0; i < ordered.length; ) {
+    const chunk: Array<[string, WatchEntry]> = [];
+    while (i < ordered.length && chunk.length < WRITE_CHUNK && handled + chunk.length < MAX_WRITES_PER_CHAIN) {
+      const pair = ordered[i++] as [string, WatchEntry];
+      const left = DAILY_WRITE_BUDGET - otherWrites - writes - chunk.length;
+      if (left <= 0 || (left <= RESERVED_WRITES && KIND_RANK[pair[1].k] < RESERVED_MIN_RANK)) drop(pair[1]);
+      else chunk.push(pair);
     }
-    handled++;
-    const existing = await kv.get(KW.address(address));
-    const old = existing ? (JSON.parse(existing) as WatchEntry) : null;
-    if (old && KIND_RANK[old.k] >= KIND_RANK[entry.k]) continue;
-    await kv.put(KW.address(address), JSON.stringify(old ? { ...entry, t: Math.min(old.t, entry.t) } : entry), { expirationTtl: WATCH_TTL_S });
-    writes++;
-    prev.flagged[entry.k] = (prev.flagged[entry.k] ?? 0) + 1;
+    if (!chunk.length) {
+      // The per-run cap is reached: what is left waits for no one, so it is counted.
+      if (handled >= MAX_WRITES_PER_CHAIN) while (i < ordered.length) drop((ordered[i++] as [string, WatchEntry])[1]);
+      break;
+    }
+    handled += chunk.length;
+    const olds = await Promise.all(chunk.map(([address]) => kv.get(KW.address(address))));
+    const puts: Array<Promise<void>> = [];
+    chunk.forEach(([address, entry], k) => {
+      const raw = olds[k];
+      const old = raw ? (JSON.parse(raw) as WatchEntry) : null;
+      if (old && KIND_RANK[old.k] >= KIND_RANK[entry.k]) return;
+      puts.push(kv.put(KW.address(address), JSON.stringify(old ? { ...entry, t: Math.min(old.t, entry.t) } : entry), { expirationTtl: WATCH_TTL_S }));
+      writes++;
+      prev.flagged[entry.k] = (prev.flagged[entry.k] ?? 0) + 1;
+    });
+    await Promise.all(puts);
   }
   // Benign verdicts expire (a delegate seen again is simply re-probed); malicious ones never do.
   const cutoff = nowS - DELEGATE_BENIGN_TTL_S;
   for (const [d, v] of delegates) if ((v.class === "not_forwarding" || v.class === "unprobed") && v.at < cutoff) delegates.delete(d);
-  if (JSON.stringify([...delegates]) !== delegatesBefore) await kv.put(KW.delegates(chain), JSON.stringify(Object.fromEntries(delegates)));
   const queueAfter = JSON.stringify(queue);
-  if (queueAfter !== queueBefore) await kv.put(KW.pending(chain), queueAfter);
+  await Promise.all([
+    JSON.stringify([...delegates]) !== delegatesBefore ? kv.put(KW.delegates(chain), JSON.stringify(Object.fromEntries(delegates))) : undefined,
+    queueAfter !== queueBefore ? kv.put(KW.pending(chain), queueAfter) : undefined,
+  ]);
   stats.chains[chain] = {
     ...prev,
     cursor: Math.max(to, prev.cursor, from - 1),
@@ -206,7 +282,10 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     scanned_blocks: prev.scanned_blocks + scanned,
     delegates: delegates.size,
     gaps,
-    gaps_total: holes + abandoned,
+    gaps_total: holes,
+    unbroken_since: unbrokenSince,
+    coverage_v: COVERAGE_V,
+    block_batch: rpc.blockBatchSize(),
     degraded: (prev.degraded ?? 0) + degraded,
     pending: queue.length,
     recovered: (prev.recovered ?? 0) + recovered,
@@ -216,28 +295,40 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     writes_today: writes,
     dropped_today: (prev.day === today ? (prev.dropped_today ?? 0) : 0) + dropped,
   };
-  if (degraded || abandoned || dropped) console.warn(`kit watch ${chain}: ${degraded} code reads queued, ${queue.length} pending, ${abandoned} abandoned, ${dropped} entries not written (caps)`);
+  if (degraded || abandoned || dropped || holes > gapCount(prev)) console.warn(`kit watch ${chain}: ${degraded} code reads queued, ${queue.length} pending, ${abandoned} abandoned, ${dropped} entries not written (caps), ${holes} holes in all`);
   delete stats.chains[chain]?.error;
   return learned;
 }
 
-/** The cron: both chains, bounded work per run; a lease keeps overlapping runs apart. */
+/** The cron: both chains, bounded work per run; a lease held for the whole run keeps runs apart. */
 export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fetch; now?: number } = {}): Promise<KitWatchStats | null> {
   const kv = env.RATE;
   if (!kv || env.KIT_WATCH === "off") return null;
   const now = opts.now ?? Date.now();
-  const lease = Number((await kv.get(KW.lease)) ?? 0);
-  if (now - lease < 30_000) return null;
-  await kv.put(KW.lease, String(now), { expirationTtl: 120 });
-  const registry = await readJson<Registry>(env, KW.registry, { updated_at: "", families: [] });
-  const learned = await readJson<Family[]>(env, KW.learned, []);
-  const families = indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] });
-  const stats = await readJson<KitWatchStats>(env, KW.stats, { updated_at: "", chains: {} });
-  const newlyLearned: Family[] = [];
+  // One round of KV reads for the whole run (a cron placed far away pays ~0.3 s per round): the
+  // lease, the stats, the families, and each chain's delegates and queue.
+  const [leaseRaw, statsRaw, registryRaw, learnedRaw, ...chainRaw] = await Promise.all([
+    kv.get(KW.lease),
+    kv.get(KW.stats),
+    kv.get(KW.registry),
+    kv.get(KW.learned),
+    ...WATCH_CHAINS.flatMap((c) => [kv.get(KW.delegates(c)), kv.get(KW.pending(c))]),
+  ]);
+  const stats: KitWatchStats = statsRaw ? (JSON.parse(statsRaw) as KitWatchStats) : { updated_at: "", chains: {} };
+  const lease = Number(leaseRaw ?? 0);
+  // Another run holds the lease until the stats it writes last record its release.
+  if (now - lease < LEASE_MS && stats.lease_released !== lease) return null;
+  await kv.put(KW.lease, String(now), { expirationTtl: LEASE_MS / 1000 });
+  // From here on the lease is released whatever happens (the stats write in `finally`).
   try {
-    for (const chain of WATCH_CHAINS) {
+    const registry: Registry = registryRaw ? (JSON.parse(registryRaw) as Registry) : { updated_at: "", families: [] };
+    const learned: Family[] = learnedRaw ? (JSON.parse(learnedRaw) as Family[]) : [];
+    const families = indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] });
+    const newlyLearned: Family[] = [];
+    for (const [i, chain] of WATCH_CHAINS.entries()) {
       try {
-        newlyLearned.push(...(await scanChain(env, chain, families, stats, { fetchImpl: opts.fetchImpl, now })));
+        const inputs = { delegatesRaw: chainRaw[2 * i] ?? null, queueRaw: chainRaw[2 * i + 1] ?? null };
+        newlyLearned.push(...(await scanChain(env, chain, families, stats, inputs, { fetchImpl: opts.fetchImpl, now })));
       } catch (err) {
         console.error(`kit watch ${chain} failed: ${String(err).slice(0, 200)}`);
         const prev = stats.chains[chain];
@@ -248,8 +339,10 @@ export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fet
     const fresh = newlyLearned.filter((f, i) => !learned.some((l) => l.id === f.id) && newlyLearned.findIndex((x) => x.id === f.id) === i);
     if (fresh.length) await kv.put(KW.learned, JSON.stringify([...learned, ...fresh]));
   } finally {
-    // The run is always recorded, so /status can tell a stalled watch from a quiet one.
+    // The run is always recorded, so /status can tell a stalled watch from a quiet one, and the
+    // lease is released with it (no extra write): the next run may start at once.
     stats.updated_at = new Date().toISOString();
+    stats.lease_released = now;
     await kv.put(KW.stats, JSON.stringify(stats));
   }
   return stats;
@@ -268,6 +361,7 @@ export function coverageOf(stats: KitWatchStats): KitWatchCoverage {
   const complete_through: Record<string, number> = {};
   const gaps: Record<string, number> = {};
   const pending: Record<string, number> = {};
+  const unbroken_since: Record<string, number> = {};
   for (const chain of WATCH_CHAINS) {
     const c = stats.chains[chain];
     if (!c || !(c.cursor > 0)) continue;
@@ -275,8 +369,15 @@ export function coverageOf(stats: KitWatchStats): KitWatchCoverage {
     const holes = gapCount(c);
     if (holes) gaps[chain] = holes;
     if (c.pending) pending[chain] = c.pending;
+    // Only stats that follow the full accounting state where unbroken coverage starts.
+    if (c.coverage_v === COVERAGE_V && typeof c.unbroken_since === "number" && c.unbroken_since > 0) unbroken_since[chain] = c.unbroken_since;
   }
-  return { complete_through, ...(Object.keys(gaps).length ? { gaps } : {}), ...(Object.keys(pending).length ? { pending } : {}) };
+  return {
+    complete_through,
+    ...(Object.keys(gaps).length ? { gaps } : {}),
+    ...(Object.keys(pending).length ? { pending } : {}),
+    ...(Object.keys(unbroken_since).length ? { unbroken_since } : {}),
+  };
 }
 
 /** The watch in /status: coverage and counts per chain, never an address. */
@@ -298,6 +399,7 @@ export function kitWatchStatus(st: KitWatchStats, nowMs: number): Record<string,
       flagged: c.flagged,
       delegates_classified: c.delegates,
       gaps: gapCount(c),
+      ...(c.coverage_v === COVERAGE_V && typeof c.unbroken_since === "number" ? { unbroken_since: c.unbroken_since } : {}),
       pending_reads: pending,
       ...(c.degraded ? { degraded_reads: c.degraded } : {}),
       ...(c.recovered ? { recovered_reads: c.recovered } : {}),

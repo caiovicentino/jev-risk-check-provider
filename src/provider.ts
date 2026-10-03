@@ -276,14 +276,21 @@ async function kitWatchEvidence(
 }
 
 /** The coverage clock for these chains (the ones the verdict consulted); nothing when unknown. */
-async function coverageFor(kw: KitWatchLookup, chains: readonly string[]): Promise<Pick<KitWatchEvidence, "complete_through" | "gaps" | "pending">> {
+async function coverageFor(kw: KitWatchLookup, chains: readonly string[]): Promise<Pick<KitWatchEvidence, "complete_through" | "gaps" | "pending" | "unbroken_since">> {
   const coverage = kw.coverage ? await kw.coverage().catch(() => undefined) : undefined;
   if (!coverage) return {};
   const pick = (m: Record<string, number> | undefined) => Object.fromEntries(chains.filter((c) => typeof m?.[c] === "number").map((c) => [c, m?.[c] as number]));
   const through = pick(coverage.complete_through);
   const gaps = pick(coverage.gaps);
   const pending = pick(coverage.pending);
-  return { ...(Object.keys(through).length ? { complete_through: through } : {}), ...(Object.keys(gaps).length ? { gaps } : {}), ...(Object.keys(pending).length ? { pending } : {}) };
+  // Where unbroken coverage starts, only for chains whose clock is stated.
+  const unbroken = Object.fromEntries(Object.entries(pick(coverage.unbroken_since)).filter(([c]) => c in through));
+  return {
+    ...(Object.keys(through).length ? { complete_through: through } : {}),
+    ...(Object.keys(gaps).length ? { gaps } : {}),
+    ...(Object.keys(pending).length ? { pending } : {}),
+    ...(Object.keys(unbroken).length ? { unbroken_since: unbroken } : {}),
+  };
 }
 
 type Verdict = { score: number; tier: RiskTier; categories: string[]; model: string; model_id?: string | undefined };
@@ -578,6 +585,7 @@ export class Provider {
               ...(kitWatch.complete_through ? { complete_through: kitWatch.complete_through } : {}),
               ...(kitWatch.gaps ? { gaps: kitWatch.gaps } : {}),
               ...(kitWatch.pending ? { pending: kitWatch.pending } : {}),
+              ...(kitWatch.unbroken_since ? { unbroken_since: kitWatch.unbroken_since } : {}),
             },
           }
         : {}),

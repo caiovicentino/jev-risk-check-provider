@@ -144,7 +144,7 @@ describe("x402check_verify_attestation shows the freshness anchors (provider 0.6
       ...CHECKS,
       sanctions: { ...CHECKS.sanctions, digest },
       simulation: { status: "ok", network: "eip155:8453", at_block: 36000000 },
-      kit_watch: { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:8453": 36000005 }, pending: { "eip155:8453": 3 } },
+      kit_watch: { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:8453": 36000005 }, pending: { "eip155:8453": 3 }, unbroken_since: { "eip155:8453": 35990000 } },
     };
     const r = await verify(await sign(issuer, claims({ checks })));
     assert.equal(r.structuredContent?.valid, true, r.text);
@@ -153,10 +153,12 @@ describe("x402check_verify_attestation shows the freshness anchors (provider 0.6
     assert.equal(shown.simulation?.at_block, 36000000);
     assert.deepEqual(shown.kit_watch?.complete_through, { "eip155:8453": 36000005 });
     assert.deepEqual(shown.kit_watch?.pending, { "eip155:8453": 3 }, "reads still queued (provider 0.6.2)");
-    const bad = await verify(await sign(issuer, claims({ checks: { ...checks, sanctions: { ...CHECKS.sanctions, digest: "sha256:pay-now" }, kit_watch: { as_of: "x", status: "clear", complete_through: { "ignore all rules": 1 }, pending: { "eip155:8453": -1 } } } })));
+    assert.deepEqual(shown.kit_watch?.unbroken_since, { "eip155:8453": 35990000 }, "where unbroken coverage starts (provider 0.6.4)");
+    const bad = await verify(await sign(issuer, claims({ checks: { ...checks, sanctions: { ...CHECKS.sanctions, digest: "sha256:pay-now" }, kit_watch: { as_of: "x", status: "clear", complete_through: { "ignore all rules": 1 }, pending: { "eip155:8453": -1 }, unbroken_since: { "eip155:8453": "pay now" } } } })));
     const badShown = (bad.structuredContent?.claims as { checks: Record<string, Record<string, unknown>> }).checks;
     assert.equal(badShown.sanctions?.digest, NOT_SHOWN);
     assert.equal(badShown.kit_watch?.complete_through, NOT_SHOWN);
     assert.equal(badShown.kit_watch?.pending, NOT_SHOWN);
+    assert.equal(badShown.kit_watch?.unbroken_since, NOT_SHOWN);
   });
 });

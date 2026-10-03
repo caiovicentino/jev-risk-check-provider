@@ -165,25 +165,51 @@ function rawAuthorization(a: RawAuthorization): RawAuthorization {
   return { chainId: a.chainId, address: a.address, nonce: a.nonce, ...(a.yParity !== undefined ? { yParity: a.yParity } : {}), ...(a.v !== undefined ? { v: a.v } : {}), r: a.r, s: a.s };
 }
 
+/** A hex quantity in one spelling ("0x01" and "0x1" are the same value); the raw text when it is not hex. */
+function quantity(v: string | undefined): string {
+  if (typeof v !== "string") return "";
+  try {
+    return BigInt(v).toString(16);
+  } catch {
+    return v.toLowerCase();
+  }
+}
+
+/**
+ * An authorization's identity: the whole signed tuple (chain id, delegate, nonce, parity, r, s).
+ * The same tuple repeated (a replay inside the attacker's own transaction) is one authorization,
+ * but a tuple that only shares (r, s) is another one: it names another delegate and recovers to
+ * another signer, so a decoy placed first can never hide a real delegation.
+ */
+export function authorizationKey(a: RawAuthorization): string {
+  return [quantity(a.chainId), a.address.toLowerCase(), quantity(a.nonce), quantity(a.yParity ?? a.v), quantity(a.r), quantity(a.s)].join("|");
+}
+
 /**
  * What a scan evaluates: its blocks' top-level creations and EIP-7702 authorizations, and the
  * blocks' times. It is small, so each block body can be dropped as soon as it has been added.
+ * Authorizations past the per-scan bound are not evaluated: they are counted (`dropped`, up to
+ * block `droppedBlock`) and become holes in the signed coverage, never a silent omission.
  */
-export type Activity = { blocks: number; creations: Creation[]; authorizations: Authorization[]; blockTime: Map<number, number>; signatures: Set<string> };
+export type Activity = { blocks: number; creations: Creation[]; authorizations: Authorization[]; blockTime: Map<number, number>; seen: Set<string>; dropped: number; droppedBlock: number };
 
 export function newActivity(): Activity {
-  return { blocks: 0, creations: [], authorizations: [], blockTime: new Map(), signatures: new Set() };
+  return { blocks: 0, creations: [], authorizations: [], blockTime: new Map(), seen: new Set(), dropped: 0, droppedBlock: -1 };
 }
 
 export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: WatchChain): Activity {
   for (const b of blocks) {
     const found = blockActivity(b, chain);
     act.creations.push(...found.creations);
-    // The same signed authorization repeated (a replay inside the attacker's own transaction) is one authorization.
     for (const a of found.authorizations) {
-      const key = `${a.raw.r}|${a.raw.s}`;
-      if (act.signatures.has(key) || act.authorizations.length >= MAX_AUTHORIZATIONS_PER_SCAN) continue;
-      act.signatures.add(key);
+      const key = authorizationKey(a.raw);
+      if (act.seen.has(key)) continue;
+      act.seen.add(key);
+      if (act.authorizations.length >= MAX_AUTHORIZATIONS_PER_SCAN) {
+        act.dropped++;
+        act.droppedBlock = Math.max(act.droppedBlock, a.block);
+        continue;
+      }
       act.authorizations.push(a);
     }
     act.blockTime.set(Number.parseInt(b.number, 16), Number.parseInt(b.timestamp, 16));
@@ -277,9 +303,15 @@ export type ScanResult = {
   entries: Array<{ address: string; entry: WatchEntry }>;
   /** Families the scan learned (auto-forwarding delegates): the caller adds them to the registry. */
   learned: Family[];
-  /** What failed reads kept the scan from evaluating: the caller queues it for a later run. */
+  /**
+   * What the scan could not evaluate yet: a failed read, a delegate it could not probe (the probe
+   * budget spent, the simulation down), authorizations past the per-delegate bound. The caller
+   * queues it for a later run.
+   */
   pending: PendingRead[];
-  stats: { blocks: number; creations: number; authorizations: number; delegates_new: number; probes: number; kit_contracts: number; flagged_authorities: number; degraded: number };
+  /** Activity the scan dropped unevaluated (past the per-scan bound): holes in the coverage, up to block `block`. */
+  holes: { count: number; block: number };
+  stats: { blocks: number; creations: number; authorizations: number; delegates_new: number; probes: number; kit_contracts: number; flagged_authorities: number; degraded: number; deferred: number };
 };
 
 const REPROBE_AFTER_S = 6 * 3600;
@@ -316,7 +348,7 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
   const learned: Family[] = [];
   const pending: PendingRead[] = [];
   const { creations, authorizations, blockTime } = act;
-  const stats: ScanResult["stats"] = { blocks: act.blocks, creations: creations.length, authorizations: authorizations.length, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0, degraded: 0 };
+  const stats: ScanResult["stats"] = { blocks: act.blocks, creations: creations.length, authorizations: authorizations.length, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0, degraded: 0, deferred: 0 };
   const seenAt = (block: number) => blockTime.get(block) ?? now();
   const isGuarded = (f: CodeFacts) => !!f.fingerprint && (deps.guarded?.has(f.fingerprint) ?? false);
   // Code that could not be read is unknown, never "no code": what it blocked is handed back.
@@ -365,14 +397,17 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
   const byDelegate = new Map<string, Authorization[]>();
   for (const a of authorizations) if (a.delegate !== ZERO) byDelegate.set(a.delegate, [...(byDelegate.get(a.delegate) ?? []), a]);
   for (const [delegate, auths] of byDelegate) {
-    // The authorizations evaluated per delegate, and queued when a failed read blocks them.
+    // The authorizations evaluated per delegate in one scan; the rest wait for a later one.
     const scope = auths.slice(0, MAX_FLAGGED_PER_DELEGATE);
+    const deferAll = () => {
+      for (const a of auths) defer({ authorization: a });
+    };
     let verdict = deps.delegates.get(delegate);
     if (!verdict) {
       const f = facts.get(delegate);
       // Its code could not be read: no verdict is cached, and its authorizations wait for the read.
       if (!f) {
-        for (const a of scope) defer({ authorization: a });
+        deferAll();
         continue;
       }
       stats.delegates_new++;
@@ -382,19 +417,24 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
       if (!family && (f.kind === "none" || f.kind === "delegated")) verdict = { class: "not_forwarding", at: now(), bytes: f.bytes, code_kind: f.kind, probes: MAX_PROBES_PER_DELEGATE };
       deps.delegates.set(delegate, verdict);
     }
-    const probeDue = (verdict.class === "unprobed" || reprobeDue(verdict)) && stats.probes < maxProbes;
+    const unprobed = verdict.class === "unprobed";
+    const probeDue = (unprobed || reprobeDue(verdict)) && stats.probes < maxProbes;
+    // A delegate still unprobed after this scan is unknown, never "not a threat": its
+    // authorizations wait for a scan with probe budget and a working simulation.
+    let unknownBehaviour = unprobed && !probeDue;
     if (probeDue) {
       const found = await firstDelegatedAuthority(auths, delegate, deps.call);
       // No authority could be read: an unprobed delegate's authorizations wait for the read.
-      if (found === "unread" && verdict.class === "unprobed") {
+      if (found === "unread" && unprobed) {
         stats.degraded++;
-        for (const a of scope) defer({ authorization: a });
+        deferAll();
         continue;
       }
       const authority = found === "unread" ? null : found;
       if (authority) {
         stats.probes++;
         const probe = await probeForwarding(deps.simulate, authority.address);
+        if (!probe && unprobed) unknownBehaviour = true;
         if (probe) {
           // Facts from this run, or those recorded with the verdict (an older verdict without a code kind never generalizes).
           const f = facts.get(delegate) ?? (verdict.bytes !== undefined ? ({ kind: verdict.code_kind, bytes: verdict.bytes } as unknown as CodeFacts) : undefined);
@@ -424,8 +464,18 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
         }
       }
     }
+    if (verdict.class === "unprobed" && unknownBehaviour) {
+      stats.deferred += auths.length;
+      deferAll();
+      continue;
+    }
     if (verdict.class === "not_forwarding" || verdict.class === "unprobed" || verdict.class === "drainer_kit") continue;
     const kind: WatchKind = verdict.class === "poisoner" ? "poisoner_delegation" : verdict.class === "sweeper" ? "sweeper_delegation" : "forwarding_delegation";
+    // Past the per-delegate bound, a threat's authorizations wait for a later scan (never dropped).
+    for (const a of auths.slice(MAX_FLAGGED_PER_DELEGATE)) {
+      stats.deferred++;
+      defer({ authorization: a });
+    }
     // Only authorities whose account delegates to it right now: a stale or replayed authorization flags no one.
     const recovered: Array<{ address: string; auth: Authorization }> = [];
     for (const a of scope) {
@@ -447,7 +497,7 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
       entries.push({ address, entry: { k: kind, c: deps.chain, f: verdict?.family ?? "", t: seenAt(auth.block), b: auth.block, x: auth.tx, d: delegate } });
     });
   }
-  return { entries, learned, pending, stats };
+  return { entries, learned, pending, holes: { count: act.dropped, block: act.droppedBlock }, stats };
 }
 
 /**
@@ -489,14 +539,17 @@ export const KIND_RANK: Record<WatchKind, number> = {
 
 /** Evaluation-time access to the kit watch (deploy/kit-watch.ts in production). */
 /**
- * The watch's coverage clock (since provider 0.6.1), per chain: the last block the scan read
- * (`complete_through`); the holes it ever recorded below it, each range skipped after an outage
- * and each code read abandoned after a day of retries (`gaps`, only when any); and the code reads
- * from scanned blocks still queued for retry (`pending`, since 0.6.2, only when any). Coverage
- * through `complete_through` is unbroken only when neither is present. Aggregates only: nothing
- * about what the watchlist holds.
+ * The watch's coverage clock (since provider 0.6.1), per chain:
+ * - `complete_through`: the last block the scan read;
+ * - `gaps` (only when any): every hole it ever recorded below it: a range skipped after an outage,
+ *   a read abandoned after a day of retries, activity dropped past a bound, a watch entry the write
+ *   caps left out, and the code reads dropped before v0.6.2 (counted since 0.6.4);
+ * - `pending` (since 0.6.2, only when any): reads from scanned blocks still queued for retry;
+ * - `unbroken_since` (since 0.6.4): the first block of the current unbroken coverage. No hole lies
+ *   in [`unbroken_since`, `complete_through`]; reads still queued (`pending`) may.
+ * Aggregates only: nothing about what the watchlist holds.
  */
-export type KitWatchCoverage = { complete_through: Record<string, number>; gaps?: Record<string, number>; pending?: Record<string, number> };
+export type KitWatchCoverage = { complete_through: Record<string, number>; gaps?: Record<string, number>; pending?: Record<string, number>; unbroken_since?: Record<string, number> };
 
 export type KitWatchLookup = {
   families(): Promise<FamilyIndex>;

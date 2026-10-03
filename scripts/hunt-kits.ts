@@ -44,7 +44,7 @@ export async function hunt(chain: WatchChain, from: number, to: number, opts: { 
   const segment = opts.segment ?? 50;
   const starts: number[] = opts.starts ? [...opts.starts] : [];
   if (!opts.starts) for (let n = from; n <= to; n += segment) starts.push(n);
-  const stats: ScanResult["stats"] = { blocks: 0, creations: 0, authorizations: 0, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0, degraded: 0 };
+  const stats: ScanResult["stats"] = { blocks: 0, creations: 0, authorizations: 0, delegates_new: 0, probes: 0, kit_contracts: 0, flagged_authorities: 0, degraded: 0, deferred: 0 };
   const all: ScanResult["entries"] = [];
   const learned: Family[] = [];
   const failedSegments: number[] = [];

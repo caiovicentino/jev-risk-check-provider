@@ -16,6 +16,8 @@ export type KitWatchRpc = {
   blocks: (from: number, to: number) => Promise<RawBlock[]>;
   /** The same, handed over batch by batch, so that each batch's bodies can be dropped once it is processed. */
   eachBlocks: (from: number, to: number, onBatch: (blocks: RawBlock[]) => void) => Promise<void>;
+  /** The block batch the next request would ask for (follows the blocks' size): the cron keeps it for its next run. */
+  blockBatchSize: () => number;
 };
 
 /** Reads per request. */
@@ -48,7 +50,7 @@ async function postBatch(doFetch: typeof fetch, url: string, requests: readonly 
   }
 }
 
-export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; timeoutMs?: number; batch?: number } = {}): KitWatchRpc {
+export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; timeoutMs?: number; batch?: number; blockBatch?: number | undefined } = {}): KitWatchRpc {
   const doFetch = opts.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => fetch(input, init));
   const readUrls = endpointsFor(chain, READ_ENDPOINTS, opts.rpc);
   const simUrls = endpointsFor(chain, SIMULATION_ENDPOINTS, opts.rpc);
@@ -56,8 +58,8 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   const timeoutMs = opts.timeoutMs ?? 20000;
   // Base's official RPC refuses batches over 10 calls.
   const maxBatch = opts.batch ?? 10;
-  // The first request is small; later ones follow the measured block size.
-  let blockBatch = Math.min(maxBatch, 2);
+  // The first request is small unless an earlier run measured the blocks; later ones follow the measured size.
+  let blockBatch = Math.min(maxBatch, Number.isSafeInteger(opts.blockBatch) && (opts.blockBatch as number) >= 1 ? (opts.blockBatch as number) : 2);
 
   // A read endpoint that failed or left holes is tried after the others for the rest of this run.
   const strikes = new Map<string, number>();
@@ -134,5 +136,5 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     return out;
   };
 
-  return { call, simulate, head, blocks, eachBlocks };
+  return { call, simulate, head, blocks, eachBlocks, blockBatchSize: () => blockBatch };
 }

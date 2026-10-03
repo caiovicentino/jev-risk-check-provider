@@ -69,8 +69,8 @@ export type AttestationChecks = {
   feeds?: string[] | undefined;
   /** `at_block` (since provider 0.6.1): the block whose state was simulated. */
   simulation?: { status: string; network?: string | undefined; findings?: string[] | undefined; at_block?: number | undefined } | undefined;
-  /** The kit watch, when it was consulted (since provider 0.6.1): its scan clock and coverage clock; `pending` since 0.6.2. */
-  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number> | undefined; gaps?: Record<string, number> | undefined; pending?: Record<string, number> | undefined } | undefined;
+  /** The kit watch, when it was consulted (since provider 0.6.1): its scan clock and coverage clock; `pending` since 0.6.2, `unbroken_since` since 0.6.4. */
+  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number> | undefined; gaps?: Record<string, number> | undefined; pending?: Record<string, number> | undefined; unbroken_since?: Record<string, number> | undefined } | undefined;
   model: string;
   /** The model revision that answered (the vendor's alias can change underneath). */
   model_id?: string | undefined;

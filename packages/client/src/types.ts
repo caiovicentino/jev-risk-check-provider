@@ -258,8 +258,10 @@ export interface KitWatchEvidence {
   complete_through?: Record<string, number>;
   /** Per chain, every hole recorded (ranges skipped after outages; since 0.6.2 also reads abandoned after a day), only when any (since provider 0.6.1). */
   gaps?: Record<string, number>;
-  /** Per chain, code reads from scanned blocks still queued for retry, only when any (since provider 0.6.2). Coverage through `complete_through` is unbroken only without `gaps` and `pending`. */
+  /** Per chain, code reads from scanned blocks still queued for retry, only when any (since provider 0.6.2). */
   pending?: Record<string, number>;
+  /** Per chain, the first block of the current unbroken coverage: no hole lies in [`unbroken_since`, `complete_through`]; queued reads (`pending`) may (since provider 0.6.4). Since 0.6.4 `gaps` also counts the reads dropped before 0.6.2. */
+  unbroken_since?: Record<string, number>;
   hits?: KitWatchHit[];
 }
 
@@ -316,8 +318,8 @@ export interface AttestationChecks {
   feeds?: string[];
   /** v0.3; `at_block`: the block whose state was simulated (since provider 0.6.1). */
   simulation?: { status: string; network?: string; findings?: string[]; at_block?: number };
-  /** The kit watch, when consulted: scan clock, status and coverage clock (since provider 0.6.1; `pending` since 0.6.2). */
-  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number>; gaps?: Record<string, number>; pending?: Record<string, number> };
+  /** The kit watch, when consulted: scan clock, status and coverage clock (since provider 0.6.1; `pending` since 0.6.2; `unbroken_since` since 0.6.4). */
+  kit_watch?: { as_of: string; status: string; complete_through?: Record<string, number>; gaps?: Record<string, number>; pending?: Record<string, number>; unbroken_since?: Record<string, number> };
   /** Question set, or "skipped" (e.g. deterministic sanctions verdict). */
   model: string;
   /** The model revision that answered, signed (since provider 0.6.0). */

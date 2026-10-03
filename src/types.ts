@@ -61,10 +61,12 @@ export type KitWatchEvidence = {
   status: "hit" | "clear" | "unavailable";
   /** The coverage clock (since provider 0.6.1): per chain, the last block the scan read. */
   complete_through?: Record<string, number>;
-  /** Per chain, every hole recorded: ranges skipped after outages and reads abandoned after a day (only when any). */
+  /** Per chain, every hole recorded: ranges skipped after outages, reads abandoned after a day, activity dropped past a bound, and (since 0.6.4) the reads dropped before v0.6.2 (only when any). */
   gaps?: Record<string, number>;
   /** Per chain, code reads from scanned blocks still queued for retry (since provider 0.6.2; only when any). */
   pending?: Record<string, number>;
+  /** Per chain, the first block of the current unbroken coverage: no hole in [unbroken_since, complete_through] (since provider 0.6.4). */
+  unbroken_since?: Record<string, number>;
   hits?: import("./kit-watch.js").KitWatchHit[];
 };
 
