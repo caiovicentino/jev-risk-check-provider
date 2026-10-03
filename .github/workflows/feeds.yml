@@ -4,11 +4,14 @@ name: feeds
 #
 # build:   regenerate the data with the repository scripts, test it, package it.
 #          Read-only token, no persisted credentials, no dependency install scripts.
-# publish: compare the new manifest with the published one and refuse an implausible
-#          change (scripts/feeds-guard.mjs, checked out from this run's commit, never
-#          taken from the artifact), then sign the manifest (Ed25519; the Worker pins the
-#          public key) and push it as the single commit of the `feeds` branch. Runs no
-#          dependency code at all: plain node and the runner's own tools.
+# publish: copy only the expected files out of the artifact into a fresh directory (never a
+#          .git, a hook, a symlink or anything else from a job that ran dependency code);
+#          compare the new manifest and OFAC address set with the published ones and refuse
+#          an implausible change or any delisting (scripts/feeds-guard.mjs, checked out from
+#          this run's commit, never taken from the artifact); then sign the manifest (Ed25519;
+#          the Worker pins the public key) and push the staged files as the single commit of
+#          the `feeds` branch, with git ignoring any inherited config, hook or fsmonitor. Runs
+#          no dependency code at all: plain node and the runner's own tools.
 # `main` is never modified. ScamSniffer (GPL) is never published here.
 #
 # Supply chain: every action is pinned to a full commit SHA (the comment names its
@@ -74,30 +77,55 @@ jobs:
         with:
           name: feeds
           path: feeds-out
-      - name: Refuse an implausible change (compared with the published manifest)
+      # Only these regular files leave the artifact, into a fresh directory: anything else in it
+      # (a planted .git, a hook, a symlink) is a refusal, and no name from it is ever printed.
+      - name: Stage the expected files
+        run: |
+          set -euo pipefail
+          expected="README.md manifest.json metamask-phishing.bin metamask.json ofac-sdn.json"
+          found=$(find feeds-out -mindepth 1 | sed 's|^feeds-out/|./|' | LC_ALL=C sort)
+          want=$(for f in $expected; do echo "./$f"; done | LC_ALL=C sort)
+          if [ "$found" != "$want" ]; then
+            echo "::error title=feeds publish::the artifact does not hold exactly the $(echo $expected | wc -w | tr -d ' ') expected files"
+            exit 1
+          fi
+          mkdir staged
+          for f in $expected; do
+            if [ -L "feeds-out/$f" ] || [ ! -f "feeds-out/$f" ]; then
+              echo "::error title=feeds publish::an expected file is not a regular file"
+              exit 1
+            fi
+            cp -- "feeds-out/$f" "staged/$f"
+          done
+      - name: Refuse an implausible change or a delisting (compared with the published release)
         env:
           GH_TOKEN: ${{ github.token }}
           FEEDS_GUARD_OVERRIDE: ${{ inputs.override && '1' || '' }}
-        # The API, not the raw CDN, which can serve a stale copy. No published manifest is a refusal.
+        # The API, not the raw CDN, which can serve a stale copy. Nothing published to compare with is a refusal.
         run: |
-          curl -fsS --retry 3 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github.raw" \
-            -o published-manifest.json "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/manifest.json?ref=feeds" \
-            || rm -f published-manifest.json
-          node trusted/scripts/feeds-guard.mjs feeds-out/manifest.json published-manifest.json
+          for f in manifest.json ofac-sdn.json; do
+            curl -fsS --retry 3 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github.raw" \
+              -o "published-$f" "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/$f?ref=feeds" \
+              || rm -f "published-$f"
+          done
+          node trusted/scripts/feeds-guard.mjs staged/manifest.json published-manifest.json staged/ofac-sdn.json published-ofac-sdn.json
       - name: Sign the manifest
         env:
           FEEDS_SIGNING_KEY: ${{ secrets.FEEDS_SIGNING_KEY }}
         run: |
-          node -e 'const c=require("node:crypto"),fs=require("node:fs");const key=c.createPrivateKey(process.env.FEEDS_SIGNING_KEY);const m=fs.readFileSync("feeds-out/manifest.json");fs.writeFileSync("feeds-out/manifest.sig",c.sign(null,m,key).toString("base64url"));'
+          node -e 'const c=require("node:crypto"),fs=require("node:fs");const key=c.createPrivateKey(process.env.FEEDS_SIGNING_KEY);const m=fs.readFileSync("staged/manifest.json");fs.writeFileSync("staged/manifest.sig",c.sign(null,m,key).toString("base64url"),{flag:"wx"});'
       - name: Publish to the feeds branch
+        working-directory: staged
         env:
           GH_TOKEN: ${{ github.token }}
+          # No system or global git config: only what this step passes with -c applies.
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
         run: |
-          cd feeds-out
+          set -euo pipefail
+          git() { command git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" "$@"; }
           git init -q -b feeds
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add -- README.md manifest.json manifest.sig metamask-phishing.bin metamask.json ofac-sdn.json
           git commit -qm "feeds: $(jq -r '.metamask.as_of + " MetaMask, " + .ofac.publish_date + " OFAC"' manifest.json)"
           git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" feeds
           echo "published: $(jq -c '{metamask: .metamask.as_of, entries: .metamask.entries, ofac: .ofac.publish_date, addresses: .ofac.addresses}' manifest.json)"

@@ -4,10 +4,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { feedsGuard, LIMITS } from "../scripts/feeds-guard.mjs";
+import { createHash } from "node:crypto";
+import { feedsGuard, LIMITS, ofacSetGuard } from "../scripts/feeds-guard.mjs";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const PUBLISHED = {
@@ -96,13 +97,105 @@ test("the CLI: exit 0 to sign, 1 when refused, 0 with the reasons as warnings un
   assert.match(overridden.stdout, /^::warning title=feeds guard \(overridden\)::OFAC addresses shrank/m);
 });
 
+/** An ofac-sdn.json snapshot (exact text) and a manifest naming it. */
+function ofac(addresses: string[]) {
+  const text = JSON.stringify({ meta: { publish_date: "2026-10-01" }, rows: addresses.map((a, i) => [a, "ETH", i, "X"]) });
+  return { text, manifest: { ofac: { json_sha256: createHash("sha256").update(text).digest("hex") } } };
+}
+const A = "0x" + "a".repeat(40);
+const B = "0x" + "b".repeat(40);
+const C = "0x" + "c".repeat(40);
+
+test("OFAC address sets: additions pass; any published address missing from the new list is refused (counts only)", () => {
+  const before = ofac([A, B]);
+  assert.deepEqual(ofacSetGuard(ofac([A, B, C]).manifest, before.manifest, ofac([A, B, C]).text, before.text), []);
+  // A tampered build that drops one sanctioned address and adds a junk one keeps the count: still refused.
+  const swapped = ofac([A, C]);
+  const reasons = ofacSetGuard(swapped.manifest, before.manifest, swapped.text, before.text);
+  assert.deepEqual(reasons, ["OFAC: 1 address(es) of the published list are missing from the new one (a delisting must be reviewed; publish it with override)"]);
+  assert.ok(!reasons.join(" ").includes(B), "no address is ever printed");
+});
+
+test("OFAC address sets fail closed: each snapshot must be the one its manifest names, and well formed", () => {
+  const before = ofac([A, B]);
+  const next = ofac([A, B]);
+  assert.deepEqual(ofacSetGuard(next.manifest, before.manifest, null, before.text), ["new OFAC snapshot: missing, or not the one the manifest names"]);
+  assert.deepEqual(ofacSetGuard(before.manifest, before.manifest, next.text.replace("ETH", "XBT"), before.text), ["new OFAC snapshot: missing, or not the one the manifest names"]);
+  assert.deepEqual(ofacSetGuard(next.manifest, before.manifest, next.text, null), ["no published OFAC snapshot to compare with"]);
+  assert.deepEqual(ofacSetGuard(next.manifest, ofac([A]).manifest, next.text, before.text), ["published OFAC snapshot: not the one the published manifest names"]);
+  const bad = '{"rows":[[1,"ETH",0,"X"]]}';
+  assert.deepEqual(ofacSetGuard({ ofac: { json_sha256: createHash("sha256").update(bad).digest("hex") } }, before.manifest, bad, before.text), ["new OFAC snapshot: malformed rows"]);
+});
+
+test("the CLI with both OFAC snapshots refuses a delisting and passes an addition", () => {
+  const dir = mkdtempSync(join(tmpdir(), "feeds-guard-ofac-"));
+  const write = (name: string, value: string) => {
+    writeFileSync(join(dir, name), value);
+    return join(dir, name);
+  };
+  const before = ofac([A, B]);
+  const after = ofac([A, B, C]);
+  const dropped = ofac([A, C]);
+  const published = write("published.json", JSON.stringify({ ...PUBLISHED, ofac: { ...PUBLISHED.ofac, ...before.manifest.ofac } }));
+  const run = (snapshot: { text: string; manifest: { ofac: { json_sha256: string } } }) => {
+    const m = next({ ofac: { ...snapshot.manifest.ofac } });
+    return spawnSync(process.execPath, ["scripts/feeds-guard.mjs", write("next.json", JSON.stringify(m)), published, write("next-ofac.json", snapshot.text), write("published-ofac.json", before.text)], { encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+  };
+  const ok = run(after);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /none delisted/);
+  const refused = run(dropped);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stdout, /^::error title=feeds guard::OFAC: 1 address\(es\) of the published list are missing/m);
+});
+
+test("the publish job's staging step takes exactly the expected regular files: a planted .git, a symlink or an extra file is refused", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/feeds.yml", import.meta.url), "utf8");
+  const step = workflow.slice(workflow.indexOf("- name: Stage the expected files"));
+  const script = step.slice(step.indexOf("run: |") + "run: |".length, step.indexOf("\n      - name:")).replace(/^ {10}/gm, "");
+  const expected = ["README.md", "manifest.json", "metamask-phishing.bin", "metamask.json", "ofac-sdn.json"];
+  const stage = (prepare: (out: string) => void) => {
+    const dir = mkdtempSync(join(tmpdir(), "feeds-stage-"));
+    const out = join(dir, "feeds-out");
+    mkdirSync(out);
+    for (const f of expected) writeFileSync(join(out, f), f);
+    prepare(out);
+    return { run: spawnSync("bash", ["-c", script], { cwd: dir, encoding: "utf8" }), dir };
+  };
+  const clean = stage(() => undefined);
+  assert.equal(clean.run.status, 0, clean.run.stdout + clean.run.stderr);
+  assert.deepEqual(readdirSync(join(clean.dir, "staged")).sort(), [...expected].sort());
+  const planted = stage((out) => {
+    mkdirSync(join(out, ".git"));
+    writeFileSync(join(out, ".git", "config"), "[core]\n\tfsmonitor = touch pwned\n");
+  });
+  assert.equal(planted.run.status, 1);
+  assert.match(planted.run.stdout, /does not hold exactly the 5 expected files/);
+  assert.ok(!existsSync(join(planted.dir, "staged")), "nothing staged");
+  const linked = stage((out) => {
+    rmSync(join(out, "README.md"));
+    symlinkSync("/etc/hosts", join(out, "README.md"));
+  });
+  assert.equal(linked.run.status, 1);
+  assert.match(linked.run.stdout, /not a regular file/);
+  const extra = stage((out) => writeFileSync(join(out, "extra.txt"), "x"));
+  assert.equal(extra.run.status, 1);
+});
+
 test("the workflow runs the guard from its own checkout before signing, with plain node and SHA-pinned actions", () => {
   const workflow = readFileSync(new URL("../.github/workflows/feeds.yml", import.meta.url), "utf8");
   const publish = workflow.slice(workflow.indexOf("\n  publish:"));
   assert.ok(publish.length > 0 && publish.length < workflow.length, "the publish job");
-  const guard = publish.indexOf("node trusted/scripts/feeds-guard.mjs feeds-out/manifest.json published-manifest.json");
+  const stage = publish.indexOf("name: Stage the expected files");
+  const guard = publish.indexOf("node trusted/scripts/feeds-guard.mjs staged/manifest.json published-manifest.json staged/ofac-sdn.json published-ofac-sdn.json");
   const sign = publish.indexOf("c.sign(null,");
-  assert.ok(guard > 0 && sign > guard, "the guard runs before the signing step");
+  assert.ok(stage > 0 && guard > stage && sign > guard, "stage, then the guard, then the signing step");
+  // Git never runs over the artifact: only over the staged copies, with no inherited config, hook or fsmonitor.
+  assert.match(publish, /working-directory: staged/);
+  assert.match(publish, /GIT_CONFIG_NOSYSTEM: "1"\n\s+GIT_CONFIG_GLOBAL: \/dev\/null/);
+  assert.match(publish, /-c core\.fsmonitor=false -c core\.hooksPath=\/dev\/null/);
+  assert.doesNotMatch(publish, /git add -A|cd feeds-out/);
+  assert.match(publish, /readFileSync\("staged\/manifest\.json"\)/);
   assert.match(publish, /sparse-checkout: scripts\/feeds-guard\.mjs\n\s+sparse-checkout-cone-mode: false\n\s+path: trusted/);
   assert.doesNotMatch(publish, /npm (ci|install)|npx /, "nothing is installed in the publish job");
   for (const [, ref] of workflow.matchAll(/uses: [\w.-]+\/[\w.-]+@(\S+)/g)) assert.match(ref ?? "", /^[0-9a-f]{40}$/, "pinned to a commit SHA");
