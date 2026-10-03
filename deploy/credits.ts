@@ -63,7 +63,8 @@ export class CreditLedger {
 
 /** The credit token in `Authorization: Bearer x402c_…`, if any. */
 export function creditToken(request: Request): string | null {
-  const m = /^Bearer\s+(x402c_[A-Za-z0-9_-]{43})$/.exec(request.headers.get("authorization")?.trim() ?? "");
+  // The scheme is case-insensitive (RFC 9110: "bearer" is "Bearer"); the token itself is not.
+  const m = /^[Bb][Ee][Aa][Rr][Ee][Rr]\s+(x402c_[A-Za-z0-9_-]{43})$/.exec(request.headers.get("authorization")?.trim() ?? "");
   return m ? (m[1] as string) : null;
 }
 
@@ -309,7 +310,7 @@ async function buyPack(env: WorkerEnv, stack: Stack, result: Extract<HTTPProcess
   await admission.finish("settled");
   const receipt = settlementReceipt(settle.headers);
   // One on-chain transaction buys one pack, even if a facilitator confirms it twice.
-  if (await settlementReused(env, receipt)) {
+  if (await settlementReused(env, receipt, String((result.paymentRequirements as { network?: unknown }).network ?? ""))) {
     console.error("settlement transaction reused on /v1/credits");
     return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already bought a pack; sign a new payment" });
   }

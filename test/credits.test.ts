@@ -21,7 +21,7 @@ function payloadOf(ctx: { adapter?: { getHeader(name: string): string | undefine
   } catch {
     // fall through to a default payer
   }
-  return { payload: { authorization: { from: "0x1111111111111111111111111111111111111111", nonce: "0x01" } } };
+  return { accepted: { scheme: "exact", network: "eip155:8453" }, payload: { authorization: { from: "0x1111111111111111111111111111111111111111", nonce: "0x01" } } };
 }
 
 /** A PAYMENT-SIGNATURE shaped like x402 v2 (the stack only accepts v2 payments). */

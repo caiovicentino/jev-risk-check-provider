@@ -437,6 +437,28 @@ function buildDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): { d
   return { deps, keyStatus };
 }
 
+/**
+ * The SVM scheme fills each challenge with a recent blockhash from a public Solana RPC, a call with
+ * no timeout: a slow RPC would stall every 402, on every network. Past SVM_BLOCKHASH_WAIT_MS the
+ * challenge goes out without it (an x402 client then fetches its own), with the fee payer as before.
+ */
+const SVM_BLOCKHASH_WAIT_MS = 800;
+export class BoundedSvmScheme extends ExactSvmScheme {
+  override async enhancePaymentRequirements(...args: Parameters<ExactSvmScheme["enhancePaymentRequirements"]>): ReturnType<ExactSvmScheme["enhancePaymentRequirements"]> {
+    const [requirements, kind] = args;
+    const withoutBlockhash = { ...requirements, extra: { ...requirements.extra, feePayer: (kind as { extra?: { feePayer?: unknown } }).extra?.feePayer } };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<typeof withoutBlockhash>((resolve) => {
+      timer = setTimeout(() => resolve(withoutBlockhash), SVM_BLOCKHASH_WAIT_MS);
+    });
+    try {
+      return (await Promise.race([super.enhancePaymentRequirements(...args), late])) as Awaited<ReturnType<ExactSvmScheme["enhancePaymentRequirements"]>>;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>, routes: PaymentRoute[] | null = null): Stack {
   const { deps, keyStatus } = ensureDeps(env, feeds);
 
@@ -447,9 +469,9 @@ export function buildStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeed
   const resourceServer = new x402ResourceServer(facilitators);
   resourceServer.register("eip155:*", new ExactEvmScheme());
   // api.mainnet-beta.solana.com refuses Worker egress (src/rpc.ts): publicnode serves it.
-  resourceServer.register(SOLANA_MAINNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL_MAINNET ?? "https://solana-rpc.publicnode.com" }));
+  resourceServer.register(SOLANA_MAINNET, new BoundedSvmScheme({ rpcUrl: env.SOL_RPC_URL_MAINNET ?? "https://solana-rpc.publicnode.com" }));
   if (env.ENABLE_TESTNETS === "true") {
-    resourceServer.register(SOLANA_DEVNET, new ExactSvmScheme({ rpcUrl: env.SOL_RPC_URL ?? "https://api.devnet.solana.com" }));
+    resourceServer.register(SOLANA_DEVNET, new BoundedSvmScheme({ rpcUrl: env.SOL_RPC_URL ?? "https://api.devnet.solana.com" }));
   }
   return { deps, http: new x402HTTPResourceServer(resourceServer, paidRoutes(env, routes)), keyStatus };
 }
@@ -566,7 +588,7 @@ async function withRequestError(res: Response, error: Record<string, unknown> | 
   const headers = new Headers(res.headers);
   headers.set("content-type", "application/json");
   headers.delete("content-length");
-  return new Response(JSON.stringify({ ...body, request_error: { ...error, detail: "this body would be refused (422) once paid; it is never charged" } }), { status: res.status, headers });
+  return new Response(JSON.stringify({ ...body, request_error: { ...error, detail: `this body would be refused (${String(error.status ?? 422)}) once paid; it is never charged` } }), { status: res.status, headers });
 }
 
 function instructionsToResponse(instr: HTTPResponseInstructions): Response {
@@ -619,7 +641,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   // Prepaid credits: `Authorization: Bearer x402c_…` debits the balance instead of paying per call.
   const token = creditToken(request);
   if (token) return spendCredits(_env, token, path, parsed, () => serve(replay()), ctx);
-  if (request.headers.get("authorization")?.startsWith("Bearer ")) return json(401, { error: "invalid_credit_token" });
+  if (/^bearer\s/i.test(request.headers.get("authorization") ?? "")) return json(401, { error: "invalid_credit_token" });
 
   // 2. Every evaluation is paid (x402 v2, PAYMENT-SIGNATURE), priced per item and per
   //    payment network (pricing.ts: $0.0035 on Base), or $0.005 for an item whose
@@ -678,7 +700,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
       await admission.finish("settled");
       const receipt = settlementReceipt(settle.headers);
       // One on-chain transaction pays for one verdict, even if a facilitator confirms it twice.
-      if (await settlementReused(_env, receipt)) {
+      if (await settlementReused(_env, receipt, String((result.paymentRequirements as { network?: unknown }).network ?? ""))) {
         console.error(`settlement transaction reused on ${path}`);
         return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already paid for another request; sign a new payment" });
       }

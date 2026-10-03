@@ -100,47 +100,79 @@ function svmMessageBytes(base64: string): Uint8Array | null {
 }
 
 /**
- * A payment's identity, from what the payer actually signed, never from how the JSON is spelled:
+ * The one scheme payload a payment carries, for the route it was paid against: a Solana network
+ * takes only `transaction`; an EVM route takes `permit2Authorization` when it is a Permit2 route
+ * (`accepted.extra.assetTransferMethod`), else `authorization` (EIP-3009). Anything else is null,
+ * and refused: a facilitator verifies one of these and ignores the others, so a decoy object next
+ * to the real one must never be what the payer screen, single use or the validity window read.
+ * (`accepted` is one of our own requirements: x402 core matches it exactly.)
+ */
+export type SchemePayload =
+  | { kind: "eip3009"; network: string; asset: string; from: string; nonce: string; validBefore: unknown }
+  | { kind: "permit2"; network: string; from: string; nonce: string; deadline: unknown }
+  | { kind: "svm"; network: string; transaction: string };
+
+const SCHEME_KEYS = ["authorization", "permit2Authorization", "transaction"] as const;
+
+export function paymentScheme(paymentPayload: unknown): SchemePayload | null {
+  const pp = paymentPayload as { accepted?: { network?: unknown; asset?: unknown; extra?: { assetTransferMethod?: unknown } | null }; payload?: unknown } | null;
+  const p = pp?.payload as Record<string, unknown> | undefined;
+  if (!pp || !p || typeof p !== "object" || Array.isArray(p)) return null;
+  const network = typeof pp.accepted?.network === "string" ? pp.accepted.network : "";
+  const present = SCHEME_KEYS.filter((k) => Object.hasOwn(p, k));
+  if (present.length !== 1) return null;
+  const key = present[0];
+  if (network.startsWith("solana:")) {
+    return key === "transaction" && typeof p.transaction === "string" ? { kind: "svm", network, transaction: p.transaction } : null;
+  }
+  if (!network.startsWith("eip155:")) return null;
+  if (pp.accepted?.extra?.assetTransferMethod === "permit2") {
+    const a = key === "permit2Authorization" ? (p.permit2Authorization as { from?: unknown; nonce?: unknown; deadline?: unknown } | null) : null;
+    if (!a || typeof a !== "object" || typeof a.from !== "string" || !(typeof a.nonce === "string" || typeof a.nonce === "number")) return null;
+    let nonce: string;
+    try {
+      nonce = BigInt(a.nonce).toString();
+    } catch {
+      return null;
+    }
+    return { kind: "permit2", network, from: a.from, nonce, deadline: a.deadline };
+  }
+  const a = key === "authorization" ? (p.authorization as { from?: unknown; nonce?: unknown; validBefore?: unknown } | null) : null;
+  if (!a || typeof a !== "object" || typeof a.from !== "string" || typeof a.nonce !== "string") return null;
+  return { kind: "eip3009", network, asset: String(pp.accepted?.asset ?? ""), from: a.from, nonce: a.nonce, validBefore: a.validBefore };
+}
+
+/**
+ * A payment's identity, from what the payer signed, never from how the JSON is spelled:
  * key order, whitespace, extra fields, hex case or base64 padding all name the same payment.
  * - EIP-3009: network, asset, payer and nonce (one authorization per nonce);
  * - Permit2: network, owner and nonce (Permit2 nonces are single-use per owner);
  * - Solana: the transaction message bytes (the fee payer signs the rest).
- * Null for a payload the claim cannot identify: such a payment is refused, not let through.
+ * Null for a payload `paymentScheme` refuses: such a payment is refused, not let through.
  */
 export async function paymentIdentity(paymentPayload: unknown): Promise<string | null> {
-  const pp = paymentPayload as { accepted?: { network?: unknown; asset?: unknown }; payload?: Record<string, unknown> } | null;
-  const p = pp?.payload;
-  if (!pp || !p || typeof p !== "object") return null;
-  const network = String(pp.accepted?.network ?? "").toLowerCase();
-  const auth = p["authorization"] as { from?: unknown; nonce?: unknown } | undefined;
-  if (auth && typeof auth.from === "string" && typeof auth.nonce === "string") {
-    return sha256Hex(`eip3009|${network}|${String(pp.accepted?.asset ?? "").toLowerCase()}|${auth.from.toLowerCase()}|${auth.nonce.toLowerCase()}`);
-  }
-  const permit = p["permit2Authorization"] as { from?: unknown; nonce?: unknown } | undefined;
-  if (permit && typeof permit.from === "string" && (typeof permit.nonce === "string" || typeof permit.nonce === "number")) {
-    let nonce: string;
-    try {
-      nonce = BigInt(permit.nonce).toString();
-    } catch {
-      return null;
-    }
-    return sha256Hex(`permit2|${network}|${permit.from.toLowerCase()}|${nonce}`);
-  }
-  if (typeof p["transaction"] === "string") {
-    const message = svmMessageBytes(p["transaction"]);
-    if (!message) return null;
-    const prefix = new TextEncoder().encode(`svm|${network}|`);
-    const material = new Uint8Array(prefix.length + message.length);
-    material.set(prefix);
-    material.set(message, prefix.length);
-    return sha256Hex(material);
-  }
-  return null;
+  const s = paymentScheme(paymentPayload);
+  if (!s) return null;
+  const network = s.network.toLowerCase();
+  if (s.kind === "eip3009") return sha256Hex(`eip3009|${network}|${s.asset.toLowerCase()}|${s.from.toLowerCase()}|${s.nonce.toLowerCase()}`);
+  if (s.kind === "permit2") return sha256Hex(`permit2|${network}|${s.from.toLowerCase()}|${s.nonce}`);
+  const message = svmMessageBytes(s.transaction);
+  if (!message) return null;
+  const prefix = new TextEncoder().encode(`svm|${network}|`);
+  const material = new Uint8Array(prefix.length + message.length);
+  material.set(prefix);
+  material.set(message, prefix.length);
+  return sha256Hex(material);
 }
 
-/** A settlement's identity: one on-chain transaction is never two payments. */
+/**
+ * A settlement's identity: one on-chain transaction is never two payments. `network` is the
+ * requirement the payment matched (not what the facilitator reports); an EVM hash is lowercased,
+ * a Solana signature (base58, case-sensitive) is kept as is.
+ */
 export async function settlementIdentity(network: string, transaction: string): Promise<string> {
-  return sha256Hex(`tx|${network.toLowerCase()}|${transaction.toLowerCase()}`);
+  const tx = /^0x[0-9a-fA-F]+$/.test(transaction) ? transaction.toLowerCase() : transaction;
+  return sha256Hex(`tx|${network.toLowerCase()}|${tx}`);
 }
 
 /** The x402 protocol version a PAYMENT-SIGNATURE declares (null when it does not decode). */

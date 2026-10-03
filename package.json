@@ -49,6 +49,7 @@
     "wrangler": "4.145.0"
   },
   "dependencies": {
+    "@noble/curves": "1.9.1",
     "@noble/hashes": "2.4.0",
     "@x402/core": "^2.27.0",
     "@x402/evm": "^2.27.0",

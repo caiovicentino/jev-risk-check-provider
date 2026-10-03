@@ -427,3 +427,114 @@ test("only public key members are published: a next key pasted with its private 
   assert.equal(leaked.jwks.some((k) => k.kid === "jev-attest-v9" || "d" in k), false);
   assert.equal(leaked.did.some((k) => k.kid === "jev-attest-v9" || "d" in k), false);
 });
+
+// The 2026-10-03 security review: a decoy scheme object next to the real one (H1), a payer with
+// a wrong EIP-55 checksum (M1), facilitator-side refusals (L3), a Solana delegate paying from
+// someone else's account (L4).
+import { paymentScheme, settlementIdentity } from "../deploy/payment-claims.js";
+import { payerRefusal } from "../deploy/http-util.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import { createTransferCheckedInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+
+const soon = () => String(Math.floor(Date.now() / 1000) + 300);
+const permit2Route = { scheme: "exact", network: "eip155:143", extra: { assetTransferMethod: "permit2" } };
+const eip3009Route = { scheme: "exact", network: "eip155:8453" };
+const solanaRoute = { scheme: "exact", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" };
+
+test("H1: exactly one scheme payload, the one the route takes: a decoy next to it is refused before any work", async () => {
+  const permit = { from: USER, nonce: "77", deadline: soon(), permitted: { token: "0x0", amount: "1000" }, spender: "0x0", witness: {} };
+  const decoy = { from: "0x2222222222222222222222222222222222222222", nonce: "0x99", validBefore: soon() };
+  assert.equal(paymentScheme({ accepted: permit2Route, payload: { signature: "0x01", permit2Authorization: permit } })?.kind, "permit2");
+  assert.equal(paymentScheme({ accepted: permit2Route, payload: { signature: "0x01", permit2Authorization: permit, authorization: decoy } }), null, "decoy next to Permit2");
+  assert.equal(paymentScheme({ accepted: permit2Route, payload: { signature: "0x01", authorization: decoy } }), null, "EIP-3009 on a Permit2 route");
+  assert.equal(paymentScheme({ accepted: eip3009Route, payload: { signature: "0x01", permit2Authorization: permit } }), null, "Permit2 on an EIP-3009 route");
+  assert.equal(paymentScheme({ accepted: solanaRoute, payload: { transaction: "AQ==", authorization: decoy } }), null, "decoy next to a Solana transaction");
+  assert.equal(paymentScheme({ accepted: solanaRoute, payload: { authorization: decoy } }), null, "EVM payload on a Solana route");
+
+  const env = claimsEnv();
+  const s = stack(USER, { ok: true, tx: "0xh1", settled: 0 });
+  const calls = { n: 0 };
+  const header = encode({ x402Version: 2, accepted: permit2Route, payload: { signature: "0x01", permit2Authorization: permit, authorization: decoy } });
+  const res = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header }), env, s, evaluate(s, calls));
+  assert.equal(res.status, 402);
+  assert.equal(((await res.json()) as { error: string }).error, "payment_unrecognized");
+  assert.equal(calls.n, 0, "never evaluated");
+});
+
+test("M1: an SDN-listed payer with a wrong EIP-55 checksum is still screened as listed", async () => {
+  const listed = OFAC_SDN_ADDRESSES.find(([a]) => /^0x[0-9a-f]{40}$/.test(a) && /[a-f]/.test(a))?.[0] as string;
+  const i = [...listed].findIndex((c, k) => k > 1 && /[a-f]/.test(c));
+  const flipped = listed.slice(0, i) + (listed[i] as string).toUpperCase() + listed.slice(i + 1);
+  const s = stack(flipped, { ok: true, tx: "0xm1", settled: 0 });
+  const calls = { n: 0 };
+  const res = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(flipped, "0x0m1") }), claimsEnv(), s, evaluate(s, calls));
+  assert.equal(res.status, 403);
+  assert.equal(calls.n, 0);
+});
+
+test("L3: only refusals the payer is answerable for count against the payer", () => {
+  for (const r of ["insufficient_funds", "invalid_exact_evm_insufficient_balance", "invalid_exact_evm_signature", "invalid_exact_evm_nonce_already_used", "invalid_exact_evm_payload_authorization_valid_before", "invalid_exact_evm_recipient_mismatch"]) assert.equal(payerRefusal(r), true, r);
+  for (const r of ["settlement_pending", "invalid_exact_evm_transaction_failed", "post_settlement_transfer_not_confirmed", "invalid_transaction_state", "unexpected_settle_error", "something_new", undefined]) assert.equal(payerRefusal(r), false, String(r));
+});
+
+test("L4: a Solana payment is admitted only from the payer's own token account; a delegate's is refused", async () => {
+  const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+  const feePayer = Keypair.generate();
+  const payer = Keypair.generate();
+  const owner = Keypair.generate(); // someone else, whose account the delegate would spend
+  const merchant = getAssociatedTokenAddressSync(mint, Keypair.generate().publicKey);
+  const wire = (source: PublicKey) => {
+    const tx = new Transaction({ feePayer: feePayer.publicKey, recentBlockhash: "11111111111111111111111111111111" });
+    tx.add(createTransferCheckedInstruction(source, mint, merchant, payer.publicKey, 3500n, 6, [], TOKEN_PROGRAM_ID));
+    tx.partialSign(payer);
+    return tx.serialize({ requireAllSignatures: false }).toString("base64");
+  };
+  const header = (tx: string) => encode({ x402Version: 2, accepted: solanaRoute, payload: { transaction: tx } });
+  const svmStack = (): Stack => {
+    const st = stack(USER, { ok: true, tx: `sig${Math.random()}`, settled: 0 });
+    // The Solana payload as-is: the mock stack's EVM default must not be filled in.
+    (st as unknown as { http: { processHTTPRequest: (c: HTTPRequestContext) => Promise<unknown> } }).http.processHTTPRequest = async (ctx: HTTPRequestContext) => {
+      const h = ctx.adapter.getHeader("PAYMENT-SIGNATURE");
+      return h ? { type: "payment-verified", paymentPayload: JSON.parse(atob(h)) as unknown, paymentRequirements: { network: solanaRoute.network } } : { type: "payment-error", response: { status: 402, headers: {}, body: {} } };
+    };
+    return st;
+  };
+  const own = svmStack();
+  const ok = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header(wire(getAssociatedTokenAddressSync(mint, payer.publicKey))) }), claimsEnv(), own, evaluate(own));
+  assert.equal(ok.status, 200, "own associated token account");
+  const delegated = svmStack();
+  const calls = { n: 0 };
+  const refused = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header(wire(getAssociatedTokenAddressSync(mint, owner.publicKey))) }), claimsEnv(), delegated, evaluate(delegated, calls));
+  assert.equal(refused.status, 402);
+  assert.match(((await refused.json()) as { detail: string }).detail, /own associated token account/);
+  assert.equal(calls.n, 0);
+});
+
+test("a settlement's identity keeps a Solana signature's case and lowercases an EVM hash", async () => {
+  assert.notEqual(await settlementIdentity("solana:x", "AbC"), await settlementIdentity("solana:x", "abc"));
+  assert.equal(await settlementIdentity("eip155:8453", "0xABC"), await settlementIdentity("eip155:8453", "0xabc"));
+});
+
+test("a challenge never waits on a slow Solana RPC, and never echoes the query string", async () => {
+  const { BoundedSvmScheme } = await import("../deploy/protected.js");
+  const { fetchAdapter } = await import("../deploy/http-util.js");
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
+    String(input instanceof Request ? input.url : input).includes("slow-solana.example") ? new Promise<Response>(() => undefined) : realFetch(input, init)) as typeof fetch;
+  try {
+    const scheme = new BoundedSvmScheme({ rpcUrl: "https://slow-solana.example" });
+    const started = Date.now();
+    const out = await scheme.enhancePaymentRequirements(
+      { scheme: "exact", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", amount: "2000", asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", payTo: "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X", maxTimeoutSeconds: 300, extra: {} } as never,
+      { x402Version: 2, scheme: "exact", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", extra: { feePayer: "DeXterR2kQmVeQ5RZt9HjdWZNcJRRBjZD5YWFYxB64JU" } } as never,
+      [],
+    );
+    assert.ok(Date.now() - started < 2000, "bounded");
+    assert.equal((out.extra as { feePayer?: string }).feePayer, "DeXterR2kQmVeQ5RZt9HjdWZNcJRRBjZD5YWFYxB64JU");
+    assert.equal((out.extra as { recentBlockhash?: string }).recentBlockhash, undefined);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const adapter = fetchAdapter(new Request("https://x402check.xyz/v1/risk-check?utm=1&x=%3Cscript%3E", { method: "POST" }), {});
+  assert.equal(adapter.getUrl(), "https://x402check.xyz/v1/risk-check");
+});

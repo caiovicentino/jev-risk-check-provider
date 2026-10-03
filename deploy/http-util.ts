@@ -2,7 +2,8 @@ import type { HTTPAdapter } from "@x402/core/http";
 import { decodeSolanaMessage } from "../packages/client/src/solana.js";
 import { parseSubject } from "../src/address.js";
 import { screenSubject } from "../src/sanctions.js";
-import { acquirePayerSlot, claimPayment, paymentIdentity, paymentVersion, RETENTION_MS, settlementIdentity } from "./payment-claims.js";
+import { acquirePayerSlot, claimPayment, paymentIdentity, paymentScheme, paymentVersion, RETENTION_MS, settlementIdentity } from "./payment-claims.js";
+import { isAssociatedTokenAccount } from "./svm-ata.js";
 import type { WorkerEnv } from "./runtime.js";
 
 // Small HTTP helpers shared by the paywall (deploy/protected.ts) and credits (deploy/credits.ts).
@@ -20,7 +21,12 @@ export function fetchAdapter(request: Request, body: unknown): HTTPAdapter {
     },
     getMethod: () => request.method,
     getPath: () => new URL(request.url).pathname,
-    getUrl: () => request.url,
+    // The resource a challenge names is the route itself: a query string is never echoed into it
+    // (nor into a catalog listing built from a paid request).
+    getUrl: () => {
+      const u = new URL(request.url);
+      return `${u.origin}${u.pathname}`;
+    },
     getAcceptHeader: () => request.headers.get("accept") ?? "*/*",
     getUserAgent: () => request.headers.get("user-agent") ?? "",
     getBody: () => body,
@@ -83,18 +89,29 @@ export function settlementReceipt(headers: Record<string, string>): { network: s
 
 /** Who pays: the EIP-3009 or Permit2 `from`, or the Solana transfer's authority (null when unknown). */
 export function payerOf(paymentPayload: unknown): string | null {
-  const p = (paymentPayload as { payload?: Record<string, unknown> } | null)?.payload;
-  if (!p || typeof p !== "object") return null;
-  const from = (p["authorization"] as { from?: unknown } | undefined)?.from ?? (p["permit2Authorization"] as { from?: unknown } | undefined)?.from;
-  if (typeof from === "string") return from;
-  const tx = p["transaction"];
-  return typeof tx === "string" ? svmTransferAuthority(tx) : null;
+  const read = readPayer(paymentPayload);
+  return "payer" in read ? read.payer : null;
+}
+
+/**
+ * The paying wallet of the one scheme payload (`paymentScheme`): the EIP-3009 or Permit2 `from`,
+ * or a Solana transfer's authority, accepted only when the transfer's source is the authority's
+ * own associated token account (a delegate paying from someone else's account would be screened
+ * instead of the owner of the funds).
+ */
+export function readPayer(paymentPayload: unknown): { payer: string } | { error: "unrecognized" | "not_owner_account" } {
+  const s = paymentScheme(paymentPayload);
+  if (!s) return { error: "unrecognized" };
+  if (s.kind !== "svm") return { payer: s.from };
+  const t = svmTransfer(s.transaction);
+  if (!t) return { error: "unrecognized" };
+  return isAssociatedTokenAccount(t.source, t.authority, t.mint, t.program) ? { payer: t.authority } : { error: "not_owner_account" };
 }
 
 const TOKEN_PROGRAMS = new Set(["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]);
 
-/** The authority of the (first) TransferChecked in a base64 wire transaction: the x402 SVM payer. */
-function svmTransferAuthority(base64: string): string | null {
+/** The (first) TransferChecked in a base64 wire transaction: source, mint, authority, token program. */
+function svmTransfer(base64: string): { source: string; mint: string; authority: string; program: string } | null {
   try {
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
     // compact-u16 signature count, then 64 bytes per signature, then the message.
@@ -109,8 +126,9 @@ function svmTransferAuthority(base64: string): string | null {
     for (const ix of message.instructions) {
       const program = message.staticAccounts[ix.programIndex];
       if (program && TOKEN_PROGRAMS.has(program) && ix.data[0] === 12) {
-        const authority = message.staticAccounts[ix.accounts[3] ?? -1];
-        if (authority) return authority;
+        // TransferChecked accounts: source, mint, destination, authority.
+        const [source, mint, authority] = [ix.accounts[0], ix.accounts[1], ix.accounts[3]].map((i) => message.staticAccounts[i ?? -1]);
+        return source && mint && authority ? { source, mint, authority, program } : null;
       }
     }
   } catch {
@@ -121,8 +139,17 @@ function svmTransferAuthority(base64: string): string | null {
 
 /** Whether a payer is on the OFAC SDN list (exact address or the same key in another encoding). */
 export function sanctionedPayer(payer: string | null): boolean {
-  const subject = payer ? parseSubject(payer) : null;
+  const subject = payer ? payerSubject(payer) : null;
   return !!subject && screenSubject(subject).status === "listed";
+}
+
+/**
+ * A payer as a subject. An EVM payer is taken lowercase: its EIP-55 checksum is the facilitator's
+ * business (a Permit2 `from` is not inside the signed message), and a wrong one must never turn a
+ * listed address into an unparseable, unscreened one.
+ */
+function payerSubject(payer: string): ReturnType<typeof parseSubject> {
+  return parseSubject(/^0x[0-9a-fA-F]{40}$/.test(payer) ? payer.toLowerCase() : payer);
 }
 
 /**
@@ -139,8 +166,8 @@ const MIN_VALIDITY_S = 60;
 
 /** When the signed authorization stops being settleable (EIP-3009 validBefore, Permit2 deadline), in seconds. */
 function expiresAt(paymentPayload: unknown): number | null {
-  const p = (paymentPayload as { payload?: Record<string, unknown> } | null)?.payload;
-  const raw = (p?.["authorization"] as { validBefore?: unknown } | undefined)?.validBefore ?? (p?.["permit2Authorization"] as { deadline?: unknown } | undefined)?.deadline;
+  const s = paymentScheme(paymentPayload);
+  const raw = s?.kind === "eip3009" ? s.validBefore : s?.kind === "permit2" ? s.deadline : undefined;
   const n = typeof raw === "string" || typeof raw === "number" ? Number(raw) : Number.NaN;
   return Number.isFinite(n) ? n : null;
 }
@@ -159,18 +186,24 @@ export type Admission = { ok: true; id: string; finish: (outcome: PaymentOutcome
  * - the payment is claimed once, by what its payer signed, however it is re-encoded.
  */
 export async function admitPayment(env: WorkerEnv, paymentPayload: unknown): Promise<Admission> {
-  const payer = payerOf(paymentPayload);
-  // A payer that cannot be read (a transaction format the decoder does not know yet) cannot be
-  // screened: no service is sold to a wallet that was not screened.
-  if (!payer) return { ok: false, response: json(402, { error: "payment_unrecognized", detail: "the paying wallet could not be read from the payment; nothing was charged" }) };
-  if (sanctionedPayer(payer)) return { ok: false, response: json(403, { error: "payer_sanctioned", detail: "the paying wallet is on the OFAC SDN list; nothing was charged" }) };
+  // Exactly one scheme payload, for the route paid on; a payer that cannot be read (a transaction
+  // format the decoder does not know yet) cannot be screened: no service is sold unscreened.
+  const read = readPayer(paymentPayload);
+  if ("error" in read) {
+    const detail = read.error === "not_owner_account" ? "pay from the paying wallet's own associated token account; nothing was charged" : "the payment must carry exactly one scheme payload for the route it pays (EIP-3009 authorization, Permit2 authorization or Solana transaction) with a readable paying wallet; nothing was charged";
+    return { ok: false, response: json(402, { error: "payment_unrecognized", detail }) };
+  }
+  const subject = payerSubject(read.payer);
+  if (!subject) return { ok: false, response: json(402, { error: "payment_unrecognized", detail: "the paying wallet could not be read from the payment; nothing was charged" }) };
+  if (screenSubject(subject).status === "listed") return { ok: false, response: json(403, { error: "payer_sanctioned", detail: "the paying wallet is on the OFAC SDN list; nothing was charged" }) };
+  const payer = subject.canonical;
   const expiry = expiresAt(paymentPayload);
   const now = Math.floor(Date.now() / 1000);
   if (expiry !== null && expiry < now + MIN_VALIDITY_S) {
     return { ok: false, response: json(402, { error: "authorization_expires_too_soon", detail: `sign an authorization valid for at least ${MIN_VALIDITY_S} s more; nothing was charged` }) };
   }
   if (expiry !== null && expiry > now + RETENTION_MS / 1000) {
-    return { ok: false, response: json(402, { error: "authorization_valid_too_long", detail: "sign an authorization that expires within 24 hours (the challenge's maxTimeoutSeconds); nothing was charged" }) };
+    return { ok: false, response: json(402, { error: "authorization_valid_too_long", detail: "sign an authorization that expires within 24 hours (the challenge asks for maxTimeoutSeconds); nothing was charged" }) };
   }
   const slot = await acquirePayerSlot(env, payer);
   if (!slot.ok) {
@@ -200,20 +233,24 @@ export async function admitPayment(env: WorkerEnv, paymentPayload: unknown): Pro
 }
 
 /**
- * A settlement the payer is answerable for: a definitive refusal (funds moved, nonce used, expired),
- * not our facilitator failing (timeouts and unexpected errors never count against a payer).
+ * A settlement refusal the payer is answerable for: funds missing, a bad or reused signature or
+ * nonce, an expired or not-yet-valid authorization, a wrong value or recipient, no Permit2
+ * allowance. Anything else (a pending or failed transaction, RPC trouble, an unknown reason) is
+ * the facilitator's or the chain's, and never counts against a payer.
  */
+const PAYER_REASONS = /insufficient|signature|nonce_already_used|nonce_used|valid_before|valid_after|deadline_expired|value_mismatch|authorization_value|recipient_mismatch|allowance_required/i;
 export function payerRefusal(reason: string | undefined): boolean {
-  return !!reason && !/unexpected|timeout|unavailable|facilitator|network_error|internal/i.test(reason);
+  return !!reason && PAYER_REASONS.test(reason);
 }
 
 /**
  * True when this settlement transaction was already used for another verdict or credit pack
  * (a facilitator that confirms an identical transaction twice): the caller then releases nothing.
  */
-export async function settlementReused(env: WorkerEnv, receipt: { network: string; transaction: string } | null): Promise<boolean> {
+export async function settlementReused(env: WorkerEnv, receipt: { network: string; transaction: string } | null, network?: string): Promise<boolean> {
   if (!receipt) return false;
-  const claim = await claimPayment(env, await settlementIdentity(receipt.network, receipt.transaction));
+  // Keyed on the requirement the payment matched when the caller knows it, not the network the facilitator reports.
+  const claim = await claimPayment(env, await settlementIdentity(network || receipt.network, receipt.transaction));
   if (claim.claimed) {
     await claim.settled();
     return false;
