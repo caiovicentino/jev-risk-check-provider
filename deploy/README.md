@@ -122,20 +122,24 @@ npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer do
 ```
 
 - OFAC and MetaMask are embedded **and** refreshed at runtime. `.github/workflows/feeds.yml` rebuilds them daily with a read-only token and no install scripts. A separate job signs the manifest with Ed25519 and publishes it to the `feeds` branch; the key is the `FEEDS_SIGNING_KEY` secret of the `feeds` environment.
-- Before signing, that job compares the new manifest with the published one (`scripts/feeds-guard.mjs`: plain node, checked out from the run's commit, never taken from the build artifact). It signs nothing when:
+- That job takes only the five expected regular files out of the build artifact, into a fresh directory: a `.git`, a symlink or any other entry fails the run. Git then runs only there, with no system or global config, `core.fsmonitor` off and hooks disabled.
+- Before signing, it compares the new release with the published one (`scripts/feeds-guard.mjs`: plain node, checked out from the run's commit, never taken from the build artifact). It signs nothing when:
   - OFAC addresses shrink by more than 5% or grow by more than 50%;
+  - **any published OFAC address is missing from the new list** (a delisting; counts only are printed);
   - MetaMask entries move by more than 20% either way;
   - a date goes backwards, or runs more than a day ahead;
-  - no published manifest can be read.
+  - no published manifest or OFAC snapshot can be read, or a snapshot is not the one its manifest names.
 
   The run then fails with `feeds guard` errors and the Worker keeps its lists. After reviewing the change, `gh workflow run feeds.yml -f override=true` publishes it anyway.
-- The Worker pins the public key (`FEEDS_PUBLIC_KEY` in `fresh-feeds.ts`) and checks hourly, in the background. A cold isolate waits up to 400 ms. It swaps in data only if all of these hold:
+- The Worker pins the public key (`FEEDS_PUBLIC_KEY` in `fresh-feeds.ts`) and checks hourly, in the background, OFAC before MetaMask. It swaps in data only if all of these hold:
   - the signature is valid;
   - the data is newer and dated no later than tomorrow;
   - it matches the manifest's SHA-256 and entry counts;
   - it has not shrunk sharply against the list in use.
 
   Otherwise it keeps the current list. `/status` shows which version is in use.
+- **OFAC on new isolates.** The last verified OFAC release is kept in KV (`feed:ofac:v1`: the signed manifest, its signature and the snapshot, re-verified with the pinned key on every load), written once per release and only forward. A new isolate applies it with one KV read before anything else. A paid request on a cold isolate waits up to 2.5 s for a current list; past that it goes ahead on the list it has (the attestation states its date), logs `a paid check went ahead on the … OFAC list` once, and the isolate stops waiting.
+- **The embedded snapshot** is what a brand-new isolate holds until then: `npx tsx scripts/sync-embedded-feeds.ts` refreshes `src/data/ofac-sdn.ts` from the published release (verified as the Worker verifies it), and `scripts/deploy.sh` refuses to deploy an older one.
 - **To rotate the publisher key,** generate a new Ed25519 key, store the PKCS#8 PEM with `gh secret set FEEDS_SIGNING_KEY --env feeds` (the environment only main may use), put the raw public key (base64url) in `FEEDS_PUBLIC_KEY`, deploy, then run the workflow (`gh workflow run feeds.yml`) so the branch carries a manifest signed with the new key. Until it does, the Worker keeps its current lists. Last rotated 2026-09-30.
 - ScamSniffer lives only in KV and is picked up within an hour. The Worker's cron rebuilds the domain and address sets at 05:37 and 17:37 UTC (`scamsniffer-refresh.ts`). It resolves the upstream commit first and reads both lists at that SHA; when GitHub does not answer, it reads `main` and records the fetch date and no commit. A list that halves, or grows by more than 50% or by more than 100,000 domains or 2,000 addresses since the last refresh, is refused: the previous sets stay and Workers Logs show `scamsniffer refresh kept the previous data: <reason>`. Addresses x402check never flags (`src/never-flag.ts`) are left out and counted in the meta's `never_flag_dropped`. The code set keeps its own date, `code_as_of`. `/status` marks the feed stale after 3 days without a refresh. The code fingerprints come from the listed addresses' runtime code on 7 EVM chains (about 2 minutes via publicnode), with the manual upload above.
 - Every attestation states the date and status of each list it consulted (`checks.sanctions`, `checks.feeds`).

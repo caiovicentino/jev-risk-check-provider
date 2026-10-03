@@ -79,10 +79,10 @@ One agent may hold several roles in one session. Know which lane you are working
 | `packages/client/src/decode/` | The Snap's decoders, **vendored**: never edit them there. Edit `snap/src`, then run `node scripts/sync-decoders.mjs`. `test/decoders-sync.test.ts` fails on drift. |
 | `snap/` | MetaMask Snap (preview). |
 | `eval/` | Evaluations and paid production probes. Reports go to `eval/evidence/`. `paid-fetch.ts` pays with the probe payer, `flags.ts` parses the scripts' flags, `redact.ts` writes ScamSniffer-only entries as hashes (every report writer that handles that data uses it), and `replay.ts` probes single-use payments. |
-| `scripts/` | `deploy.sh` (the only deploy path, §3.2), feed builders, `feeds-guard.mjs` (the feeds workflow's check before signing, plain node; §3.13), kit-watch tooling, `publish-npm.sh`, `verify-attest.ts` (the SDK's verifier as a CLI: `--request`, `--max-age`, key pinned), `redact-evidence.ts` (`--check`: no ScamSniffer-only entry in the reports), `payai-shadow.ts`. **Money scripts:** `x402-pay.ts`, `sol-treasury-transfer.ts`, `gen-payer-wallets.ts` (see §4). |
+| `scripts/` | `deploy.sh` (the only deploy path, §3.2), feed builders, `feeds-guard.mjs` (the feeds workflow's check before signing, plain node; §3.13), `sync-embedded-feeds.ts` (the embedded OFAC snapshot from the published release; `--check` for `deploy.sh`), kit-watch tooling, `publish-npm.sh`, `verify-attest.ts` (the SDK's verifier as a CLI: `--request`, `--max-age`, key pinned), `redact-evidence.ts` (`--check`: no ScamSniffer-only entry in the reports), `payai-shadow.ts`. **Money scripts:** `x402-pay.ts`, `sol-treasury-transfer.ts`, `gen-payer-wallets.ts` (see §4). |
 | `docs/` | `STRATEGY.md` (direction), `METHODOLOGY.md` (verdict rules), `EVIDENCE.md` (measurements). The rest are historical records: `DISTRIBUTION.md` holds superseded drafts, `PR-PLAN.md` dates from 2026-09-27, and the `EVIDENCE-*` files and `hackathon/` are older. |
 | `test/` | Provider tests (`npm test`). |
-| `.github/workflows/` | `ci.yml` (push to main and PRs: provider, Worker bundle dry-run, Snap with a manifest-vs-rebuild check, client and MCP, production `npm audit`), `feeds.yml` (daily at 05:17 UTC → the guard compares with the published manifest → signed → `feeds` branch), `publish-mcp-registry.yml` (tag `mcp-v*` → waits for green CI on that main commit → pinned, SHA-256-verified `mcp-publisher` → MCP Registry). Every action is pinned to a commit SHA and every token is least-privilege. |
+| `.github/workflows/` | `ci.yml` (push to main and PRs: provider, Worker bundle dry-run, Snap with a manifest-vs-rebuild check, client and MCP, production `npm audit`), `feeds.yml` (daily at 05:17 UTC → only the expected files are staged → the guard compares with the published release, OFAC address sets included → signed → `feeds` branch, with a hardened git), `publish-mcp-registry.yml` (tag `mcp-v*` → waits for green CI on that main commit → pinned, SHA-256-verified `mcp-publisher` → MCP Registry). Every action is pinned to a commit SHA and every token is least-privilege. |
 | `.github/dependabot.yml` | Monthly version-update PRs, grouped (npm for the root, `packages/client`, `packages/mcp` and `snap`, plus GitHub Actions); each major update gets its own PR. |
 | `SECURITY.md` | Vulnerability reporting (GitHub private reporting), scope, testing rules and the trust anchor. `/.well-known/security.txt` points to it. |
 | `AGENTS.md`, `CLAUDE.md` | This map. |
@@ -100,6 +100,7 @@ One agent may hold several roles in one session. Know which lane you are working
 | `GET /.well-known/did.json`, `/.well-known/jwks.json` | Attestation identity. |
 | `GET /` (browser) | The site, served with a strict CSP (its one inline script allowed by hash). `/og.png?v=0.5`, `/icon.png` and `/favicon.ico` are the images. |
 | `GET /.well-known/security.txt` | How to report a vulnerability (RFC 9116). |
+| `GET /llms.txt`, `GET /.well-known/x402`, `GET /sitemap.xml` | Discovery for agents and crawlers: `llms.txt` (llmstxt.org) and `/.well-known/x402` (x402scan's compatibility format, `{version: 1, resources}`) are built from the OpenAPI document, so they list the same routes, prices and fields. No A2A agent card: x402check is not an A2A agent. |
 
 Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every response carries HSTS, `nosniff` and a `Referrer-Policy`.
 
@@ -108,7 +109,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | System | Detail |
 |---|---|
 | Cloudflare | Worker `x402check`, deployed with `scripts/deploy.sh` (§3.2), using the wrangler pinned exactly in the root `devDependencies`. Workers Logs (`[observability]`) keep only the Worker's own error lines: invocation logs are off, so no request header (bearer token, `PAYMENT-SIGNATURE`) is stored. Zone settings (2026-09-30): minimum TLS 1.2, DNSSEC on (registrar: Cloudflare), CAA for the CAs Cloudflare issues with, SPF `v=spf1 -all` and DMARC `p=reject` (the domain sends no mail). Wrangler's OAuth token can only read the zone: zone changes need a zone-scoped API token from the owner. The zone is on the Free plan and Workers is on the **Paid** plan, which the cron needs (~250 ms of CPU per run, `cpu_ms = 30000`). |
-| KV `RATE` | Kit watch (`kw:a:*`, `kw:delegates:*`, `kw:registry`, `kw:learned`, `kw:stats`, `kw:lease`, `kw:cursor:*`, and `kw:pending:*`: work queued for a later run (failed reads, delegates not yet probed, authorizations past 100 per delegate), at most 500 per chain; the watch writes at most 25,000 entries a UTC day; `kw:lease` holds the running cron's start time until its stats release it), the ScamSniffer blobs (GPL, runtime only), settlement records (`st:<network>:<tx>`, kept 400 days, for reconciling against the chain), and credits queued after a ledger failure (`pc:<settlement>`, applied by the cron; they hold the token's SHA-256, never the token). |
+| KV `RATE` | Kit watch (`kw:a:*`, `kw:delegates:*`, `kw:registry`, `kw:learned`, `kw:stats`, `kw:lease`, `kw:cursor:*`, and `kw:pending:*`: work queued for a later run (failed reads, delegates not yet probed, authorizations past 100 per delegate), at most 500 per chain; the watch writes at most 25,000 entries a UTC day; `kw:lease` holds the running cron's start time until its stats release it), the ScamSniffer blobs (GPL, runtime only), the last verified OFAC release for new isolates (`feed:ofac:v1`: signed manifest, signature and snapshot, re-verified on every load, written once per release), settlement records (`st:<network>:<tx>`, kept 400 days, for reconciling against the chain), and credits queued after a ledger failure (`pc:<settlement>`, applied by the cron; they hold the token's SHA-256, never the token). |
 | Durable Object `CREDITS` | `CreditLedger`: one per credit token, named by the token's SHA-256. |
 | Durable Object `PAYMENT_CLAIMS` | `PaymentClaim` (migration `v4`). One object per payment, named by the SHA-256 of what the payer signed (EIP-3009: network, asset, payer, nonce; Permit2: network, owner, nonce; Solana: the message bytes), never by the JSON spelling: each payment is single-use and kept 24 h. One per settlement transaction (`tx|network|hash`): a transaction pays once. One per payer (`payer:<address>`): at most 8 payments in flight, and 5 settlement refusals an hour hold the payer back. |
 | Rate limit `UNPAID_LIMITER` | About 60 requests a minute per IP (Cloudflare's binding is approximate and counted per location: a short burst can pass) for unpaid requests to paid routes (or ones whose credential is malformed), balance reads (`GET /v1/credits`) and `/status`. |
@@ -189,7 +190,7 @@ Push to `main`, wait for CI, then:
 scripts/deploy.sh
 ```
 
-It refuses unless the tree is clean, HEAD is `main` on GitHub and CI passed on it. It installs the locked dependencies, deploys with the pinned wrangler, and sets `GIT_COMMIT`. A raw `wrangler deploy` is for emergencies only. To roll back, use `npx wrangler rollback`.
+It refuses unless the tree is clean, HEAD is `main` on GitHub, CI passed on it, and the embedded OFAC snapshot is not older than the published feeds release (run `npx tsx scripts/sync-embedded-feeds.ts`, commit and push first; `SKIP_FEEDS_CHECK=1` only in an emergency). It installs the locked dependencies without install scripts, deploys with the pinned wrangler, and sets `GIT_COMMIT`. A raw `wrangler deploy` is for emergencies only. To roll back, use `npx wrangler rollback`.
 
 Then verify:
 - `curl https://x402check.xyz/healthz` shows the version, the commit and `attestation_key: "ok"`;
@@ -201,9 +202,10 @@ Local dev uses **port 8799**: `npm run dev:worker`.
 ### 3.3 Release
 
 1. Bump the version in `src/provider.ts` (`PROVIDER_VERSION`), in `package.json`, and in `package-lock.json` (two root fields).
-2. Add a `CHANGELOG.md` entry, and update `README.md`, `docs/EVIDENCE.md`, `deploy/README.md` and this file as needed.
-3. Push, wait for CI, deploy (§3.2) and verify.
-4. `git tag -a vX.Y.Z`, push, then `gh release create vX.Y.Z --notes-file …`.
+2. Sync the embedded OFAC snapshot with the published release: `npx tsx scripts/sync-embedded-feeds.ts` (it verifies the release as the Worker does and rewrites `src/data/ofac-sdn.ts` only when the published one is newer). A brand-new isolate screens against it until KV or the network gives it a newer one, and `scripts/deploy.sh` refuses an older snapshot.
+3. Add a `CHANGELOG.md` entry, and update `README.md`, `docs/EVIDENCE.md`, `deploy/README.md` and this file as needed.
+4. Push, wait for CI, deploy (§3.2) and verify.
+5. `git tag -a vX.Y.Z`, push, then `gh release create vX.Y.Z --notes-file …`.
 
 ### 3.4 Evidence in production
 
@@ -299,11 +301,13 @@ Both refusals keep the data in use, so nothing breaks while you look.
 
 - **The feeds workflow (OFAC, MetaMask).** The `publish` job printed `feeds guard` errors and signed nothing. The bounds (`scripts/feeds-guard.mjs`):
   - OFAC addresses shrink by more than 5% or grow by more than 50%;
+  - any published OFAC address is missing from the new list (a delisting: only the count is printed);
   - MetaMask entries move by more than 20% either way;
   - a date goes backwards or runs more than a day ahead;
-  - no published manifest can be read.
+  - no published manifest or OFAC snapshot can be read, or a snapshot is not the one its manifest names.
 
-  Check the upstream change (OFAC's recent actions, the MetaMask repository's commits). If it is legitimate, for example an OFAC delisting, run `gh workflow run feeds.yml -f override=true`. If it is not, find what broke the build: never override blind.
+  Check the upstream change (OFAC's recent actions, the MetaMask repository's commits). If it is legitimate, for example an OFAC delisting (compare the two `ofac-sdn.json` locally to see which addresses), run `gh workflow run feeds.yml -f override=true`. If it is not, find what broke the build: never override blind.
+- **`feeds publish` errors** (the artifact "does not hold exactly the 5 expected files", or "an expected file is not a regular file"): the build produced something it never should (a `.git`, a symlink, an extra file). Nothing was signed or pushed. Treat it as a possible build compromise: inspect the build job's log and the dependencies it ran before re-running.
 - **The ScamSniffer refresh.** Workers Logs show `scamsniffer refresh kept the previous data: <reason>`: a list halved, or grew by more than 50% or by more than 100,000 domains or 2,000 addresses. Look at the upstream commit. If it is legitimate, for example a large import, run `npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload`, which has no growth bound.
 - **`scamsniffer lists N never-flag address(es)`** in the logs means the list named an address from `src/never-flag.ts`. It was left out, so nothing is blocked; find out which entry it was and why.
 
