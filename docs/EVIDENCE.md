@@ -374,6 +374,7 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run security:v5`: v0.5 prices, routing and prepaid credits (Worker `d9030314`, `security-v5-v0.5.0-report.json`) | **9/9 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack (one settlement) |
 | `npm run security:v5` on v0.5.1, settling through Coinbase CDP (Worker `08c5a2f6`) | **11/11 PASS** | 1 per call ($0.0035), then 2 from a $0.10 credit pack. Both settlements were sent by CDP signers |
 | `npm run security:v5` on v0.6.0 (commit `7d1e3ab`) | **11/11 PASS** | the same probes; per call 4,716 ms end to end, from credits 664 and 538 ms |
+| `npm run security:v5` on v0.6.3 (commit `f3516b1`, 2026-10-03) | **11/11 PASS** | the same probes after the evaluation release; per call 5,656 ms end to end (one sample), from credits 1,406 and 634 ms; both settlements by CDP |
 | `eval/replay.ts` on v0.6.0: three copies of one payment at once | **PASS** | one evaluated and settled; two `409 payment_already_used`; a later copy 409 |
 | `eval/replay.ts` on v0.6.2 (commit `c4a5f33`): four spellings of one payment at once (the original, an exact copy, every JSON key reversed, the nonce's hex upper-cased plus an extra field) | **PASS** | one evaluated and settled on Base (`0x6d7f4ac8…`): the re-spelled copy, which CDP accepted; the other three `409 payment_already_used`; a later copy 402 (the facilitator saw the nonce used). On v0.6.1 each spelling was its own claim (security review F1) |
 

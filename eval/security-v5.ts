@@ -8,10 +8,15 @@
 // Budget: one per-call check on Base ($0.0035) and one $0.10 credit pack, through
 // eval/paid-fetch.ts. Without a funded payer the paid probes are SKIP, never PASS. The credit
 // token is a secret: the report carries only a SHA-256 prefix of it.
+//
+// The pack tops up the probe credit token (~/.config/paysol/x402check-credit-token, or
+// PROBE_CREDIT_TOKEN_FILE) when there is one, so its checks stay usable by later probes; without
+// it a new token is minted and saved there (mode 600). Earlier runs discarded each new token.
 import { createHash } from "node:crypto";
 import { NETWORK_PRICES, SIMULATION_PRICE } from "../deploy/pricing.js";
 import { CREDIT_CHECK_PRICE } from "../deploy/credits.js";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { buildPayFetch, settlementReceipt, type PayFetch, type SettlementReceipt } from "./paid-fetch.js";
 
@@ -110,27 +115,42 @@ async function main(): Promise<void> {
   if (paid.status === 0 || paid.status === 402) add("per_call_base", null, `not paid (status ${paid.status}): fund the payer`);
   else add("per_call_base", paid.status === 200 && typeof paid.json?.jws === "string" && !!settlementReceipt(paid.headers)?.transaction, `HTTP ${paid.status} score=${String(paid.json?.score)} ${paid.ms} ms end to end (402, payment, evaluation, settlement)`);
 
-  const bought = await call("POST", "/v1/credits", { amount_usd: 0.1 }, { paid: true });
-  const token = typeof bought.json?.token === "string" ? bought.json.token : "";
+  // Top up the probe token when there is one (its checks stay usable); otherwise mint and keep a new one.
+  const tokenFile = process.env.PROBE_CREDIT_TOKEN_FILE ?? `${homedir()}/.config/paysol/x402check-credit-token`;
+  const existing = existsSync(tokenFile) ? readFileSync(tokenFile, "utf8").trim() : "";
+  const probeToken = /^x402c_[A-Za-z0-9_-]{43}$/.test(existing) ? existing : "";
+  const usd = (v: unknown) => (typeof v === "string" && /^\$\d+(\.\d+)?$/.test(v) ? Math.round(Number(v.slice(1)) * 1e6) : Number.NaN);
+  const fmt = (micro: number) => `$${(micro / 1e6).toFixed(3).replace(/0$/, "")}`;
+  const before = probeToken ? usd((await call("GET", "/v1/credits", undefined, { headers: { Authorization: `Bearer ${probeToken}` } })).json?.balance_usd) : 0;
+  const bought = await call("POST", "/v1/credits", { amount_usd: 0.1 }, { paid: true, ...(probeToken ? { headers: { Authorization: `Bearer ${probeToken}` } } : {}) });
+  const minted = typeof bought.json?.token === "string" ? bought.json.token : "";
+  if (minted && !probeToken) writeFileSync(tokenFile, `${minted}\n`, { mode: 0o600 });
+  const token = probeToken || minted;
   const hashed = token ? `sha256:${createHash("sha256").update(token).digest("hex").slice(0, 12)}` : "none";
-  if (bought.status === 0 || (bought.status === 402 && !token)) add("credits_buy", null, `not paid (status ${bought.status})`);
-  else add("credits_buy", bought.status === 200 && /^x402c_[A-Za-z0-9_-]{43}$/.test(token) && bought.json?.balance_usd === "$0.10" && !!settlementReceipt(bought.headers)?.transaction, `HTTP ${bought.status} token ${hashed} balance=${String(bought.json?.balance_usd)} (one settlement for 100 checks)`);
+  const credited = usd(bought.json?.balance_usd);
+  if (bought.status === 0 || (bought.status === 402 && !minted && !probeToken)) add("credits_buy", null, `not paid (status ${bought.status})`);
+  else add("credits_buy", bought.status === 200 && /^x402c_[A-Za-z0-9_-]{43}$/.test(token) && credited === before + 100_000 && !!settlementReceipt(bought.headers)?.transaction, `HTTP ${bought.status} token ${hashed} (${probeToken ? "topped up" : "new, saved"}) balance ${fmt(before)} → ${String(bought.json?.balance_usd)} (one settlement for 100 checks)`);
 
-  if (token) {
+  if (token && bought.status === 200) {
     const auth = { Authorization: `Bearer ${token}` };
     const first = await call("POST", "/v1/risk-check", { wallet: WALLET, chain: "base" }, { headers: auth });
     const second = await call("POST", "/v1/risk-check", { wallet: USER, chain: "base" }, { headers: auth });
+    const spent = credited - 2_000;
     add(
       "credits_spend",
-      first.status === 200 && second.status === 200 && first.headers.get("x-credits-charged") === "$0.001" && second.headers.get("x-credits-balance") === "$0.098" && !first.headers.get("payment-response") && typeof second.json?.jws === "string",
+      first.status === 200 && second.status === 200 && first.headers.get("x-credits-charged") === "$0.001" && usd(second.headers.get("x-credits-balance")) === spent && !first.headers.get("payment-response") && typeof second.json?.jws === "string",
       `HTTP ${first.status}/${second.status} charged ${first.headers.get("x-credits-charged")} each; balance ${first.headers.get("x-credits-balance")} → ${second.headers.get("x-credits-balance")}; ${first.ms} ms and ${second.ms} ms, no payment round trip, no settlement (per call: ${paid.ms} ms)`,
     );
     const balance = await call("GET", "/v1/credits", undefined, { headers: auth });
-    add("credits_balance", balance.status === 200 && balance.json?.balance_usd === "$0.098", `HTTP ${balance.status} balance=${String(balance.json?.balance_usd)}`);
+    add("credits_balance", balance.status === 200 && usd(balance.json?.balance_usd) === spent, `HTTP ${balance.status} balance=${String(balance.json?.balance_usd)}`);
+    // The largest batch (25 simulated items) costs $0.125: refused only while the balance is below it.
     const big = { requests: new Array(25).fill({ wallet: USER, chain: "base", transaction: { from: USER, to: USER, value: "1" } }) };
-    const refused = await call("POST", "/v1/risk-check/batch", big, { headers: auth });
-    const after = await call("GET", "/v1/credits", undefined, { headers: auth });
-    add("credits_insufficient", refused.status === 402 && refused.json?.error === "insufficient_credits" && refused.json?.cost_usd === "$0.125" && after.json?.balance_usd === "$0.098", `HTTP ${refused.status} ${String(refused.json?.error)} cost=${String(refused.json?.cost_usd)}; balance still ${String(after.json?.balance_usd)}`);
+    if (spent >= 125_000) add("credits_insufficient", null, `balance ${fmt(spent)} covers the largest batch: not testable with this token`);
+    else {
+      const refused = await call("POST", "/v1/risk-check/batch", big, { headers: auth });
+      const after = await call("GET", "/v1/credits", undefined, { headers: auth });
+      add("credits_insufficient", refused.status === 402 && refused.json?.error === "insufficient_credits" && refused.json?.cost_usd === "$0.125" && usd(after.json?.balance_usd) === spent, `HTTP ${refused.status} ${String(refused.json?.error)} cost=${String(refused.json?.cost_usd)}; balance still ${String(after.json?.balance_usd)}`);
+    }
   } else {
     for (const id of ["credits_spend", "credits_balance", "credits_insufficient"]) add(id, null, "no token (the purchase did not complete)");
   }
