@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { getDefaultAsset } from "@x402/evm";
 import { X402_PERMIT2_PROXIES, X402CHECK_PAY_TO, X402CHECK_PAYMENT_ASSETS } from "../packages/client/src/guard.js";
 import { NEVER_FLAG_EVM } from "../src/never-flag.js";
-import { buildAccepts, MAINNET_NETWORKS } from "../deploy/protected.js";
+import { buildAccepts, MAINNET_NETWORKS, openApi } from "../deploy/protected.js";
+import { llmsTxt } from "../deploy/discovery.js";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { formatUsd, networkPrice, SIMULATION_PRICE, toMicro } from "../deploy/pricing.js";
@@ -74,6 +75,7 @@ test("prices a buyer reads (site, READMEs, MCP texts) are the ones deploy/pricin
     "mcp --help": read("packages/mcp/src/index.ts"),
     "mcp render": read("packages/mcp/src/render.ts"),
     AGENTS: read("AGENTS.md"),
+    "llms.txt": llmsTxt(openApi({})),
   };
   let seen = 0;
   for (const [name, raw] of Object.entries(texts)) {

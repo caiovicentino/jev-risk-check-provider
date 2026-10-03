@@ -12,6 +12,11 @@ export type HandlerDeps = {
   nextPublicJwk?: Record<string, unknown> | undefined;
 };
 
+/** The site's one page (sitemaps.org). */
+export function sitemap(host: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://${host}/</loc></url>\n</urlset>\n`;
+}
+
 /** How to report a vulnerability (RFC 9116). */
 export const SECURITY_TXT = [
   "Contact: https://github.com/caiovicentino/jev-risk-check-provider/security/advisories/new",
@@ -114,6 +119,9 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/security.txt") {
       return new Response(SECURITY_TXT, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" } });
+    }
+    if ((req.method === "GET" || req.method === "HEAD") && path === "/sitemap.xml") {
+      return new Response(sitemap(deps.provider.host), { status: 200, headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=86400" } });
     }
     if (req.method === "POST" && path === "/v1/risk-check") {
       const v = validateRequest(await readJson(req));

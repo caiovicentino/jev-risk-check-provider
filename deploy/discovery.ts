@@ -32,6 +32,7 @@ export const REQUEST_BODY_SCHEMA = {
     aud: { type: "string", maxLength: MAX_FIELD_LEN.aud, description: "Audience to bind the attestation to" },
     interaction: {
       type: "object",
+      description: "What the agent is about to do (type), and whether an approval is unlimited",
       properties: { type: { type: "string", enum: [...INTERACTION_TYPES] }, unlimited: { type: "boolean" } },
       required: ["type"],
       additionalProperties: false,
@@ -60,8 +61,8 @@ export const REQUEST_BODY_SCHEMA = {
       required: ["from"],
       additionalProperties: false,
     },
-    screening: { type: "object", properties: { sanctions: { type: "string", enum: ["clean", "flagged", "unknown"] } }, required: ["sanctions"], additionalProperties: false },
-    authorization: { type: "object", properties: { pre_authorized: { type: "boolean" }, source: { type: "string", maxLength: MAX_FIELD_LEN.source } }, required: ["pre_authorized"], additionalProperties: false },
+    screening: { type: "object", description: "The caller's own sanctions screening: recorded as asserted, it can only raise risk", properties: { sanctions: { type: "string", enum: ["clean", "flagged", "unknown"] } }, required: ["sanctions"], additionalProperties: false },
+    authorization: { type: "object", description: "The caller's pre-authorization: recorded as asserted, it can only raise risk", properties: { pre_authorized: { type: "boolean" }, source: { type: "string", maxLength: MAX_FIELD_LEN.source } }, required: ["pre_authorized"], additionalProperties: false },
   },
   required: ["wallet"],
   additionalProperties: false,
@@ -206,3 +207,74 @@ export function openApiDocument(version: string, prices: { minUsd: string; maxUs
     },
   };
 }
+
+type OpenApiDoc = {
+  info: { title: string; version: string; description: string; "x-guidance": string };
+  servers: Array<{ url: string }>;
+  paths: Record<string, { post?: { summary?: string; "x-payment-info"?: { price?: { min?: string; max?: string } } } }>;
+};
+
+/** The paid resources the OpenAPI document declares, as absolute URLs. */
+function paidResources(openapi: Record<string, unknown>): Array<{ url: string; path: string; summary: string; min: string; max: string }> {
+  const doc = openapi as unknown as OpenApiDoc;
+  const origin = doc.servers[0]?.url ?? "https://x402check.xyz";
+  return Object.entries(doc.paths).flatMap(([path, item]) => {
+    const price = item.post?.["x-payment-info"]?.price;
+    return price ? [{ url: `${origin}${path}`, path, summary: item.post?.summary ?? "", min: price.min ?? "", max: price.max ?? "" }] : [];
+  });
+}
+
+/**
+ * /.well-known/x402, x402scan's compatibility discovery (Merit-Systems/x402scan docs/DISCOVERY.md:
+ * `{version: 1, resources: [urls]}`, OpenAPI first). Built from the OpenAPI document, so the two
+ * list the same paid resources.
+ */
+export function wellKnownX402(openapi: Record<string, unknown>): { version: 1; resources: string[]; instructions: string } {
+  return {
+    version: 1,
+    resources: paidResources(openapi).map((r) => r.url),
+    instructions: "OpenAPI with prices and schemas: /openapi.json. An unpaid POST returns the x402 v2 challenge; prepaid credits: POST /v1/credits.",
+  };
+}
+
+/**
+ * /llms.txt (the llmstxt.org format): what x402check is and how an agent uses it, built from the
+ * OpenAPI document (description, guidance, paid routes and their prices) and the request schema,
+ * so it can never quote a price or a field the API does not have.
+ */
+export function llmsTxt(openapi: Record<string, unknown>): string {
+  const doc = openapi as unknown as OpenApiDoc;
+  const fields = Object.entries(REQUEST_BODY_SCHEMA.properties).map(([name, s]) => `\`${name}\`${(REQUEST_BODY_SCHEMA.required as readonly string[]).includes(name) ? " (required)" : ""}${"description" in s ? `: ${s.description}` : ""}`);
+  const repo = "https://github.com/caiovicentino/jev-risk-check-provider";
+  return [
+    `# ${doc.info.title}`,
+    "",
+    `> ${doc.info.description}`,
+    "",
+    `Version ${doc.info.version}. ${doc.info["x-guidance"]}`,
+    "",
+    "## Paid API",
+    "",
+    ...paidResources(openapi).map((r) => `- [POST ${r.path}](${r.url}): ${r.summary}. $${r.min}–$${r.max} with x402.`),
+    "",
+    "Every check is paid; there is no free tier. Without a payment, a POST answers 402 with the x402 v2 challenge (`PAYMENT-REQUIRED`), listing every payment network and its price; pay with any x402 client and retry with `PAYMENT-SIGNATURE`. With prepaid credits, send `Authorization: Bearer <token>` instead: no payment round trip.",
+    "",
+    "## Request fields (POST /v1/risk-check)",
+    "",
+    ...fields.map((f) => `- ${f}`),
+    "",
+    "Any other field is refused with a 422 that names it. A batch is `{\"requests\": [...]}`, up to 25 items, billed per item.",
+    "",
+    "## Docs",
+    "",
+    `- [OpenAPI](${doc.servers[0]?.url ?? "https://x402check.xyz"}/openapi.json): schemas, prices and responses`,
+    "- [Risk-check discovery](https://x402check.xyz/.well-known/risk-check.json): the risk-check extension's document",
+    "- [Attestation identity](https://x402check.xyz/.well-known/did.json): did:web:x402check.xyz and its keys",
+    "- [@x402check/client](https://www.npmjs.com/package/@x402check/client): typed client, attestation verifier and signing guard",
+    "- [@x402check/mcp](https://www.npmjs.com/package/@x402check/mcp): MCP server for agents",
+    `- [Methodology](${repo}/blob/main/docs/METHODOLOGY.md): every verdict rule`,
+    `- [Evidence](${repo}/blob/main/docs/EVIDENCE.md): what each layer catches, with confidence intervals`,
+    "",
+  ].join("\n");
+}
+

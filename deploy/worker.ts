@@ -1,4 +1,5 @@
 import { handleProtected, ensureDeps, ensureStack, facilitatorStatus, isProductionHost, jevFor, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
+import { llmsTxt, wellKnownX402 } from "./discovery.js";
 import { maybeRunModelCanary, MODEL_CANARY_KEY } from "./model-canary.js";
 import { maybeRefreshScamSniffer, SCAMSNIFFER_KEYS } from "./scamsniffer-refresh.js";
 import { createHandler } from "../src/handler.js";
@@ -201,6 +202,11 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
     res = await status(env);
   } else if (request.method === "GET" && path === "/openapi.json") {
     res = json(200, openApi(env), { "Cache-Control": "public, max-age=300" });
+  } else if (request.method === "GET" && path === "/llms.txt") {
+    // Built from the OpenAPI document: the same prices, routes and fields.
+    res = new Response(llmsTxt(openApi(env)), { headers: { "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
+  } else if (request.method === "GET" && path === "/.well-known/x402") {
+    res = json(200, wellKnownX402(openApi(env)), { "Cache-Control": "public, max-age=3600" });
   } else if (!paidRoute) {
     // Identity documents, the site and discovery never wait for the payment stack (a hung facilitator).
     res = await createHandler(ensureDeps(env, feedsFor(env)).deps)(request);
