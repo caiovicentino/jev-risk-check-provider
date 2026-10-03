@@ -73,7 +73,7 @@ Plain HTTP is never served: a page gets a 301 to HTTPS and an API call a 403, be
    - **Storage:** the token is shown once. Only its SHA-256, the ledger's name, is stored.
 6. **Mainnets only by default:** Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. `ENABLE_TESTNETS="true"` adds Base Sepolia, Arbitrum Sepolia and Solana Devnet on a local host only; on x402check.xyz it is ignored and logged, because testnet USDC is free.
 7. **Outages:** a facilitator's `/supported` has 5 s and verify/settle 30 s. A network whose facilitator is down leaves the 402 challenge, a failed stack build is never cached, and identity documents and the site never wait for the payment stack.
-8. **Rate limits:** every POST to a paid route is limited per IP. Unpaid requests (and ones whose credential is malformed), and `/status`, get 60 a minute (`UNPAID_LIMITER`); requests with a well-formed credential (an x402 v2 payment or a `Bearer x402c_…` token) get 300 a minute (`PAID_LIMITER`). Every response, 429s and preflights included, carries CORS and the security headers.
+8. **Rate limits:** every POST to a paid route, and every balance read, is limited per IP (approximately: Cloudflare's rate-limit binding counts per location and lets a short burst through). Unpaid requests (and ones whose credential is malformed), and `/status`, get 60 a minute (`UNPAID_LIMITER`); requests with a well-formed credential (an x402 v2 payment or a `Bearer x402c_…` token) get 300 a minute (`PAID_LIMITER`). Every response, 429s and preflights included, carries CORS and the security headers.
 
 ## Secrets and variables
 

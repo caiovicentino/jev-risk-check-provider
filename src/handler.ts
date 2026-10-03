@@ -102,10 +102,15 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/jwks.json") {
       const current = jwksDocument(deps.provider.keyPair.publicJwk.kid, deps.provider.keyPair.publicJwk);
       const next = deps.nextPublicJwk && deps.nextPublicJwk.kid !== deps.provider.keyPair.publicJwk.kid ? [publicJwkOf(deps.nextPublicJwk)] : [];
-      return json(200, { keys: [...current.keys, ...next] });
+      // Verifiers cache the keys briefly (AGENTS.md §3.12 waits 10 minutes before a key starts signing).
+      const keys = json(200, { keys: [...current.keys, ...next] });
+      keys.headers.set("Cache-Control", "public, max-age=300");
+      return keys;
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/did.json") {
-      return json(200, didDocument(deps.provider.host, deps.provider.keyPair.publicJwk as unknown as Record<string, unknown>, deps.nextPublicJwk));
+      const did = json(200, didDocument(deps.provider.host, deps.provider.keyPair.publicJwk as unknown as Record<string, unknown>, deps.nextPublicJwk));
+      did.headers.set("Cache-Control", "public, max-age=300");
+      return did;
     }
     if ((req.method === "GET" || req.method === "HEAD") && path === "/.well-known/security.txt") {
       return new Response(SECURITY_TXT, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" } });
@@ -133,10 +138,14 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
             "Content-Security-Policy": page.csp,
             "X-Frame-Options": "DENY",
             "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+            // The same URL serves the site or the discovery JSON by Accept: caches must key on it.
+            Vary: "Accept",
           },
         });
       }
-      return json(200, discoveryDocument(deps.provider.host, deps.pricing, deps.provider.keyPair.publicJwk.kid));
+      const doc = json(200, discoveryDocument(deps.provider.host, deps.pricing, deps.provider.keyPair.publicJwk.kid));
+      doc.headers.set("Vary", "Accept");
+      return doc;
     }
     if (req.method === "GET" && path === "/favicon.ico") {
       return new Response(Uint8Array.from(atob(FAVICON_ICO_B64), (ch) => ch.charCodeAt(0)), {

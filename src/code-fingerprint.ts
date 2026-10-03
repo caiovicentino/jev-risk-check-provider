@@ -23,7 +23,7 @@ export type CodeFacts = {
    * A proxy whose whole code is a known forwarding pattern (EIP-1167, Safe, minimal
    * EIP-1967): it runs exactly its implementation, so it can be judged by it.
    */
-  proxy?: "eip1167" | "safe" | "eip1967-minimal" | "eip1967";
+  proxy?: "eip1167" | "safe" | "eip1967-minimal" | "eip1967" | "zeppelinos";
   /** Logic-code fingerprint of the delegate or implementation, when it has logic code. */
   implementation_fingerprint?: string;
   /** Addresses hard-coded in delegating code (PUSH20): candidate implementations of non-standard proxies. */
@@ -42,6 +42,14 @@ export type CodeFacts = {
 
 /** EIP-1967 implementation slot: keccak256("eip1967.proxy.implementation") - 1. */
 export const EIP1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+/**
+ * The ZeppelinOS (pre-EIP-1967) implementation slot: keccak256("org.zeppelinos.proxy.implementation").
+ * USDC's FiatTokenProxy keeps its implementation there, and its EIP-1967 slot is empty.
+ */
+export const ZEPPELINOS_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
+const ZEPPELINOS_SLOT_HEX = ZEPPELINOS_IMPLEMENTATION_SLOT.slice(2);
+/** 20 printable ASCII bytes: text embedded in the bytecode (a revert string), not an address. */
+const isText = (bytes: Uint8Array): boolean => bytes.every((b) => b >= 0x20 && b <= 0x7e);
 const EIP1167 = /^363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903d91602b57fd5bf3$/;
 // Safe proxies 1.1.1–1.4.1: load masterCopy from slot 0, answer masterCopy() (0xa619486e), else delegatecall.
 const SAFE_PROXY_PREFIX = "608060405273ffffffffffffffffffffffffffffffffffffffff600054167fa619486e";
@@ -101,8 +109,11 @@ export function codeFacts(codeHex: string): CodeFacts {
     if (op === 0xf4 || op === 0xf2) delegating = true; // DELEGATECALL / CALLCODE
     if (op === 0x63 && i + 4 < code.length) selectors.add(Buffer.from(code.subarray(i + 1, i + 5)).toString("hex")); // PUSH4
     if (op === 0x73 && i + 20 < code.length && linked.size < 3) {
-      const a = Buffer.from(code.subarray(i + 1, i + 21)).toString("hex"); // PUSH20
-      if (!/^(0{40}|f{40})$/.test(a)) linked.add(`0x${a}`);
+      // PUSH20, or the byte "s" of embedded text read as an opcode: an operand that is all
+      // printable ASCII ("et a proxy implement") is text, not an address.
+      const operand = code.subarray(i + 1, i + 21);
+      const a = Buffer.from(operand).toString("hex");
+      if (!/^(0{40}|f{40})$/.test(a) && !isText(operand)) linked.add(`0x${a}`);
     }
     if (op >= 0x60 && op <= 0x7f) i += op - 0x5f; // skip PUSH data
   }
@@ -110,7 +121,7 @@ export function codeFacts(codeHex: string): CodeFacts {
     return {
       kind: "delegating",
       bytes: raw.length,
-      proxy: raw.length <= MINIMAL_PROXY_BYTES && hex.includes(EIP1967_SLOT_HEX) ? "eip1967-minimal" : "eip1967",
+      proxy: raw.length <= MINIMAL_PROXY_BYTES && hex.includes(EIP1967_SLOT_HEX) ? "eip1967-minimal" : !hex.includes(EIP1967_SLOT_HEX) && hex.includes(ZEPPELINOS_SLOT_HEX) ? "zeppelinos" : "eip1967",
       ...(linked.size ? { linked: [...linked] } : {}),
     };
   }
@@ -158,8 +169,10 @@ export async function resolveIndirection(entries: Map<string, CodeFacts>, call: 
   }
   if (slotReads.length) {
     try {
-      // Safe proxies keep the implementation (masterCopy) in slot 0; the others in the EIP-1967 slot.
-      const slots = await call(slotReads.map((a) => ({ method: "eth_getStorageAt", params: [a, entries.get(a)?.proxy === "safe" ? "0x0" : EIP1967_IMPLEMENTATION_SLOT, "latest"] })));
+      // Safe proxies keep the implementation (masterCopy) in slot 0, ZeppelinOS proxies in their
+      // own slot, the others in the EIP-1967 slot.
+      const slotOf = (proxy: CodeFacts["proxy"]) => (proxy === "safe" ? "0x0" : proxy === "zeppelinos" ? ZEPPELINOS_IMPLEMENTATION_SLOT : EIP1967_IMPLEMENTATION_SLOT);
+      const slots = await call(slotReads.map((a) => ({ method: "eth_getStorageAt", params: [a, slotOf(entries.get(a)?.proxy), "latest"] })));
       slotReads.forEach((address, i) => {
         const word = typeof slots[i] === "string" ? (slots[i] as string).toLowerCase().replace(/^0x/, "").padStart(64, "0") : "";
         const impl = word.length === 64 ? `0x${word.slice(24)}` : "";

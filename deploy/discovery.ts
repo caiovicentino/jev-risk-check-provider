@@ -21,12 +21,12 @@ export const SERVICE_METADATA = {
 
 const EVM = "^0x[0-9a-fA-F]{40}$";
 
-/** The body of POST /v1/risk-check, mirroring src/validate.ts (unknown top-level fields are ignored there). */
+/** The body of POST /v1/risk-check, mirroring src/validate.ts, which refuses any field it does not list (422 naming it). */
 export const REQUEST_BODY_SCHEMA = {
   type: "object",
   properties: {
-    wallet: { type: "string", minLength: 1, maxLength: 128, description: "The counterparty to check: recipient, spender, operator or pay_to (EVM, Solana, Bitcoin or Tron address)" },
-    chain: { type: "string", maxLength: 64, description: "CAIP-2 id or alias, e.g. base, ethereum, solana" },
+    wallet: { type: "string", minLength: 1, maxLength: 160, description: "The counterparty to check: recipient, spender, operator or pay_to (EVM, Solana, Bitcoin or Tron address, or a CAIP-10 id whose chain can hold it). A mixed-case EVM address must carry a valid EIP-55 checksum" },
+    chain: { type: "string", maxLength: 64, description: "A known CAIP-2 id or alias, e.g. base, ethereum, solana; it must be able to hold the wallet (an EVM address on an eip155 chain)" },
     domain: { type: "string", maxLength: 2048, description: "The site or dApp involved" },
     context: { type: "string", maxLength: MAX_FIELD_LEN.context, description: "The content the agent acted on, verbatim: checked for injected instructions" },
     aud: { type: "string", maxLength: MAX_FIELD_LEN.aud, description: "Audience to bind the attestation to" },
@@ -60,10 +60,11 @@ export const REQUEST_BODY_SCHEMA = {
       required: ["from"],
       additionalProperties: false,
     },
-    screening: { type: "object", properties: { sanctions: { type: "string", enum: ["clean", "flagged", "unknown"] } }, required: ["sanctions"] },
-    authorization: { type: "object", properties: { pre_authorized: { type: "boolean" }, source: { type: "string", maxLength: MAX_FIELD_LEN.source } }, required: ["pre_authorized"] },
+    screening: { type: "object", properties: { sanctions: { type: "string", enum: ["clean", "flagged", "unknown"] } }, required: ["sanctions"], additionalProperties: false },
+    authorization: { type: "object", properties: { pre_authorized: { type: "boolean" }, source: { type: "string", maxLength: MAX_FIELD_LEN.source } }, required: ["pre_authorized"], additionalProperties: false },
   },
   required: ["wallet"],
+  additionalProperties: false,
 } as const;
 
 export const REQUEST_EXAMPLE = {
@@ -121,7 +122,7 @@ export const RISK_CHECK_DISCOVERY = postJson(REQUEST_EXAMPLE, REQUEST_BODY_SCHEM
 
 export const BATCH_DISCOVERY = postJson(
   { requests: [REQUEST_EXAMPLE, { wallet: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", chain: "base" }] },
-  { type: "object", properties: { requests: { type: "array", minItems: 1, maxItems: 25, items: REQUEST_BODY_SCHEMA } }, required: ["requests"] },
+  { type: "object", properties: { requests: { type: "array", minItems: 1, maxItems: 25, items: REQUEST_BODY_SCHEMA } }, required: ["requests"], additionalProperties: false },
   { results: [RESULT_EXAMPLE] },
 );
 
@@ -142,11 +143,17 @@ function tierGuidance(): string {
 
 export function openApiDocument(version: string, prices: { minUsd: string; maxUsd: string; creditUsd: string; simulatedUsd: string; basePerCallUsd: string }): Record<string, unknown> {
   const x402 = (min: string, max: string) => ({ price: { mode: "dynamic", currency: "USD", min, max }, protocols: [{ x402: {} }] });
-  const result = { type: "object", properties: { checked: { type: "boolean" }, score: { type: "integer", minimum: 0, maximum: 100 }, tier: { type: "string", enum: ["low", "medium", "high", "critical"] }, categories: { type: "array", items: { type: "string" }, description: "Always starts with the evaluated families \"intent_risk\" and \"behavioral\" (present in every verdict, not findings), then the specific findings behind the verdict" }, evidence: { type: "object" }, jws: { type: "string", description: "ES256 attestation from did:web:x402check.xyz" }, checked_at: { type: "string" }, expires_at: { type: "string" } }, required: ["checked"] };
+  const result = { type: "object", properties: { checked: { type: "boolean" }, score: { type: "integer", minimum: 0, maximum: 100 }, tier: { type: "string", enum: ["low", "medium", "high", "critical"] }, categories: { type: "array", items: { type: "string" }, description: "The findings behind the verdict. A full evaluation lists the evaluated families \"intent_risk\" and \"behavioral\" first (present in every such verdict, not findings); a sanctions hit carries its own categories alone (\"sanctioned_address\", \"compliance_risk\"). Never rely on position: look for the hard-block categories anywhere in the list" }, evidence: { type: "object" }, jws: { type: "string", description: "ES256 attestation from did:web:x402check.xyz" }, checked_at: { type: "string" }, expires_at: { type: "string" } }, required: ["checked"] };
   const responses = (schema: Record<string, unknown>) => ({
     "200": { description: "The verdict, with its signed attestation", content: { "application/json": { schema } } },
     "402": { description: "Payment Required: pay with x402 (the challenge lists every network), or send Authorization: Bearer x402c_… to pay from prepaid credits. Unpaid, a body that would be refused still gets the challenge, with the reason in request_error; it is never charged" },
+    "401": { description: "A malformed credit token (Authorization: Bearer x402c_…); nothing is charged" },
+    "403": { description: "The paying wallet is on the OFAC SDN list (payer_sanctioned); nothing is charged" },
+    "409": { description: "This payment was already used (payment_already_used): sign a new one" },
+    "413": { description: "Body over 64 KiB or a batch over 25 items; nothing is charged" },
     "422": { description: "Invalid request (with a payment or a credit token): the offending field is named, including an unknown field; nothing is charged" },
+    "429": { description: "Rate limited per IP (approximate, per Cloudflare location), a payer with too many payments in flight, or one whose recent payments did not settle; Retry-After says when" },
+    "503": { description: "The evaluation or the payment claims are unavailable, or the attestation key is not healthy; nothing is charged, retry" },
   });
   const maxBatch = (Number(prices.maxUsd) * 25).toFixed(3);
   return {

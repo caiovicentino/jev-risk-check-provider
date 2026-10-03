@@ -184,7 +184,8 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
   // Every POST to a paid route, and /status, is rate-limited per IP: unpaid traffic tightly (it costs
   // work), traffic with a well-formed credential generously. A header's mere presence never skips it.
   const paidRoute = PROTECTED.has(path) || path === "/v1/credits";
-  if ((paidRoute && request.method === "POST") || path === "/status") {
+  // A balance read costs a ledger call too: GET /v1/credits is limited like the paid POSTs.
+  if ((paidRoute && (request.method === "POST" || path === "/v1/credits")) || path === "/status") {
     const paid = paidRoute && credentialed(request);
     const limiter = paid ? env.PAID_LIMITER : env.UNPAID_LIMITER;
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
@@ -192,7 +193,9 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
     if (!success) return json(429, { error: "rate_limited", detail: paid ? "too many requests; use /v1/risk-check/batch for volume, or retry in a minute" : "too many unpaid requests; pay or retry in a minute" }, { "Retry-After": "60" });
   }
   let res: Response;
-  if (request.method === "GET" && path === "/healthz") {
+  if ((path === "/healthz" || path === "/status") && request.method !== "GET") {
+    res = json(405, { error: "method_not_allowed" }, { Allow: "GET" });
+  } else if (request.method === "GET" && path === "/healthz") {
     res = healthz(env);
   } else if (request.method === "GET" && path === "/status") {
     res = await status(env);
@@ -212,6 +215,8 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
         ? json(405, usageFor(path), { Allow: "POST" })
         : await handleProtected(request, env, stack, (req) => createHandler(stack.deps)(req), ctx);
     }
+    // Verdicts, balances and tokens are per request: never stored by a cache.
+    if (!res.headers.has("Cache-Control")) res.headers.set("Cache-Control", "no-store");
   }
   return res;
 }
@@ -223,7 +228,7 @@ export default {
     } catch (err) {
       // Never an HTML error page or a stack trace: a JSON 500, logged without request data.
       console.error(`unhandled: ${String(err).slice(0, 300)}`);
-      return new Response(JSON.stringify({ error: "internal_error" }), { status: 500, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS } });
+      return new Response(JSON.stringify({ error: "internal_error" }), { status: 500, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS, ...securityHeaders(env, false) } });
     }
   },
 

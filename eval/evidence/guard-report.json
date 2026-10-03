@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-09-30T22:17:45.238Z",
+  "timestamp": "2026-10-03T14:19:02.908Z",
   "cases_from": "eval/evidence/simulation-report.json (2026-09-29T18:55:02.779Z)",
   "provider": "in process, same code as production; ScamSniffer feed OFF (circular); neutral model; simulation on public mainnet RPCs at the latest block",
-  "duration_s": 71,
+  "duration_s": 83,
   "fetched": 284,
   "drainer": {
     "transactions": 56,
@@ -2887,10 +2887,13 @@
       "score": 100,
       "categories": [
         "intent_risk",
-        "behavioral"
+        "behavioral",
+        "simulation_reverted"
       ],
-      "simulation": "ok",
-      "findings": []
+      "simulation": "reverted",
+      "findings": [
+        "simulation_reverted"
+      ]
     },
     {
       "label": "legit",
@@ -3220,13 +3223,10 @@
       "score": 100,
       "categories": [
         "intent_risk",
-        "behavioral",
-        "simulation_reverted"
+        "behavioral"
       ],
-      "simulation": "reverted",
-      "findings": [
-        "simulation_reverted"
-      ]
+      "simulation": "ok",
+      "findings": []
     },
     {
       "label": "legit",

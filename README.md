@@ -124,7 +124,7 @@ curl -X POST https://x402check.xyz/v1/risk-check -H "Content-Type: application/j
 | Field | Required | Rules |
 |---|---|---|
 | `wallet` | yes | the subject address: EVM `0x…`, base58 (Solana/Tron/BTC…), bech32, cashaddr, or CAIP-10. Anything else → `422 {error, field:"wallet"}` |
-| `chain` | no | alias (`ethereum`, `base`, `solana`, …) or a known CAIP-2 id (`eip155:8453`, the Solana mainnet or devnet id, `bip122:…`, `tron:…`); enables on-chain facts on supported mainnets. An unknown id (`solana:mainnet`) → `422` |
+| `chain` | no | alias (`ethereum`, `base`, `solana`, …) or a known CAIP-2 id (`eip155:8453`, the Solana mainnet or devnet id, `bip122:…`, `tron:…`); enables on-chain facts on supported mainnets. An unknown id (`solana:mainnet`) or a chain that cannot hold the wallet (an EVM address with `solana`) → `422` |
 | `domain` | no | hostname or http(s) URL (normalized server-side); the site the payment or signature is for |
 | `context` | no | ≤ 4096 chars: what the agent acted on (tool output, page text, instruction). Untrusted by design. Leave out secrets and personal data: keys, seed phrases and credit tokens are redacted before the model sees it, but nothing else is (see [Data handling](#data-handling)) |
 | `interaction` | no | `{type, unlimited?}`; `type` ∈ `native_transfer`, `token_transfer`, `token_approval`, `nft_approval`, `permit_signature`, `order_signature`, `message_signature`, `contract_call` |
@@ -216,7 +216,7 @@ Every evaluation is paid; there is no free tier.
 - **An unpaid request** gets `402` with the accepted options in `PAYMENT-REQUIRED`, whatever its body. Any x402 client pays and retries.
 - **Invalid input** is never charged: with a payment or a token it is rejected (`422`/`413`) before any payment work; unpaid, the `402` says why in `request_error`.
 - **Release after settlement:** the attestation is returned only once the payment settles. If the evaluation cannot be produced, nothing is settled (`503`, no charge).
-- **One payment, one evaluation:** a payment is claimed once, when it verifies, by what its payer signed: a copy of the same payment, sent at the same time or later and however it is re-encoded, gets `409 payment_already_used`. An authorization must stay valid for 60 s more (and at most 24 h), a payer may have 8 payments in flight, and repeated settlement failures hold a payer back.
+- **One payment, one evaluation:** a payment is claimed once, when it verifies, by what its payer signed: a copy of the same payment, sent at the same time or later and however it is re-encoded, gets `409 payment_already_used`. An authorization must stay valid for 60 s more (and at most 24 h), a payer may have 8 payments in flight, and repeated settlement failures hold a payer back. A payment carries exactly one scheme payload, the one its route takes, and a Solana payment comes from the payer's own token account.
 - **The payer is screened:** a paying wallet on the OFAC SDN list gets `403 payer_sanctioned`, and nothing is charged.
 - **HTTPS only:** a plain-HTTP API call gets `403`, before its body or token is read.
 

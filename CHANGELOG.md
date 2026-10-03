@@ -2,6 +2,20 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## Unreleased (v0.6.4)
+
+From a second full evaluation on 2026-10-03 (an independent security review of everything in v0.6.2–v0.6.3, a black-box run against production, and an operations review):
+
+- **One scheme payload per payment, the one its route takes (security review H1, high):** a facilitator verifies the EIP-3009 authorization, the Permit2 authorization or the Solana transaction and ignores anything else in the payload, but admission read an `authorization` object first. A decoy one next to a real Permit2 or Solana payment could pass an SDN-listed payer, give one payment many evaluations, or lock another wallet out for an hour. A payment must now carry exactly one of them, matching its route (Solana: `transaction`; a Permit2 route: `permit2Authorization`; any other EVM route: `authorization`), and payer, identity and validity are read from it alone; anything else is a 402 `payment_unrecognized` before any work.
+- **The payer screen cannot be skipped by spelling (M1):** an EVM payer is screened lowercase, so a wrong EIP-55 checksum (which a Permit2 facilitator accepts) never turns a listed address into an unscreened one; an unreadable payer is refused.
+- **A Solana payment must come from the payer's own token account (L4):** a delegate spending someone else's account would have been screened instead of the owner of the funds. The transfer's source must be the authority's associated token account (derived locally, no RPC).
+- **Only the payer's own refusals count against the payer (L3):** insufficient funds, a bad or reused signature or nonce, an expired or premature authorization, a wrong value or recipient, a missing Permit2 allowance. A pending or failed transaction, RPC trouble or an unknown reason never does.
+- **The chain must be able to hold the address (black-box):** a CAIP-10 id, `wallet` + `chain`, or `payment.network` + `pay_to` from different families (an EVM address on Solana, a Solana address on Base) was accepted and the chain-keyed checks were silently skipped. It is a 422 now, and the SDK's subject comparison treats two namespaces as different subjects.
+- **Strictness:** `transaction.from`/`to` need a valid EIP-55 checksum when mixed-case; `eip155:0` is refused; a string with a lone surrogate is refused (no client could recompute `request_hash`); `payment.amount` must fit in uint256; a batch carries `requests` only.
+- **HTTP:** the `Bearer` scheme is case-insensitive (RFC 9110); balance reads are rate-limited; `/status` and `/healthz` answer 405 to other methods; verdicts and balances are `no-store`, the identity documents cacheable for 5 minutes, `/` varies by `Accept`, and a 500 carries the security headers too. A challenge no longer waits on a slow Solana RPC for its blockhash (at most 800 ms), and its `resource` never echoes the query string.
+- **Proxy evidence:** USDC's proxy keeps its implementation in the ZeppelinOS slot, which is now read, and text embedded in bytecode is never taken for a linked address.
+- **Discovery documents:** the request schema is strict like the validator (`additionalProperties: false`, `wallet` up to 160), lists every status the routes return, and no longer says categories always start with the evaluated families (a sanctions hit carries its own alone). Rate limits are documented as approximate (Cloudflare counts per location).
+
 ## v0.6.3 — 2026-10-02
 
 - **A credit pack still needs its amount:** v0.6.2 answered `POST /v1/credits` without an amount with the $1 pack's 402. The credit pack is deliberately not a listed Bazaar service, so that challenge carries no discovery schemas, and AgentCash flagged the route (`SCHEMA_INPUT_MISSING`, `SCHEMA_OUTPUT_MISSING`). Without an amount it is a 422 again; the check routes keep answering every unpaid body with their challenge. AgentCash reports 3 paid routes and no warnings, and x402scan re-registered 3 of 3.
