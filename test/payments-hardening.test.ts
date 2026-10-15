@@ -203,7 +203,7 @@ test("a paid route refuses all work (no charge) while the key cannot sign verifi
 });
 
 test("routing: a network with no live facilitator leaves the challenge; a Permit2-only route says so", () => {
-  const route = (network: string, facilitator: string | null, method: string | null): PaymentRoute => ({ network, price_usd: 0.001, facilitator, transfer_method: method, fee_usd: 0, floor_usd: null, below_floor: false, margin_usd: 0, margin_pct: 0 });
+  const route = (network: string, facilitator: string | null, method: string | null): PaymentRoute => ({ network, price_usd: 0.001, facilitator, transfer_method: method, fee_usd: 0, floor_usd: null, below_floor: false, margin_usd: 0.00093, margin_pct: 93, offered: facilitator !== null, ...(facilitator ? {} : { reason: "no_facilitator" as const }) });
   const routes = [route("eip155:8453", "cdp", "eip3009"), route("eip155:143", "dexter", "permit2"), route("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", null, null)];
   const accepts = buildAccepts({}, undefined, routes);
   assert.deepEqual(accepts.map((a) => a.network), ["eip155:8453", "eip155:143"]);

@@ -202,14 +202,16 @@ Every evaluation is paid; there is no free tier.
 - If a verdict is not produced, the check is refunded.
 
 **Per call:**
-- **Price by payment network** (the 402 lists every option): Base **$0.0035**, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009.
+- **Price by payment network** (the 402 lists every network it offers): Base **$0.0035**, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009.
 - A request whose `transaction` is simulated costs **$0.005**, or the network's price if that is higher. The simulated price covers the simulation, the classification of every recipient and spender, and code fingerprints through delegations and proxies. It is charged only on chains where simulation runs.
 - A batch is billed per item.
 - **Why the prices differ:** every x402 payment is an on-chain settlement, and its cost is ours. PayAI settles EVM payments with EIP-3009, which any wallet can pay gaslessly, and bills us the network's gas + 30% per settlement (about $0.0023 on Base). Dexter bills nothing, but on EVM networks it settles only through Permit2, which most payers' wallets cannot use without an on-chain approval. Coinbase CDP settles with EIP-3009 too, at $0.001 per settlement after 1,000 free a month, so it takes the EVM networks where it is cheapest.
-- **Routing:** each network settles through the facilitator any payer can pay through, and among those the cheapest to us:
+- **Routing:** each network settles through a facilitator that does not cost more than the price; among those, one any payer can pay through, then the cheapest to us:
   - Coinbase CDP for Base, Polygon and Arbitrum ($0.001 per settlement after 1,000 free a month);
-  - PayAI for Avalanche and Sei, and as the fallback for every EVM network;
-  - Dexter for Solana and Monad.
+  - PayAI for Sei, and as the fallback for every EVM network;
+  - Dexter for Solana and Monad (on Monad through Permit2, since CDP's fee there equals the price).
+
+  A network whose every route would lose money is not offered until one clears its cost again: Avalanche since 2026-10-15, when PayAI's fee there rose to $0.0057 against a $0.001 price.
 
   [`/status`](https://x402check.xyz/status) shows each network's facilitator, transfer method, fee and margin live. It also lists each facilitator's health and published signers, so anyone can check on-chain who settled a payment.
 - **Settlement:** USDC via x402 v2 (`PAYMENT-SIGNATURE`), **mainnet only**: Base, Polygon, Arbitrum, Avalanche, Monad, Sei and Solana. The x402 "exact" scheme is gasless for the payer, so USDC alone is enough.

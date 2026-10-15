@@ -51,16 +51,17 @@ Plain HTTP is never served: a page gets a 301 to HTTPS and an API call a 403, be
    - Every settlement is recorded in KV (`st:<network>:<tx>`, 400 days) for reconciliation against the chain.
 3. **Facilitator routing** (`paymentRouting` in `protected.ts`, recomputed every 10 minutes). For each network the router picks, in order:
    1. a facilitator that accepts our price (Dexter refuses payments below its floor);
-   2. one every payer can pay through: EIP-3009 (PayAI, Coinbase CDP) over Dexter's EVM Permit2, which needs an on-chain allowance most wallets lack;
-   3. the one cheapest to us. PayAI charges from its live fee table (gas + 30% per settlement). Dexter charges nothing. Coinbase CDP charges $0.001 per settlement after 1,000 free a month, and routing always uses the paid rate.
+   2. one that does not cost more than the price (the settlement fee plus one model call). A network whose every route would lose money is not offered: it leaves the 402 challenge, and comes back on its own once a route clears its cost (Avalanche left on 2026-10-15, when PayAI's fee there reached $0.0057 against a $0.001 price, below Dexter's floor);
+   3. one every payer can pay through: EIP-3009 (PayAI, Coinbase CDP) over Dexter's EVM Permit2, which needs an on-chain allowance most wallets lack;
+   4. the one cheapest to us. PayAI charges from its live fee table (gas + 30% per settlement; a failed lookup reuses the last table read). Dexter charges nothing. Coinbase CDP charges $0.001 per settlement after 1,000 free a month, and routing always uses the paid rate.
 
    The resource server gets each facilitator scoped to its networks, first. `/status` shows two things:
-   - `payments`: the facilitator, transfer method, fee, floor and margin of every route;
+   - `payments`: the facilitator, transfer method, fee, floor and margin of every route, and whether the network is offered (`offered`; when not, `reason`);
    - `facilitators`: whether each configured facilitator answers, and the mainnets it offers. Only an HTTP status is shown, never a key.
 
    **Coinbase CDP** is used only when both `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are set (see below).
    - Every call carries a JWT signed with that key (`deploy/cdp.ts`, WebCrypto, 120 s).
-   - CDP settles Base, Polygon, Arbitrum and Solana.
+   - CDP settles Base, Polygon, Arbitrum, Monad and Solana.
    - A key CDP rejects drops it from routing, and PayAI takes those networks back.
 4. **Pricing** (`deploy/pricing.ts`, in micro-dollars):
    - per network: Base $0.0035, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009;

@@ -11,17 +11,20 @@ export const BASE_MAINNET = "eip155:8453";
 /**
  * Price per evaluation, by payment network (USD). The payer pays exactly this, and it
  * reaches our wallet in full; settling it costs us, separately:
+ * - Coinbase CDP settles Base, Polygon, Arbitrum, Monad and Solana for $0.001 a
+ *   settlement after 1,000 free a month (EIP-3009 on EVM).
  * - PayAI settles EVM payments with EIP-3009 (gasless for any payer) and, since
- *   2026-09-21, bills the receiving merchant the network's gas + 30% per settlement
- *   (Base ≈ $0.0023, Polygon ≈ $0.0049, Arbitrum ≈ $0.0066, Sei ≈ $0.0008, Avalanche
- *   ≈ $0.0001).
+ *   2026-09-21, bills the receiving merchant the network's gas + 30% per settlement,
+ *   repriced daily (2026-10-15: Base ≈ $0.0020, Sei ≈ $0.0006, Avalanche ≈ $0.0057,
+ *   up from ≈ $0.0001).
  * - Dexter sponsors gas and bills nothing, but it refuses payments below its floor
- *   (Solana ≈ $0.0013, Monad ≈ $0.0003). On EVM networks it settles through Permit2,
- *   which only payers with a Permit2 allowance, or a wallet that can sign the EIP-2612
- *   sponsoring extension, can use.
- * Each price clears the cost of the route it takes (paymentRouting). `/status` → payments
- * shows the live fee, floor and margin per network. Prepaid credits (deploy/credits.ts)
- * spread one settlement over many checks.
+ *   (2026-10-15: Solana ≈ $0.0012, Monad ≈ $0.0002, Avalanche ≈ $0.0034). On EVM networks
+ *   it settles through Permit2, which only payers with a Permit2 allowance, or a wallet
+ *   that can sign the EIP-2612 sponsoring extension, can use.
+ * Routing (paymentRouting) never offers a route that costs more than the price: a network
+ * whose every route would lose money leaves the 402 challenge until one clears it again.
+ * `/status` → payments shows the live fee, floor, margin and offer per network. Prepaid
+ * credits (deploy/credits.ts) spread one settlement over many checks.
  */
 export const NETWORK_PRICES: Readonly<Record<string, number>> = {
   [BASE_MAINNET]: 0.0035,

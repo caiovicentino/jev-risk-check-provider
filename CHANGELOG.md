@@ -2,6 +2,16 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.5 — 2026-10-15: no route at a loss
+
+- **Routing never offers a route that costs more than its price.** On 2026-10-15 PayAI's fee on Avalanche had risen to $0.00574 per settlement against a $0.001 price (a margin of −481%), and Coinbase CDP had begun settling Monad at $0.001 against a $0.001 price (−7% with the model call). Routing ranked a facilitator any wallet can pay through above cost, so both networks were offered at a loss; no payment was made on either. A route known to lose money is now never chosen while another clears its cost, and a network with no such route is not offered:
+  - Monad moves to Dexter (free, through Permit2);
+  - Avalanche leaves the 402 challenge (its price is below Dexter's $0.0034 floor there) and comes back on its own once a route clears its cost.
+- `/status` → `payments` shows `offered` per network and, for one that is not offered, the `reason` (`unprofitable`, `below_floor` or `no_facilitator`).
+- A failed PayAI fee lookup reuses the last table read rather than leaving the fee unknown. With every facilitator down, the challenge still never lists a network known to lose money.
+
+Prices are unchanged.
+
 ## v0.6.4 — 2026-10-03: the second evaluation
 
 From a second full evaluation on 2026-10-03 (an independent security review of everything in v0.6.2–v0.6.3, a black-box run against production, and an operations review):

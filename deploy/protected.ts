@@ -103,9 +103,10 @@ export function loadKeyPair(env: WorkerEnv): { keyPair: KeyPair; status: Attesta
 export const MAINNET_NETWORKS = [BASE_MAINNET, "eip155:137", "eip155:42161", "eip155:43114", "eip155:143", "eip155:1329", SOLANA_MAINNET] as const;
 
 /**
- * The payment options of the 402 challenge. With a routing table, only the networks that have a
- * live facilitator are offered (one facilitator's outage must not break every network), and a
- * network routed to a Permit2-only facilitator says so. Testnets never in production.
+ * The payment options of the 402 challenge. With a routing table, only the networks it offers are
+ * listed: a live facilitator (one facilitator's outage must not break every network) that accepts
+ * the price and does not cost more than it. A network routed to a Permit2-only facilitator says
+ * so. Testnets never in production.
  */
 export function buildAccepts(env: WorkerEnv, price: (network: string) => PaymentOption["price"] = (n) => makePrice(networkPrice(n), env.SIMULATION !== "off"), routes: PaymentRoute[] | null = null): PaymentOption[] {
   const payToEvm = env.PAY_TO_EVM ?? "0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178";
@@ -119,9 +120,11 @@ export function buildAccepts(env: WorkerEnv, price: (network: string) => Payment
     price: price(network),
     ...(route(network)?.transfer_method === "permit2" ? { extra: { assetTransferMethod: "permit2" } } : {}),
   });
-  const live = routes ? MAINNET_NETWORKS.filter((n) => route(n)?.facilitator) : MAINNET_NETWORKS;
-  // Every network down (or unknown): offer them all rather than none; payments then fail per network.
-  const accepts: PaymentOption[] = (live.length ? live : MAINNET_NETWORKS).map(option);
+  const live = routes ? MAINNET_NETWORKS.filter((n) => route(n)?.offered) : MAINNET_NETWORKS;
+  // Every facilitator down (or unknown): offer every network rather than none, and payments then fail
+  // per network; but never one that is known to lose money or to fall below its facilitator's floor.
+  const reachable = MAINNET_NETWORKS.filter((n) => (route(n)?.reason ?? "no_facilitator") === "no_facilitator");
+  const accepts: PaymentOption[] = (live.length ? live : reachable).map(option);
   if (env.ENABLE_TESTNETS === "true") {
     if (isProductionHost(env)) console.error("ENABLE_TESTNETS is set on a production host: ignored (testnet USDC is free)");
     else for (const network of [BASE_SEPOLIA, "eip155:421614", SOLANA_DEVNET]) accepts.push(option(network));
@@ -216,11 +219,20 @@ function facilitatorClient(url: string, key = url, auth?: ConstructorParameters<
 export function mainnetFacilitators(env: WorkerEnv): FacilitatorEntry[] {
   const payaiUrl = env.X402_FACILITATOR_URL_PAYAI ?? DEFAULT_PAYAI_FACILITATOR;
   let feeCache: { at: number; value: Promise<Map<string, number>> } | null = null;
+  let lastFees: Map<string, number> | null = null;
   const fees = () => {
     if (!feeCache || Date.now() - feeCache.at > TEN_MINUTES) {
-      const value = payaiFees(payaiUrl);
+      // A failed lookup is retried on the next call and, meanwhile, answered with the last table this
+      // isolate read (PayAI publishes new rates once a day): a hiccup must not hide a known fee.
+      const value = payaiFees(payaiUrl).then(
+        (table) => (lastFees = table),
+        (err: unknown) => {
+          feeCache = null;
+          if (lastFees) return lastFees;
+          throw err;
+        },
+      );
       feeCache = { at: Date.now(), value };
-      value.catch(() => (feeCache = null));
     }
     return feeCache.value;
   };
@@ -255,18 +267,29 @@ export type PaymentRoute = {
   /** Price minus the settlement fee and one model call. */
   margin_usd: number | null;
   margin_pct: number | null;
+  /**
+   * Whether the 402 challenge offers the network: a facilitator settles it, accepts the price, and
+   * does not cost more than the price (an unknown fee is offered, and shows a null margin).
+   */
+  offered: boolean;
+  /** Why the network is not offered; the fields above describe the best route there was. */
+  reason?: "no_facilitator" | "below_floor" | "unprofitable";
 };
 
 type Kind = { x402Version: number; scheme: string; network: string; extra?: Record<string, unknown> };
-type Candidate = { name: string; index: number; method: string; floor: number | null; fee: number | null; usable: boolean; compatible: boolean };
+type Candidate = { name: string; index: number; method: string; floor: number | null; fee: number | null; margin: number | null; usable: boolean; compatible: boolean };
+
+/** A route known to cost more than the price (settlement fee and one model call): never offered. */
+const losesMoney = (c: Candidate) => c.margin !== null && c.margin <= 0;
 
 /**
- * The route for one network: a facilitator that accepts the price, that any payer can pay
- * through (Permit2 only as a last resort), then the cheapest to us, then configured order.
+ * The route for one network: a facilitator that accepts the price and does not cost more than it,
+ * that any payer can pay through (Permit2 only as a last resort), then the cheapest to us (a known
+ * fee before an unknown one), then configured order.
  */
 export function chooseRoute(candidates: Candidate[]): Candidate | undefined {
   const cost = (c: Candidate) => c.fee ?? Number.MAX_VALUE;
-  return [...candidates].sort((a, b) => Number(b.usable) - Number(a.usable) || Number(b.compatible) - Number(a.compatible) || cost(a) - cost(b) || a.index - b.index)[0];
+  return [...candidates].sort((a, b) => Number(b.usable) - Number(a.usable) || Number(losesMoney(a)) - Number(losesMoney(b)) || Number(b.compatible) - Number(a.compatible) || cost(a) - cost(b) || a.index - b.index)[0];
 }
 
 function candidateFor(entry: FacilitatorEntry, index: number, kinds: Kind[], fees: Map<string, number> | null, network: string, price: number): Candidate | null {
@@ -277,7 +300,7 @@ function candidateFor(entry: FacilitatorEntry, index: number, kinds: Kind[], fee
   const floorRaw = extra.paymentFloorAvailable === true ? Number(extra.minPaymentAmountUsd) : Number.NaN;
   const floor = Number.isFinite(floorRaw) ? floorRaw : null;
   const fee = fees ? (fees.get(network) ?? entry.flatFee ?? null) : null;
-  return { name: entry.name, index, method, floor, fee, usable: floor === null || price >= floor, compatible: method !== "permit2" };
+  return { name: entry.name, index, method, floor, fee, margin: fee === null ? null : price - fee - MODEL_COST_USD, usable: floor === null || price >= floor, compatible: method !== "permit2" };
 }
 
 /** Which facilitator settles each mainnet network, at what cost and margin (cached 10 min). */
@@ -306,7 +329,8 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
       const price = networkPrice(network);
       const candidates = facilitators.map((f, i) => candidateFor(f, i, supported[i] ?? [], fees[i] ?? null, network, price)).filter((c): c is Candidate => c !== null);
       const route = chooseRoute(candidates);
-      const margin = route && route.fee !== null ? price - route.fee - MODEL_COST_USD : null;
+      const margin = route?.margin ?? null;
+      const reason = !route ? "no_facilitator" : !route.usable ? "below_floor" : losesMoney(route) ? "unprofitable" : undefined;
       return {
         network,
         price_usd: price,
@@ -317,6 +341,8 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
         below_floor: !!route && !route.usable,
         margin_usd: margin === null ? null : Math.round(margin * MICRO) / MICRO,
         margin_pct: margin === null ? null : Math.round((margin / price) * 1000) / 10,
+        offered: !reason,
+        ...(reason ? { reason } : {}),
       };
     });
   })();
@@ -341,7 +367,7 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
  * for the rest), which also covers testnets and a routing table that could not be computed.
  */
 export function routedFacilitators(entries: FacilitatorEntry[], routes: PaymentRoute[] | null): FacilitatorClient[] {
-  const routed = routes ? entries.map((e) => scopedFacilitator(e.client, (n) => routes.some((r) => r.network === n && r.facilitator === e.name))) : [];
+  const routed = routes ? entries.map((e) => scopedFacilitator(e.client, (n) => routes.some((r) => r.network === n && r.offered && r.facilitator === e.name))) : [];
   const byName = new Map(entries.map((e) => [e.name, e.client]));
   const evm = (name: string) => {
     const client = byName.get(name);
@@ -551,7 +577,7 @@ export async function ensureStack(env: WorkerEnv, feeds?: () => Promise<ThreatIn
   // The routing table (cached 10 min) decides the facilitator order; a slow or failed lookup
   // falls back to the default order, and the stack is rebuilt once the table changes.
   const routes = await Promise.race([paymentRouting(env).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 4000))]);
-  const key = JSON.stringify([stackKey(env), routes?.map((r) => [r.network, r.facilitator]) ?? null]);
+  const key = JSON.stringify([stackKey(env), routes?.map((r) => [r.network, r.offered ? r.facilitator : null]) ?? null]);
   if (cached?.key === key) return cached.stack;
   if (pending?.key !== key) {
     const stack = buildStack(env, feeds, routes);

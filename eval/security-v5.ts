@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   );
 
   const st = (await call("GET", "/status")).json as {
-    payments?: Array<{ network: string; facilitator: string | null; transfer_method: string | null; fee_usd: number | null; margin_usd: number | null; margin_pct: number | null; below_floor: boolean }>;
+    payments?: Array<{ network: string; facilitator: string | null; transfer_method: string | null; fee_usd: number | null; margin_usd: number | null; margin_pct: number | null; below_floor: boolean; offered?: boolean; reason?: string }>;
     facilitators?: Array<{ name: string; ok: boolean; networks: string[]; error?: string }>;
   } | null;
   const routes = Array.isArray(st?.payments) ? st.payments : [];
@@ -100,8 +100,9 @@ async function main(): Promise<void> {
   const baseRoute = r["eip155:8453"]?.facilitator ?? null;
   add(
     "status_routes_and_margins",
-    routes.length === 7 && (baseRoute === "payai" || baseRoute === "cdp") && r["eip155:8453"]?.transfer_method === "eip3009" && r[SOL]?.facilitator === "dexter" && routes.every((x) => !x.below_floor && (x.margin_usd === null || x.margin_usd > 0)),
-    routes.map((x) => `${x.network.replace("eip155:", "")}:${x.facilitator}/${x.transfer_method} fee=${x.fee_usd} margin=${x.margin_pct}%`).join(" · "),
+    // v0.6.5: a route that would lose money is not offered (and leaves the challenge); every offered one clears its cost.
+    routes.length === 7 && (baseRoute === "payai" || baseRoute === "cdp") && r["eip155:8453"]?.transfer_method === "eip3009" && r[SOL]?.facilitator === "dexter" && routes.filter((x) => x.offered !== false).every((x) => !x.below_floor && (x.margin_usd === null || x.margin_usd > 0)) && routes.filter((x) => x.offered === false).every((x) => !accepts.some((a) => a.network === x.network)),
+    routes.map((x) => `${x.network.replace("eip155:", "")}:${x.facilitator}/${x.transfer_method} fee=${x.fee_usd} margin=${x.margin_pct}%${x.offered === false ? ` not offered (${x.reason})` : ""}`).join(" · "),
   );
   const facs = Array.isArray(st?.facilitators) ? st.facilitators : [];
   const cdp = facs.find((f) => f.name === "cdp");
