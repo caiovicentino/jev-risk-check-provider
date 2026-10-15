@@ -114,6 +114,29 @@ test("blocks: batches follow the blocks' JSON size, and each batch is handed ove
   assert.deepEqual(events, ["fetch 2", "fetch 10", "fetch 8"]);
 });
 
+test("blocks: a batch no endpoint serves is split, and stays that small for the run; a single block that fails says why per endpoint", async () => {
+  const sizes: number[] = [];
+  // Every endpoint fails a request for more than 2 blocks (a slow download cut off by the timeout).
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Req[];
+    if (url.includes("blastapi")) sizes.push(req.length);
+    if (req.length > 2) return new Response("rate limited", { status: 429 });
+    return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
+  }) as unknown as typeof fetch;
+  const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 7 });
+  const got: number[] = [];
+  await rpc.eachBlocks(100, 109, (blocks) => void got.push(...blocks.map((b) => Number.parseInt(b.number, 16))));
+  assert.deepEqual(got, Array.from({ length: 10 }, (_, i) => 100 + i), "every block, in order");
+  assert.deepEqual(sizes, [7, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], "7 fails, then 3; single blocks get through, and the batch does not grow back");
+  assert.equal(rpc.blockBatchSize(), 1, "the next run starts at the size that worked");
+
+  const down = (async (url: string) => (url.includes("tenderly") ? new Response("[]") : new Response("busy", { status: 503 }))) as unknown as typeof fetch;
+  await assert.rejects(kitWatchRpc("eip155:1", { fetchImpl: down, blockBatch: 1 }).eachBlocks(100, 100, () => undefined), (err: Error) => {
+    assert.match(err.message, /^blocks 100-100 unavailable \(eth-mainnet\.public\.blastapi\.io: HTTP 503; mainnet\.gateway\.tenderly\.co: incomplete; ethereum-rpc\.publicnode\.com: HTTP 503\)$/);
+    return true;
+  });
+});
+
 // --- scan: reads that fail are handed back ------------------------------------------
 
 test("scan: a creation whose code cannot be read is handed back, then evaluated with its original block, transaction and time", async () => {
@@ -192,13 +215,17 @@ function memoryKv(): KVNamespace & { data: Map<string, string>; puts: string[]; 
 }
 
 /** One JSON-RPC stub for every endpoint of both chains; `code` answers eth_getCode (undefined: rate-limited). */
-function chainStub(opts: { head?: number; blocks?: Record<number, RawBlock["transactions"]>; code?: (address: string) => string | undefined; log?: string[] }): typeof fetch {
+function chainStub(opts: { head?: number; blocks?: Record<number, RawBlock["transactions"]>; code?: (address: string) => string | undefined; log?: string[]; missing?: (block: number) => boolean }): typeof fetch {
   return (async (_url: string, init: RequestInit) => {
     const req = JSON.parse(String(init.body)) as Req | Req[];
     const answer = (r: Req) => {
       opts.log?.push(r.method === "eth_getCode" ? `code ${String(r.params[0])}` : r.method);
       if (r.method === "eth_blockNumber") return { jsonrpc: "2.0", id: r.id, result: `0x${(opts.head ?? 0x200).toString(16)}` };
-      if (r.method === "eth_getBlockByNumber") return { jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x6400", transactions: opts.blocks?.[Number.parseInt(r.params[0] as string, 16)] ?? [] } };
+      if (r.method === "eth_getBlockByNumber") {
+        const n = Number.parseInt(r.params[0] as string, 16);
+        if (opts.missing?.(n)) return { jsonrpc: "2.0", id: r.id, result: null };
+        return { jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x6400", transactions: opts.blocks?.[n] ?? [] } };
+      }
       if (r.method === "eth_getCode") {
         const code = opts.code?.(String(r.params[0]).toLowerCase());
         return code === undefined ? { jsonrpc: "2.0", id: r.id, error: { code: -32005, message: "rate limited" } } : { jsonrpc: "2.0", id: r.id, result: code };
@@ -531,4 +558,21 @@ test("cron: the queue is retried by cost: at most 100 reads a run, a threat's au
   assert.equal(creationReads, 100, "100 queued reads retried, not 150");
   assert.equal(JSON.parse(kv.data.get(KW.address(me)) as string).k, "poisoner_delegation", "the threat's authorizations were evaluated");
   assert.deepEqual([st.chains["eip155:1"]?.pending, st.chains["eip155:1"]?.recovered, st.chains["eip155:1"]?.abandoned ?? 0], [150, 15, 0], "the settled delegate's 10 cost nothing; the 150 reads wait");
+});
+
+test("cron: a segment whose blocks no endpoint serves ends the run's scan there: earlier segments are kept, the next run resumes, nothing is skipped", async () => {
+  const kv = seeded();
+  // Base: cursor 499, head 600 − 10 confirmations; blocks from 530 on cannot be fetched this run.
+  const stuck = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600, missing: (n) => n >= 530 && n < 1000 }), now: T })) as KitWatchStats;
+  const base = stuck.chains["eip155:8453"] as ChainStats;
+  assert.deepEqual([base.cursor, base.gaps_total ?? 0], [529, 0], "three segments kept, no hole");
+  assert.match(base.error ?? "", /^Error: blocks 530-530 unavailable \(mainnet\.base\.org: incomplete; /);
+  assert.equal(stuck.chains["eip155:1"]?.error, undefined, "the other chain is untouched");
+  assert.equal(coverageOf(stuck).complete_through["eip155:8453"], 529);
+  const view = kitWatchStatus(stuck, Date.parse(stuck.updated_at)) as { chains: Record<string, Record<string, unknown>> };
+  assert.equal(view.chains["eip155:8453"]?.status, "error");
+
+  const resumed = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600 }), now: T + 60_000 })) as KitWatchStats;
+  const base2 = resumed.chains["eip155:8453"] as ChainStats;
+  assert.deepEqual([base2.cursor, base2.error, base2.gaps_total ?? 0, base2.scanned_blocks], [590, undefined, 0, 91], "resumed at 530: every block from 500 to 590 scanned once");
 });

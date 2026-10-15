@@ -2,6 +2,14 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.7 — 2026-10-15: a slow block fetch no longer stalls a chain
+
+From 21:50 UTC on 2026-10-15 the kit watch's Base scan stopped moving. Every run failed with `blocks … unavailable`: no endpoint answered a 7-block request (about 2.4 MB) within the cron's time budget, although all three answered it in about a second from outside Cloudflare. One failed request discarded the whole run, so the cursor never advanced, and the same request failed again a minute later.
+
+- A batch that no endpoint serves is split in half, down to single blocks, and stays at most that size for the rest of the run. The next run starts at the size that worked.
+- A segment whose blocks still cannot be fetched ends the run's scan there. The segments before it are kept (cursor, entries, queue, stats), and the next run resumes with that segment, so nothing is skipped.
+- The chain's `error` in `/status` states what each endpoint answered (an HTTP status, a timeout, an incomplete batch), by host name only.
+
 ## v0.6.6 — 2026-10-15: the kit watch keeps up with floods of delegations
 
 From 2026-10-03 to 2026-10-15 the kit watch counted about 153,000 holes on Ethereum: every 10-block segment kept at most 1,000 EIP-7702 authorizations and dropped the rest unevaluated. On Base, 7,204 queued items were abandoned: a threat's authorizations past 100 per scan waited in a queue of 500. Much of what a flood carries needs no work: in a sample of 3,000 Ethereum blocks on 2026-10-15, 48% of the 20,653 authorizations went to delegates already judged not a threat, and 43% to one address-poisoning executor.

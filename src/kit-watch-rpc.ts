@@ -30,22 +30,34 @@ const MAX_REQUESTS_PER_ENDPOINT = 4;
  */
 const BLOCK_BYTES_TARGET = 2_000_000;
 
-/** One batch to one endpoint: each item's result in request order (undefined when unanswered) and the JSON's size; null when the call failed. */
-async function postBatch(doFetch: typeof fetch, url: string, requests: readonly RpcRequest[], timeoutMs: number): Promise<{ results: unknown[]; bytes: number } | null> {
+/**
+ * One batch to one endpoint: each item's result in request order (undefined when unanswered) and the
+ * JSON's size; null when the call failed, with the reason handed to `onFail` (an HTTP status, a
+ * timeout, a body that is not a batch answer).
+ */
+async function postBatch(doFetch: typeof fetch, url: string, requests: readonly RpcRequest[], timeoutMs: number, onFail?: (reason: string) => void): Promise<{ results: unknown[]; bytes: number } | null> {
+  const started = Date.now();
   try {
     const res = await doFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requests.map((r, i) => ({ jsonrpc: "2.0", id: i + 1, ...r }))), signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      onFail?.(`HTTP ${res.status}`);
+      return null;
+    }
     const text = await res.text();
     const bytes = text.length;
     const json = JSON.parse(text) as unknown;
-    if (!Array.isArray(json)) return null;
+    if (!Array.isArray(json)) {
+      onFail?.("not a batch answer");
+      return null;
+    }
     const results: unknown[] = Array.from({ length: requests.length }, () => undefined);
     for (const item of json as RpcItem[]) {
       const k = typeof item?.id === "number" ? item.id - 1 : -1;
       if (k >= 0 && k < requests.length && item.error === undefined && item.result !== undefined && item.result !== null) results[k] = item.result;
     }
     return { results, bytes };
-  } catch {
+  } catch (err) {
+    onFail?.((err as { name?: string })?.name === "TimeoutError" ? `timeout after ${Date.now() - started} ms` : String((err as { name?: string })?.name ?? "error"));
     return null;
   }
 }
@@ -108,24 +120,43 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
 
   // Every block of the batch from one endpoint, or the next one. The scan's order is kept (not
   // reordered by health): the endpoints that serve evaluations stay the last fallback for its volume.
+  // A failure states what each endpoint answered (host names only: an operator's URL may hold a key).
   const fetchBlocks = async (numbers: number[]): Promise<{ blocks: RawBlock[]; bytes: number }> => {
     const deadline = Date.now() + timeoutMs;
+    const why: string[] = [];
     for (const url of scanUrls) {
-      if (timeLeft(deadline) < 150) break;
+      const host = new URL(url).hostname;
+      if (timeLeft(deadline) < 150) {
+        why.push(`${host}: no time left`);
+        break;
+      }
       if (numbers.length > (BATCH_LIMITS[url] ?? Number.POSITIVE_INFINITY)) continue;
-      const answer = await postBatch(doFetch, url, numbers.map((b) => ({ method: "eth_getBlockByNumber", params: [`0x${b.toString(16)}`, true] })), timeLeft(deadline));
+      const answer = await postBatch(doFetch, url, numbers.map((b) => ({ method: "eth_getBlockByNumber", params: [`0x${b.toString(16)}`, true] })), timeLeft(deadline), (reason) => why.push(`${host}: ${reason}`));
       const blocks = (answer?.results ?? []) as Array<RawBlock | undefined>;
       if (answer && numbers.every((b, i) => Array.isArray(blocks[i]?.transactions) && Number.parseInt(blocks[i]?.number ?? "", 16) === b)) return { blocks: blocks as RawBlock[], bytes: answer.bytes };
+      if (answer) why.push(`${host}: incomplete`);
     }
-    throw new Error(`blocks ${numbers[0]}-${numbers[numbers.length - 1]} unavailable`);
+    throw new Error(`blocks ${numbers[0]}-${numbers[numbers.length - 1]} unavailable (${why.join("; ")})`);
   };
 
+  // A batch no endpoint served in time is split: smaller requests get through where large ones do
+  // not (a cron placed far from the RPCs downloads slowly), and the batch stays at most that size for
+  // the rest of the run. A single block no endpoint serves ends the fetch: the cursor must not skip it.
+  let ceiling = maxBatch;
   const eachBlocks = async (from: number, to: number, onBatch: (blocks: RawBlock[]) => void): Promise<void> => {
     for (let n = from; n <= to; ) {
       const numbers = Array.from({ length: Math.min(blockBatch, to - n + 1) }, (_, i) => n + i);
-      const { blocks, bytes } = await fetchBlocks(numbers);
-      onBatch(blocks);
-      blockBatch = Math.max(1, Math.min(maxBatch, Math.floor((BLOCK_BYTES_TARGET * numbers.length) / Math.max(1, bytes))));
+      let fetched: { blocks: RawBlock[]; bytes: number };
+      try {
+        fetched = await fetchBlocks(numbers);
+      } catch (err) {
+        if (numbers.length === 1) throw err;
+        ceiling = Math.max(1, Math.floor(numbers.length / 2));
+        blockBatch = ceiling;
+        continue;
+      }
+      onBatch(fetched.blocks);
+      blockBatch = Math.max(1, Math.min(ceiling, Math.floor((BLOCK_BYTES_TARGET * numbers.length) / Math.max(1, fetched.bytes))));
       n += numbers.length;
     }
   };

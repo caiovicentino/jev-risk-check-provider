@@ -223,10 +223,20 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   let scanned = 0;
   let degraded = 0;
   let skipped = 0;
+  // A segment whose blocks no endpoint serves ends this run's scan: the segments before it are kept,
+  // and the next run starts with it (never skipped). The reason is recorded as the chain's error.
+  let scannedTo = from - 1;
+  let blockError: string | null = null;
   for (let n = from; n <= to; n += SEGMENT) {
+    const end = Math.min(to, n + SEGMENT - 1);
     const act = newActivity();
-    // Each batch's block bodies are dropped once its activity is taken: full blocks are large.
-    await rpc.eachBlocks(n, Math.min(to, n + SEGMENT - 1), (blocks) => void addBlocks(act, blocks, chain, settled));
+    try {
+      // Each batch's block bodies are dropped once its activity is taken: full blocks are large.
+      await rpc.eachBlocks(n, end, (blocks) => void addBlocks(act, blocks, chain, settled));
+    } catch (err) {
+      blockError = String(err).slice(0, 300);
+      break;
+    }
     const res = await scanActivity(act, deps);
     entries.push(...res.entries);
     learned.push(...res.learned);
@@ -235,6 +245,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     degraded += res.stats.degraded;
     queue.push(...res.pending);
     hole(res.holes.count, res.holes.block);
+    scannedTo = end;
   }
   // One entry per read; a full queue gives way at its oldest reads.
   const seen = new Set<string>();
@@ -308,7 +319,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   ]);
   stats.chains[chain] = {
     ...prev,
-    cursor: Math.max(to, prev.cursor, from - 1),
+    cursor: Math.max(scannedTo, prev.cursor, from - 1),
     head,
     last_run: new Date().toISOString(),
     scanned_blocks: prev.scanned_blocks + scanned,
@@ -329,7 +340,11 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     dropped_today: (prev.day === today ? (prev.dropped_today ?? 0) : 0) + dropped,
   };
   if (degraded || abandoned || dropped || holes > gapCount(prev)) console.warn(`kit watch ${chain}: ${degraded} code reads queued, ${queue.length} pending, ${abandoned} abandoned, ${dropped} entries not written (caps), ${holes} holes in all`);
-  delete stats.chains[chain]?.error;
+  const done = stats.chains[chain] as ChainStats;
+  if (blockError) {
+    console.error(`kit watch ${chain}: scanned to ${done.cursor} of ${to}; ${blockError}`);
+    done.error = blockError;
+  } else delete done.error;
   return learned;
 }
 
