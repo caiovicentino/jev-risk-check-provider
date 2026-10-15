@@ -1,4 +1,4 @@
-import { addBlocks, authorizationKey, EOA_KINDS, indexFamilies, KIND_RANK, newActivity, rescanPending, scanActivity, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchCoverage, type KitWatchLookup, type PendingRead, type Registry, type ScanDeps, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
+import { addBlocks, authorizationKey, EOA_KINDS, indexFamilies, KIND_RANK, newActivity, rescanPending, scanActivity, settledDelegates, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchCoverage, type KitWatchLookup, type PendingRead, type Registry, type ScanDeps, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
 import type { WorkerEnv } from "./runtime.js";
 
@@ -20,11 +20,14 @@ export const KW = {
 export const WATCH_TTL_S = 365 * 86400;
 const DELEGATE_BENIGN_TTL_S = 30 * 86400;
 /**
- * Watch entries handled per chain per run. A Worker invocation may make at most 1,000 KV
- * operations; each entry costs a read and a write, so both chains together stay far below it,
- * whatever a crafted transaction flags. The most important kinds are written first.
+ * A Worker invocation may make at most 1,000 KV operations. Current watch entries are read in bulk
+ * (one operation per 100 keys, at most MAX_ENTRIES_READ entries per chain per run), and each chain
+ * writes at most `PLAN[chain].writes` entries per run, the most severe first; with the run's other
+ * reads and writes, both chains together stay under ~860 operations whatever a crafted transaction
+ * flags. What the caps leave out is counted as a hole.
  */
-const MAX_WRITES_PER_CHAIN = 200;
+const BULK_READ = 100;
+const MAX_ENTRIES_READ = 2_000;
 /**
  * Watch-entry writes per UTC day, both chains together. Workers Paid includes 1M KV writes a
  * month and the cron's own bookkeeping takes up to ~260k of them; a busy day writes a few thousand
@@ -35,14 +38,22 @@ export const DAILY_WRITE_BUDGET = 25_000;
 const RESERVED_WRITES = 5_000;
 const RESERVED_MIN_RANK = KIND_RANK.drainer_kit_contract;
 /**
- * Reads still failing after the RPC's retries wait in one KV value per chain (written at most once
- * a run, never once per address) and are re-read before new work. A read a day old, or pushed out
- * of a full queue, is abandoned and counted as a hole in the coverage.
+ * Reads still failing after the RPC's retries, and a threat's authorizations past the run's
+ * evaluation budget, wait in one KV value per chain (written at most once a run, never once per
+ * address) and are evaluated before new work. A read a day old, or pushed out of a full queue, is
+ * abandoned and counted as a hole in the coverage. The queue absorbs a flood of delegations to a
+ * threat: at each chain's budget a run works off hundreds of them.
  */
-export const PENDING_MAX = 500;
+export const PENDING_MAX = 10_000;
 const PENDING_TTL_S = 86400;
-/** Queued reads retried per chain per run; those that still fail go to the back. */
-const PENDING_RETRY_PER_RUN = 100;
+/**
+ * Queued items retried per chain per run, chosen by cost in queue order: any number whose delegate
+ * has since settled (nothing left to do), a threat's authorizations up to the run's evaluation
+ * budget, and at most READ_RETRY_PER_RUN reads (creations, delegates still to classify), so an RPC
+ * outage that queued thousands of reads cannot make one run retry them all.
+ */
+const PENDING_RETRY_PER_RUN = 2_000;
+const READ_RETRY_PER_RUN = 100;
 /** /status marks a chain degraded at this many queued reads. */
 export const PENDING_DEGRADED = 50;
 /** The cron runs every minute: stats older than 3 minutes mean the watch has stalled. */
@@ -54,8 +65,6 @@ const KIT_WATCH_STALE_S = 180;
  * the cron's cadence.
  */
 export const LEASE_MS = 5 * 60 * 1000;
-/** Watch-entry reads and writes issued together (they are independent): wall time, not KV operations. */
-const WRITE_CHUNK = 50;
 /**
  * The coverage accounting the stats follow (provider 0.6.4): every hole counted, and the start of
  * the current unbroken coverage kept. Stats from before it are migrated once (`scanChain`).
@@ -68,12 +77,18 @@ export const COVERAGE_V = 2;
  */
 export const LEGACY_DROPPED_READS: Record<WatchChain, number> = { "eip155:1": 9_884, "eip155:8453": 2_090 };
 
-type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag: number };
+/**
+ * `writes`: watch entries a run may write for the chain. `evaluations`: authorizations to threats it
+ * may evaluate (each a signature recovery, a code read and at most one entry), a little under
+ * `writes` so that the entries a run's other findings add still fit. Ethereum carries the floods of
+ * delegations (address-poisoning look-alikes), so it gets the larger share.
+ */
+type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag: number; writes: number; evaluations: number };
 const PLAN: Record<WatchChain, ChainPlan> = {
   // ~5 blocks a minute; a run catches up to 15.
-  "eip155:1": { confirmations: 2, perRun: 15, start: 5, maxLag: 1800 },
+  "eip155:1": { confirmations: 2, perRun: 15, start: 5, maxLag: 1800, writes: 500, evaluations: 450 },
   // ~30 blocks a minute; a run catches up to 90, in segments of 10.
-  "eip155:8453": { confirmations: 10, perRun: 90, start: 30, maxLag: 10800 },
+  "eip155:8453": { confirmations: 10, perRun: 90, start: 30, maxLag: 10800, writes: 300, evaluations: 250 },
 };
 const SEGMENT = 10;
 
@@ -100,6 +115,8 @@ export type ChainStats = {
   block_batch?: number;
   /** Code reads that failed after the RPC's retries, each queued for a later run. */
   degraded?: number;
+  /** Authorizations to a delegate with a settled, harmless verdict: counted, with nothing to evaluate (since 0.6.6). */
+  settled?: number;
   /** Reads queued now, recovered from the queue, and abandoned (a day old, or the queue full). */
   pending?: number;
   recovered?: number;
@@ -168,7 +185,9 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   const to = Math.min(head, from + plan.perRun - 1);
   const delegates = new Map(Object.entries(inputs.delegatesRaw ? (JSON.parse(inputs.delegatesRaw) as Record<string, DelegateVerdict>) : {}));
   const delegatesBefore = JSON.stringify([...delegates]);
-  const deps: ScanDeps = { chain, call: rpc.call, simulate: rpc.simulate, families, delegates, maxProbes: 6, now: () => nowS };
+  const deps: ScanDeps = { chain, call: rpc.call, simulate: rpc.simulate, families, delegates, maxProbes: 6, now: () => nowS, budget: { evaluations: plan.evaluations } };
+  // Authorizations to a delegate with a settled, harmless verdict are counted, never kept.
+  const settled = settledDelegates(delegates, nowS);
   const learned: Family[] = [];
   const entries: ScanResult["entries"] = [];
 
@@ -181,26 +200,38 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   let abandoned = expired.length;
   let recovered = 0;
   if (queue.length) {
-    const retry = queue.slice(0, PENDING_RETRY_PER_RUN);
+    const retry: PendingRead[] = [];
+    const rest: PendingRead[] = [];
+    let threats = 0;
+    let reads = 0;
+    for (const p of queue) {
+      const d = p.authorization?.delegate;
+      const cls = d ? delegates.get(d)?.class : undefined;
+      const cost = d && settled(d) ? "none" : cls === "poisoner" || cls === "sweeper" || cls === "forwarder" ? "evaluation" : "read";
+      const take = retry.length < PENDING_RETRY_PER_RUN && (cost === "none" || (cost === "evaluation" ? threats++ < plan.evaluations : reads++ < READ_RETRY_PER_RUN));
+      (take ? retry : rest).push(p);
+    }
     const res = await rescanPending(retry, deps);
     entries.push(...res.entries);
     learned.push(...res.learned);
     // Recovered: only what this run evaluated; anything it could not is back in the queue.
     recovered = Math.max(0, retry.length - new Set(res.pending.map(pendingKey)).size);
-    queue = [...queue.slice(retry.length), ...res.pending];
+    queue = [...rest, ...res.pending];
     hole(res.holes.count, res.holes.block);
   }
 
   let scanned = 0;
   let degraded = 0;
+  let skipped = 0;
   for (let n = from; n <= to; n += SEGMENT) {
     const act = newActivity();
     // Each batch's block bodies are dropped once its activity is taken: full blocks are large.
-    await rpc.eachBlocks(n, Math.min(to, n + SEGMENT - 1), (blocks) => void addBlocks(act, blocks, chain));
+    await rpc.eachBlocks(n, Math.min(to, n + SEGMENT - 1), (blocks) => void addBlocks(act, blocks, chain, settled));
     const res = await scanActivity(act, deps);
     entries.push(...res.entries);
     learned.push(...res.learned);
     scanned += act.blocks;
+    skipped += act.settled;
     degraded += res.stats.degraded;
     queue.push(...res.pending);
     hole(res.holes.count, res.holes.block);
@@ -230,40 +261,41 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   // The daily budget is shared: what the other chain wrote today counts too.
   const otherWrites = WATCH_CHAINS.reduce((n, c) => n + (c !== chain && stats.chains[c]?.day === today ? (stats.chains[c]?.writes_today ?? 0) : 0), 0);
   let writes = prev.day === today ? (prev.writes_today ?? 0) : 0;
-  let handled = 0;
+  let runWrites = 0;
   let dropped = 0;
   // An entry the caps leave out is a hole too: a verdict on that address would not see it.
   const drop = (entry: WatchEntry) => {
     dropped++;
     hole(1, entry.b ?? to);
   };
-  // Most severe first, in chunks read and written together. Within a chunk the budget is checked
-  // as if every entry wrote, so it is never exceeded; KV operations stay one read per entry handled
-  // and one write per entry written.
-  for (let i = 0; i < ordered.length; ) {
-    const chunk: Array<[string, WatchEntry]> = [];
-    while (i < ordered.length && chunk.length < WRITE_CHUNK && handled + chunk.length < MAX_WRITES_PER_CHAIN) {
-      const pair = ordered[i++] as [string, WatchEntry];
-      const left = DAILY_WRITE_BUDGET - otherWrites - writes - chunk.length;
-      if (left <= 0 || (left <= RESERVED_WRITES && KIND_RANK[pair[1].k] < RESERVED_MIN_RANK)) drop(pair[1]);
-      else chunk.push(pair);
+  // Most severe first. The current entries come in bulk reads; only a new or stronger entry is
+  // written, within the run's cap and the daily budget (the last part of it kept for the most
+  // severe kinds). An entry past MAX_ENTRIES_READ is not read, and counts as a hole.
+  for (let i = 0; i < ordered.length; i += BULK_READ) {
+    const chunk = ordered.slice(i, i + BULK_READ);
+    if (i >= MAX_ENTRIES_READ) {
+      for (const [, entry] of chunk) drop(entry);
+      continue;
     }
-    if (!chunk.length) {
-      // The per-run cap is reached: what is left waits for no one, so it is counted.
-      if (handled >= MAX_WRITES_PER_CHAIN) while (i < ordered.length) drop((ordered[i++] as [string, WatchEntry])[1]);
-      break;
-    }
-    handled += chunk.length;
-    const olds = await Promise.all(chunk.map(([address]) => kv.get(KW.address(address))));
+    const olds = await kv.get(
+      chunk.map(([address]) => KW.address(address)),
+      { type: "text" },
+    );
     const puts: Array<Promise<void>> = [];
-    chunk.forEach(([address, entry], k) => {
-      const raw = olds[k];
+    for (const [address, entry] of chunk) {
+      const raw = olds.get(KW.address(address)) ?? null;
       const old = raw ? (JSON.parse(raw) as WatchEntry) : null;
-      if (old && KIND_RANK[old.k] >= KIND_RANK[entry.k]) return;
+      if (old && KIND_RANK[old.k] >= KIND_RANK[entry.k]) continue;
+      const left = DAILY_WRITE_BUDGET - otherWrites - writes;
+      if (runWrites >= plan.writes || left <= 0 || (left <= RESERVED_WRITES && KIND_RANK[entry.k] < RESERVED_MIN_RANK)) {
+        drop(entry);
+        continue;
+      }
       puts.push(kv.put(KW.address(address), JSON.stringify(old ? { ...entry, t: Math.min(old.t, entry.t) } : entry), { expirationTtl: WATCH_TTL_S }));
       writes++;
+      runWrites++;
       prev.flagged[entry.k] = (prev.flagged[entry.k] ?? 0) + 1;
-    });
+    }
     await Promise.all(puts);
   }
   // Benign verdicts expire (a delegate seen again is simply re-probed); malicious ones never do.
@@ -287,6 +319,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     coverage_v: COVERAGE_V,
     block_batch: rpc.blockBatchSize(),
     degraded: (prev.degraded ?? 0) + degraded,
+    settled: (prev.settled ?? 0) + skipped,
     pending: queue.length,
     recovered: (prev.recovered ?? 0) + recovered,
     abandoned: (prev.abandoned ?? 0) + abandoned,
@@ -402,6 +435,7 @@ export function kitWatchStatus(st: KitWatchStats, nowMs: number): Record<string,
       ...(c.coverage_v === COVERAGE_V && typeof c.unbroken_since === "number" ? { unbroken_since: c.unbroken_since } : {}),
       pending_reads: pending,
       ...(c.degraded ? { degraded_reads: c.degraded } : {}),
+      ...(c.settled ? { settled_authorizations: c.settled } : {}),
       ...(c.recovered ? { recovered_reads: c.recovered } : {}),
       ...(c.abandoned ? { abandoned_reads: c.abandoned } : {}),
       writes_today: sameDay ? (c.writes_today ?? 0) : 0,

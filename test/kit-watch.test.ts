@@ -246,7 +246,7 @@ function memoryKv(): KVNamespace & { data: Map<string, string> } {
   const data = new Map<string, string>();
   return {
     data,
-    get: (async (key: string) => data.get(key) ?? null) as KVNamespace["get"],
+    get: (async (key: string | string[]) => (Array.isArray(key) ? new Map(key.map((k) => [k, data.get(k) ?? null])) : (data.get(key) ?? null))) as KVNamespace["get"],
     put: async (key: string, value: string) => void data.set(key, value),
   };
 }

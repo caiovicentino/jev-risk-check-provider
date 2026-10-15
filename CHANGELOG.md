@@ -2,6 +2,16 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.6 — 2026-10-15: the kit watch keeps up with floods of delegations
+
+From 2026-10-03 to 2026-10-15 the kit watch counted about 153,000 holes on Ethereum: every 10-block segment kept at most 1,000 EIP-7702 authorizations and dropped the rest unevaluated. On Base, 7,204 queued items were abandoned: a threat's authorizations past 100 per scan waited in a queue of 500. Much of what a flood carries needs no work: in a sample of 3,000 Ethereum blocks on 2026-10-15, 48% of the 20,653 authorizations went to delegates already judged not a threat, and 43% to one address-poisoning executor.
+
+- Authorizations to a delegate whose verdict leaves nothing to evaluate (a revocation, or a delegate judged not a threat with no re-probe due) are counted, never kept (`settled_authorizations` in `/status`): they no longer crowd out the rest or become holes. A segment keeps up to 5,000 others.
+- A threat's authorizations are evaluated up to a budget per run (450 on Ethereum, 250 on Base), shared by the queue and the new blocks. The rest wait in the queue, in order, instead of being dropped.
+- The queue holds 10,000 items and is retried by cost: items whose delegate has since settled at no cost, a threat's authorizations within the budget, and at most 100 reads. An RPC outage cannot make one run retry thousands of reads.
+- Current watch entries are read in bulk (100 keys per KV operation), and only a new or stronger one is written: at most 500 a run on Ethereum and 300 on Base, within the invocation's KV limit.
+- The holes already counted stay in `gaps` (every hole ever recorded), and `unbroken_since` shows where unbroken coverage restarts.
+
 ## v0.6.5 — 2026-10-15: no route at a loss
 
 - **Routing never offers a route that costs more than its price.** On 2026-10-15 PayAI's fee on Avalanche had risen to $0.00574 per settlement against a $0.001 price (a margin of −481%), and Coinbase CDP had begun settling Monad at $0.001 against a $0.001 price (−7% with the model call). Routing ranked a facilitator any wallet can pay through above cost, so both networks were offered at a loss; no payment was made on either. A route known to lose money is now never chosen while another clears its cost, and a network with no such route is not offered:

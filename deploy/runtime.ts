@@ -4,6 +4,8 @@ export interface KVNamespace {
   get(key: string): Promise<string | null>;
   get(key: string, opts: { type: "text"; cacheTtl?: number }): Promise<string | null>;
   get(key: string, opts: { type: "arrayBuffer"; cacheTtl?: number }): Promise<ArrayBuffer | null>;
+  /** A bulk read of up to 100 keys: one KV operation; a missing key maps to null. */
+  get(keys: string[], opts: { type: "text"; cacheTtl?: number }): Promise<Map<string, string | null>>;
   put(key: string, value: string | ArrayBuffer | ArrayBufferView, opts?: { expirationTtl?: number }): Promise<void>;
   delete?(key: string): Promise<void>;
   list?(opts: { prefix: string; limit?: number; cursor?: string }): Promise<{ keys: Array<{ name: string }>; list_complete: boolean; cursor?: string }>;

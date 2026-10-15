@@ -115,9 +115,16 @@ export function forwardingGeneralizes(verdict: Pick<DelegateVerdict, "bytes" | "
   return (verdict.code_kind === "tiny" || verdict.code_kind === "logic") && (verdict.bytes ?? Number.POSITIVE_INFINITY) <= FORWARDER_MAX_BYTES;
 }
 
-/** Authorizations recovered per scan, and authorities flagged per delegate per scan: bounds CPU and KV work. */
-const MAX_AUTHORIZATIONS_PER_SCAN = 1000;
-const MAX_FLAGGED_PER_DELEGATE = 100;
+/**
+ * Authorizations a scan keeps for evaluation (a memory bound: past it they are counted as holes).
+ * An authorization whose delegate needs no evaluation per authorization (a revocation, or a delegate
+ * already judged not a threat with no re-probe due) is counted but not kept, and never reaches the
+ * bound: floods of benign batch delegations cost nothing and leave no hole.
+ */
+export const MAX_AUTHORIZATIONS_PER_SCAN = 5000;
+/** A delegate judged not a threat is re-probed this long after its last probe, up to this many probes in all. */
+const REPROBE_AFTER_S = 6 * 3600;
+const MAX_PROBES_PER_DELEGATE = 3;
 
 export type Creation = { address: string; deployer: string; tx: string; block: number };
 export type Authorization = {
@@ -188,16 +195,36 @@ export function authorizationKey(a: RawAuthorization): string {
 /**
  * What a scan evaluates: its blocks' top-level creations and EIP-7702 authorizations, and the
  * blocks' times. It is small, so each block body can be dropped as soon as it has been added.
- * Authorizations past the per-scan bound are not evaluated: they are counted (`dropped`, up to
- * block `droppedBlock`) and become holes in the signed coverage, never a silent omission.
+ * Authorizations to a settled delegate are only counted (`settled`). Past the per-scan bound the
+ * others are not evaluated: they are counted (`dropped`, up to block `droppedBlock`) and become
+ * holes in the signed coverage, never a silent omission.
  */
-export type Activity = { blocks: number; creations: Creation[]; authorizations: Authorization[]; blockTime: Map<number, number>; seen: Set<string>; dropped: number; droppedBlock: number };
+export type Activity = { blocks: number; creations: Creation[]; authorizations: Authorization[]; blockTime: Map<number, number>; seen: Set<string>; settled: number; dropped: number; droppedBlock: number };
 
 export function newActivity(): Activity {
-  return { blocks: 0, creations: [], authorizations: [], blockTime: new Map(), seen: new Set(), dropped: 0, droppedBlock: -1 };
+  return { blocks: 0, creations: [], authorizations: [], blockTime: new Map(), seen: new Set(), settled: 0, dropped: 0, droppedBlock: -1 };
 }
 
-export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: WatchChain): Activity {
+/** A verdict that is not a threat but is re-checked: forwarding behaviour is probed a few times, hours apart. */
+export function reprobeDue(v: DelegateVerdict | undefined, nowS: number): boolean {
+  return !!v && v.class === "not_forwarding" && (v.probes ?? 0) < MAX_PROBES_PER_DELEGATE && nowS - v.at > REPROBE_AFTER_S;
+}
+
+/**
+ * Delegates whose authorizations a scan has nothing to evaluate for (scanActivity reads, probes and
+ * flags nothing for them): a revocation (the zero address), a drainer kit's code (a contract, not a
+ * delegation target the watch flags), and a delegate judged not a threat with no re-probe due. The
+ * verdicts are read live, so one a scan reaches applies to the rest of the run.
+ */
+export function settledDelegates(delegates: ReadonlyMap<string, DelegateVerdict>, nowS: number): (delegate: string) => boolean {
+  return (delegate) => {
+    if (delegate === ZERO) return true;
+    const v = delegates.get(delegate);
+    return !!v && (v.class === "drainer_kit" || (v.class === "not_forwarding" && !reprobeDue(v, nowS)));
+  };
+}
+
+export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: WatchChain, settled?: (delegate: string) => boolean): Activity {
   for (const b of blocks) {
     const found = blockActivity(b, chain);
     act.creations.push(...found.creations);
@@ -205,6 +232,10 @@ export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: Wat
       const key = authorizationKey(a.raw);
       if (act.seen.has(key)) continue;
       act.seen.add(key);
+      if (settled?.(a.delegate)) {
+        act.settled++;
+        continue;
+      }
       if (act.authorizations.length >= MAX_AUTHORIZATIONS_PER_SCAN) {
         act.dropped++;
         act.droppedBlock = Math.max(act.droppedBlock, a.block);
@@ -297,6 +328,12 @@ export type ScanDeps = {
   now?: () => number;
   /** Probes per scan (each is one eth_simulateV1 call). */
   maxProbes?: number;
+  /**
+   * Authorizations to threats the run may evaluate (each: a signature recovery and a code read, and
+   * at most one watch entry), shared by every scan of the run and spent in place. Past it they wait
+   * for a later run, in order. Unbounded when absent (offline scripts).
+   */
+  budget?: { evaluations: number };
 };
 
 export type ScanResult = {
@@ -305,17 +342,14 @@ export type ScanResult = {
   learned: Family[];
   /**
    * What the scan could not evaluate yet: a failed read, a delegate it could not probe (the probe
-   * budget spent, the simulation down), authorizations past the per-delegate bound. The caller
-   * queues it for a later run.
+   * budget spent, the simulation down), a threat's authorizations past the run's evaluation budget.
+   * The caller queues it for a later run.
    */
   pending: PendingRead[];
   /** Activity the scan dropped unevaluated (past the per-scan bound): holes in the coverage, up to block `block`. */
   holes: { count: number; block: number };
   stats: { blocks: number; creations: number; authorizations: number; delegates_new: number; probes: number; kit_contracts: number; flagged_authorities: number; degraded: number; deferred: number };
 };
-
-const REPROBE_AFTER_S = 6 * 3600;
-const MAX_PROBES_PER_DELEGATE = 3;
 
 /** Scans already-fetched blocks: classifies new contracts and every delegate authorized in them. */
 export async function scanBlocks(blocks: RawBlock[], deps: ScanDeps): Promise<ScanResult> {
@@ -357,10 +391,8 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
     pending.push({ ...item, t: seenAt(it.block), q: queuedAt(it) ?? now() });
   };
 
-  const reprobeDue = (v: DelegateVerdict | undefined) => !!v && v.class === "not_forwarding" && (v.probes ?? 0) < MAX_PROBES_PER_DELEGATE && now() - v.at > REPROBE_AFTER_S;
-
   // --- new contracts: kit families, and delegates deployed before their first use ---
-  const needCode = (d: string) => d !== ZERO && (!deps.delegates.has(d) || reprobeDue(deps.delegates.get(d)));
+  const needCode = (d: string) => d !== ZERO && (!deps.delegates.has(d) || reprobeDue(deps.delegates.get(d), now()));
   const codeTargets = [...new Set([...creations.map((c) => c.address), ...authorizations.map((a) => a.delegate).filter(needCode)])];
   const facts = new Map<string, CodeFacts>();
   for (let i = 0; i < codeTargets.length; i += 50) {
@@ -395,10 +427,13 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
 
   // --- delegates: known families, then behaviour ---
   const byDelegate = new Map<string, Authorization[]>();
-  for (const a of authorizations) if (a.delegate !== ZERO) byDelegate.set(a.delegate, [...(byDelegate.get(a.delegate) ?? []), a]);
+  for (const a of authorizations) {
+    if (a.delegate === ZERO) continue;
+    const list = byDelegate.get(a.delegate);
+    if (list) list.push(a);
+    else byDelegate.set(a.delegate, [a]);
+  }
   for (const [delegate, auths] of byDelegate) {
-    // The authorizations evaluated per delegate in one scan; the rest wait for a later one.
-    const scope = auths.slice(0, MAX_FLAGGED_PER_DELEGATE);
     const deferAll = () => {
       for (const a of auths) defer({ authorization: a });
     };
@@ -418,7 +453,7 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
       deps.delegates.set(delegate, verdict);
     }
     const unprobed = verdict.class === "unprobed";
-    const probeDue = (unprobed || reprobeDue(verdict)) && stats.probes < maxProbes;
+    const probeDue = (unprobed || reprobeDue(verdict, now())) && stats.probes < maxProbes;
     // A delegate still unprobed after this scan is unknown, never "not a threat": its
     // authorizations wait for a scan with probe budget and a working simulation.
     let unknownBehaviour = unprobed && !probeDue;
@@ -471,16 +506,21 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
     }
     if (verdict.class === "not_forwarding" || verdict.class === "unprobed" || verdict.class === "drainer_kit") continue;
     const kind: WatchKind = verdict.class === "poisoner" ? "poisoner_delegation" : verdict.class === "sweeper" ? "sweeper_delegation" : "forwarding_delegation";
-    // Past the per-delegate bound, a threat's authorizations wait for a later scan (never dropped).
-    for (const a of auths.slice(MAX_FLAGGED_PER_DELEGATE)) {
+    // Past the run's evaluation budget, a threat's authorizations wait for a later run (never dropped).
+    const take = deps.budget ? Math.max(0, Math.min(auths.length, deps.budget.evaluations)) : auths.length;
+    if (deps.budget) deps.budget.evaluations -= take;
+    for (const a of auths.slice(take)) {
       stats.deferred++;
       defer({ authorization: a });
     }
     // Only authorities whose account delegates to it right now: a stale or replayed authorization flags no one.
     const recovered: Array<{ address: string; auth: Authorization }> = [];
-    for (const a of scope) {
+    const signers = new Set<string>();
+    for (const a of auths.slice(0, take)) {
       const authority = await signerOf(a);
-      if (authority && !recovered.some((r) => r.address === authority)) recovered.push({ address: authority, auth: a });
+      if (!authority || signers.has(authority)) continue;
+      signers.add(authority);
+      recovered.push({ address: authority, auth: a });
     }
     if (!recovered.length) continue;
     const codes = await deps.call(recovered.map((r) => ({ method: "eth_getCode", params: [r.address, "latest"] }))).catch(() => [] as unknown[]);

@@ -194,7 +194,7 @@ It refuses unless the tree is clean, HEAD is `main` on GitHub, CI passed on it, 
 
 Then verify:
 - `curl https://x402check.xyz/healthz` shows the version, the commit and `attestation_key: "ok"`;
-- `/status` shows routes, facilitators all ok, and kit watch with lag 0 and gaps 0;
+- `/status` shows routes, facilitators all ok, and kit watch with lag near 0 and no new gaps (`unbroken_since` not moving);
 - `curl -H "Accept: text/html" https://x402check.xyz/` shows the site.
 
 Local dev uses **port 8799**: `npm run dev:worker`.
