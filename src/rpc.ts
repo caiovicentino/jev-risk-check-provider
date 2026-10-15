@@ -28,14 +28,15 @@ export const SIMULATION_ENDPOINTS: Record<string, readonly string[]> = {
 };
 
 /**
- * Block scanning for the kit watch (src/kit-watch-rpc.ts): full blocks in batches of 10,
- * about 20 GB a day for both chains. It runs on endpoints other than the ones that serve
- * evaluations, so the scan's volume can never rate-limit a paid check; the evaluation
- * primaries are the last fallback.
+ * Block scanning for the kit watch (src/kit-watch-rpc.ts): full blocks, about 20 GB a day for
+ * both chains. Each batch starts at the next endpoint that serves no evaluation, so no public
+ * endpoint takes the whole volume (from 2026-10-15 the Base endpoints answered the cron's shared
+ * egress with HTTP 429), and the scan can never rate-limit a paid check: the endpoints that serve
+ * evaluations (RPC_ENDPOINTS, SIMULATION_ENDPOINTS) are only the last fallback.
  */
 export const SCAN_ENDPOINTS: Record<string, readonly string[]> = {
   "eip155:1": ["https://eth-mainnet.public.blastapi.io", "https://mainnet.gateway.tenderly.co", "https://ethereum-rpc.publicnode.com"],
-  "eip155:8453": ["https://mainnet.base.org", "https://base-mainnet.public.blastapi.io", "https://base-rpc.publicnode.com"],
+  "eip155:8453": ["https://base.gateway.tenderly.co", "https://1rpc.io/base", "https://base-mainnet.public.blastapi.io", "https://base.meowrpc.com", "https://base.drpc.org", "https://mainnet.base.org", "https://base-rpc.publicnode.com"],
 };
 
 /**
@@ -50,7 +51,7 @@ export const READ_ENDPOINTS: Record<string, readonly string[]> = {
 };
 
 /** Keyless tiers that refuse a whole JSON-RPC batch of more calls than this. */
-export const BATCH_LIMITS: Record<string, number> = { "https://eth.drpc.org": 3, "https://mainnet.base.org": 10, "https://mainnet.gateway.tenderly.co": 10 };
+export const BATCH_LIMITS: Record<string, number> = { "https://eth.drpc.org": 3, "https://base.drpc.org": 3, "https://base.meowrpc.com": 5, "https://mainnet.base.org": 10, "https://mainnet.gateway.tenderly.co": 10, "https://base.gateway.tenderly.co": 10, "https://1rpc.io/base": 10 };
 
 /** An operator override (one URL) takes the primary slot; the defaults remain as fallbacks. */
 export function endpointsFor(network: string, defaults: Record<string, readonly string[]>, override?: Record<string, string>): string[] {

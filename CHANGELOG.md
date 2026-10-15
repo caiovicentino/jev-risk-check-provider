@@ -2,6 +2,13 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.8 — 2026-10-15: the Base scan spreads its load
+
+With v0.6.7's diagnostics, the Base failures turned out to be rate limits: from 22:11 UTC all three Base scan endpoints answered the cron with HTTP 429. The scan downloads about 15 GB of Base blocks a day, and Cloudflare's egress is shared. Base's official RPC took that volume first, although it also serves paid evaluations as their fallback.
+
+- The Base scan now spreads its blocks over five public endpoints that serve no evaluation (Tenderly, 1RPC, BlastAPI, MeowRPC, dRPC), starting each batch at the next one, within each endpoint's batch limit. Base's official RPC and publicnode, which serve paid evaluations, are only the last fallback.
+- Ethereum's scan alternates between BlastAPI and Tenderly the same way; publicnode stays the last fallback.
+
 ## v0.6.7 — 2026-10-15: a slow block fetch no longer stalls a chain
 
 From 21:50 UTC on 2026-10-15 the kit watch's Base scan stopped moving. Every run failed with `blocks … unavailable`: no endpoint answered a 7-block request (about 2.4 MB) within the cron's time budget, although all three answered it in about a second from outside Cloudflare. One failed request discarded the whole run, so the cursor never advanced, and the same request failed again a minute later.

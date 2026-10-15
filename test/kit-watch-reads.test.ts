@@ -105,21 +105,23 @@ test("blocks: batches follow the blocks' JSON size, and each batch is handed ove
   });
   assert.deepEqual(got, Array.from({ length: 10 }, (_, i) => 100 + i), "every block, in order");
   // 2 blocks of ~800 KB fill the 2 MB a request asks for. The incomplete batch is fetched whole from
-  // the next endpoint, and the scan's order is kept for the next batch (evaluation endpoints last).
-  assert.deepEqual(events, ["fetch 2", "fetch 2 mainnet.gateway.tenderly.co", "hand 2", "fetch 2", "hand 2", "fetch 2", "hand 2", "fetch 2", "hand 2", "fetch 2", "hand 2"]);
+  // the next endpoint. Batches alternate between the endpoints that serve no evaluation (BlastAPI,
+  // Tenderly): publicnode, which serves evaluations, is only the last fallback and is never reached.
+  const T_ = "mainnet.gateway.tenderly.co";
+  assert.deepEqual(events, ["fetch 2", `fetch 2 ${T_}`, "hand 2", `fetch 2 ${T_}`, "hand 2", "fetch 2", "hand 2", `fetch 2 ${T_}`, "hand 2", "fetch 2", "hand 2"]);
   // Small blocks grow the batch up to the endpoints' limit of 10.
   pad = "";
   events.length = 0;
   assert.equal((await rpc.blocks(200, 219)).length, 20);
-  assert.deepEqual(events, ["fetch 2", "fetch 10", "fetch 8"]);
+  assert.deepEqual(events, [`fetch 2 ${T_}`, "fetch 10", `fetch 8 ${T_}`]);
 });
 
 test("blocks: a batch no endpoint serves is split, and stays that small for the run; a single block that fails says why per endpoint", async () => {
   const sizes: number[] = [];
   // Every endpoint fails a request for more than 2 blocks (a slow download cut off by the timeout).
-  const fetchImpl = (async (url: string, init: RequestInit) => {
+  const fetchImpl = (async (_url: string, init: RequestInit) => {
     const req = JSON.parse(String(init.body)) as Req[];
-    if (url.includes("blastapi")) sizes.push(req.length);
+    sizes.push(req.length);
     if (req.length > 2) return new Response("rate limited", { status: 429 });
     return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
   }) as unknown as typeof fetch;
@@ -127,7 +129,7 @@ test("blocks: a batch no endpoint serves is split, and stays that small for the 
   const got: number[] = [];
   await rpc.eachBlocks(100, 109, (blocks) => void got.push(...blocks.map((b) => Number.parseInt(b.number, 16))));
   assert.deepEqual(got, Array.from({ length: 10 }, (_, i) => 100 + i), "every block, in order");
-  assert.deepEqual(sizes, [7, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], "7 fails, then 3; single blocks get through, and the batch does not grow back");
+  assert.deepEqual(sizes, [7, 7, 7, 3, 3, 3, ...Array.from({ length: 10 }, () => 1)], "7 fails on all three endpoints, then 3; single blocks get through, and the batch does not grow back");
   assert.equal(rpc.blockBatchSize(), 1, "the next run starts at the size that worked");
 
   const down = (async (url: string) => (url.includes("tenderly") ? new Response("[]") : new Response("busy", { status: 503 }))) as unknown as typeof fetch;
@@ -566,7 +568,8 @@ test("cron: a segment whose blocks no endpoint serves ends the run's scan there:
   const stuck = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600, missing: (n) => n >= 530 && n < 1000 }), now: T })) as KitWatchStats;
   const base = stuck.chains["eip155:8453"] as ChainStats;
   assert.deepEqual([base.cursor, base.gaps_total ?? 0], [529, 0], "three segments kept, no hole");
-  assert.match(base.error ?? "", /^Error: blocks 530-530 unavailable \(mainnet\.base\.org: incomplete; /);
+  // Every endpoint was asked; the two that serve evaluations last.
+  assert.match(base.error ?? "", /^Error: blocks 530-530 unavailable \((?:[a-z0-9.-]+: incomplete; ){5}mainnet\.base\.org: incomplete; base-rpc\.publicnode\.com: incomplete\)$/);
   assert.equal(stuck.chains["eip155:1"]?.error, undefined, "the other chain is untouched");
   assert.equal(coverageOf(stuck).complete_through["eip155:8453"], 529);
   const view = kitWatchStatus(stuck, Date.parse(stuck.updated_at)) as { chains: Record<string, Record<string, unknown>> };

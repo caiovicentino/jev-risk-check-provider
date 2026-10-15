@@ -1,4 +1,4 @@
-import { BATCH_LIMITS, endpointsFor, READ_ENDPOINTS, rpcWithFallback, SCAN_ENDPOINTS, SIMULATION_ENDPOINTS } from "./rpc.js";
+import { BATCH_LIMITS, endpointsFor, READ_ENDPOINTS, RPC_ENDPOINTS, rpcWithFallback, SCAN_ENDPOINTS, SIMULATION_ENDPOINTS } from "./rpc.js";
 import type { BatchCall } from "./code-fingerprint.js";
 import type { RawBlock, SimulateCall, WatchChain } from "./kit-watch.js";
 
@@ -118,13 +118,22 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     return n;
   };
 
-  // Every block of the batch from one endpoint, or the next one. The scan's order is kept (not
-  // reordered by health): the endpoints that serve evaluations stay the last fallback for its volume.
-  // A failure states what each endpoint answered (host names only: an operator's URL may hold a key).
+  // Every block of the batch from one endpoint, or the next one. Each batch starts at the next
+  // endpoint that serves no evaluation, so the volume is spread; the endpoints that serve
+  // evaluations stay the last fallback, in order (not reordered by health). A failure states what
+  // each endpoint answered (host names only: an operator's URL may hold a key).
+  const evaluation = new Set([...(RPC_ENDPOINTS[chain] ?? []), ...(SIMULATION_ENDPOINTS[chain] ?? [])]);
+  const rotating = scanUrls.filter((u) => !evaluation.has(u));
+  const lastResort = scanUrls.filter((u) => evaluation.has(u));
+  let turn = 0;
+  const scanOrder = (): string[] => {
+    const k = rotating.length ? turn++ % rotating.length : 0;
+    return [...rotating.slice(k), ...rotating.slice(0, k), ...lastResort];
+  };
   const fetchBlocks = async (numbers: number[]): Promise<{ blocks: RawBlock[]; bytes: number }> => {
     const deadline = Date.now() + timeoutMs;
     const why: string[] = [];
-    for (const url of scanUrls) {
+    for (const url of scanOrder()) {
       const host = new URL(url).hostname;
       if (timeLeft(deadline) < 150) {
         why.push(`${host}: no time left`);
