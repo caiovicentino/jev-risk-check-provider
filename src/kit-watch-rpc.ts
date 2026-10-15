@@ -130,17 +130,27 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     const k = rotating.length ? turn++ % rotating.length : 0;
     return [...rotating.slice(k), ...rotating.slice(0, k), ...lastResort];
   };
+  // An endpoint that answered 429 is not asked for blocks again in this run: more requests would
+  // only prolong its limit. When every endpoint is limited the scan stops, and the next run resumes.
+  const limited = new Set<string>();
   const fetchBlocks = async (numbers: number[]): Promise<{ blocks: RawBlock[]; bytes: number }> => {
     const deadline = Date.now() + timeoutMs;
     const why: string[] = [];
     for (const url of scanOrder()) {
       const host = new URL(url).hostname;
+      if (limited.has(url)) {
+        why.push(`${host}: HTTP 429 earlier in this run`);
+        continue;
+      }
       if (timeLeft(deadline) < 150) {
         why.push(`${host}: no time left`);
         break;
       }
       if (numbers.length > (BATCH_LIMITS[url] ?? Number.POSITIVE_INFINITY)) continue;
-      const answer = await postBatch(doFetch, url, numbers.map((b) => ({ method: "eth_getBlockByNumber", params: [`0x${b.toString(16)}`, true] })), timeLeft(deadline), (reason) => why.push(`${host}: ${reason}`));
+      const answer = await postBatch(doFetch, url, numbers.map((b) => ({ method: "eth_getBlockByNumber", params: [`0x${b.toString(16)}`, true] })), timeLeft(deadline), (reason) => {
+        why.push(`${host}: ${reason}`);
+        if (reason === "HTTP 429") limited.add(url);
+      });
       const blocks = (answer?.results ?? []) as Array<RawBlock | undefined>;
       if (answer && numbers.every((b, i) => Array.isArray(blocks[i]?.transactions) && Number.parseInt(blocks[i]?.number ?? "", 16) === b)) return { blocks: blocks as RawBlock[], bytes: answer.bytes };
       if (answer) why.push(`${host}: incomplete`);
@@ -159,7 +169,8 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
       try {
         fetched = await fetchBlocks(numbers);
       } catch (err) {
-        if (numbers.length === 1) throw err;
+        // A single block, or every endpoint rate-limited: a smaller request would fare no better.
+        if (numbers.length === 1 || scanUrls.every((u) => limited.has(u))) throw err;
         ceiling = Math.max(1, Math.floor(numbers.length / 2));
         blockBatch = ceiling;
         continue;

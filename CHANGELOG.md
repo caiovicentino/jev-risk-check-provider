@@ -2,6 +2,13 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.9 — 2026-10-15: no retries into a rate limit
+
+While Base caught up after v0.6.8, every Base endpoint answered some requests with HTTP 429. Each batch still asked every endpoint in turn, including ones that had just refused, which only prolonged their limits.
+
+- An endpoint that answers 429 is not asked for blocks again in the same run.
+- When every endpoint is limited, the scan stops at once with the segments it completed, and the next run resumes. A batch is split only after other failures (too large, or cut off by the timeout), not after a rate limit.
+
 ## v0.6.8 — 2026-10-15: the Base scan spreads its load
 
 With v0.6.7's diagnostics, the Base failures turned out to be rate limits: from 22:11 UTC all three Base scan endpoints answered the cron with HTTP 429. The scan downloads about 15 GB of Base blocks a day, and Cloudflare's egress is shared. Base's official RPC took that volume first, although it also serves paid evaluations as their fallback.

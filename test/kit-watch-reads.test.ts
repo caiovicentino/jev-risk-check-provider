@@ -118,11 +118,11 @@ test("blocks: batches follow the blocks' JSON size, and each batch is handed ove
 
 test("blocks: a batch no endpoint serves is split, and stays that small for the run; a single block that fails says why per endpoint", async () => {
   const sizes: number[] = [];
-  // Every endpoint fails a request for more than 2 blocks (a slow download cut off by the timeout).
+  // Every endpoint refuses a request for more than 2 blocks (too large, or cut off by the timeout).
   const fetchImpl = (async (_url: string, init: RequestInit) => {
     const req = JSON.parse(String(init.body)) as Req[];
     sizes.push(req.length);
-    if (req.length > 2) return new Response("rate limited", { status: 429 });
+    if (req.length > 2) return new Response("too large", { status: 413 });
     return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
   }) as unknown as typeof fetch;
   const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 7 });
@@ -578,4 +578,25 @@ test("cron: a segment whose blocks no endpoint serves ends the run's scan there:
   const resumed = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600 }), now: T + 60_000 })) as KitWatchStats;
   const base2 = resumed.chains["eip155:8453"] as ChainStats;
   assert.deepEqual([base2.cursor, base2.error, base2.gaps_total ?? 0, base2.scanned_blocks], [590, undefined, 0, 91], "resumed at 530: every block from 500 to 590 scanned once");
+});
+
+test("blocks: an endpoint that answers 429 is not asked again in the run; when all are limited the fetch fails at once", async () => {
+  const asked: string[] = [];
+  const limiting = new Set(["blastapi"]);
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Req[];
+    asked.push(host(url));
+    if ([...limiting].some((name) => url.includes(name))) return new Response("slow down", { status: 429 });
+    return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
+  }) as unknown as typeof fetch;
+  const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 1 });
+  await rpc.eachBlocks(100, 103, () => undefined);
+  // Block 100 alone, then 101-103 in one batch (small blocks grow it): BlastAPI is asked once.
+  assert.deepEqual(asked, ["eth-mainnet.public.blastapi.io", "mainnet.gateway.tenderly.co", "mainnet.gateway.tenderly.co"]);
+  asked.length = 0;
+  limiting.add("tenderly").add("publicnode");
+  const batch = rpc.blockBatchSize();
+  await assert.rejects(rpc.eachBlocks(104, 110, () => undefined), /^Error: blocks 104-110 unavailable \(eth-mainnet\.public\.blastapi\.io: HTTP 429 earlier in this run; mainnet\.gateway\.tenderly\.co: HTTP 429; ethereum-rpc\.publicnode\.com: HTTP 429\)$/);
+  assert.deepEqual(asked, ["mainnet.gateway.tenderly.co", "ethereum-rpc.publicnode.com"], "nothing more for BlastAPI, and no smaller retries");
+  assert.equal(rpc.blockBatchSize(), batch, "a rate limit does not shrink the batch");
 });
