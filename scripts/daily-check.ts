@@ -291,6 +291,16 @@ async function main(): Promise<void> {
     const m = parse<{ metamask?: { as_of?: string }; ofac?: { publish_date?: string } }>((await http(`https://raw.githubusercontent.com/${REPO}/feeds/manifest.json`)).text);
     published = { ...(m?.metamask?.as_of ? { metamask: m.metamask.as_of } : {}), ...(m?.ofac?.publish_date ? { ofac: m.ofac.publish_date } : {}) };
   });
+  // /status describes the isolate that answered, and a new isolate's first answer comes before its
+  // feeds load (a paid request waits for them; /status does not). A list behind the published one
+  // is looked at again on up to two more isolates before it counts.
+  if (status && published.metamask && status.data.metamask_phishing.as_of < published.metamask) {
+    for (let i = 0; i < 2 && status.data.metamask_phishing.as_of < published.metamask; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const again = parse<Status>((await http("/status")).text);
+      if (again && again.data.metamask_phishing.as_of > status.data.metamask_phishing.as_of) status.data.metamask_phishing = again.data.metamask_phishing;
+    }
+  }
   if (!status) add("status", "fail", `HTTP ${statusRes.status}: not JSON`);
   else {
     checks.push(...statusChecks(status, prev, published));

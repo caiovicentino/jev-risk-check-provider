@@ -344,9 +344,11 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
 
 ---
 
-## 5. State as of 2026-10-15 (update when it changes)
+## 5. State as of 2026-10-16 (update when it changes)
 
-- **Production:** v0.6.9 (2026-10-15, commit `31a6018`), five releases that day:
+- **Production:** v0.6.10 (2026-10-16, commit `4bfd802`): new isolates take the MetaMask list from KV (`feed:metamask:v1`), as OFAC; before it they checked domains against the list embedded at deploy (16 days behind on 2026-10-15) until their own refresh finished. The daily maintenance routine (`docs/MAINTENANCE.md`) found it on its first run.
+- **Daily maintenance:** a Claude Code session cron in the owner's open session (job `11c03462`, every day at 09:07 in his time zone, created 2026-10-16; each run renews it from day 6, state in `.cache/maintenance/state.json`).
+- **The day before:** v0.6.9 (2026-10-15, commit `31a6018`), five releases that day:
   - v0.6.5: routing never offers a route that loses money. Avalanche left the 402 challenge (PayAI's fee $0.00574 against a $0.001 price, below Dexter's floor), and Monad moved to Dexter (Permit2). `/status` → `payments` shows `offered` and `reason`.
   - v0.6.6: the kit watch keeps up with floods of EIP-7702 delegations. Authorizations to settled harmless delegates are counted, not kept. A threat's authorizations are evaluated up to a per-run budget (450 on Ethereum, 250 on Base), and the rest wait in a 10,000-item queue retried by cost. Entries are read in bulk.
   - v0.6.7: a segment whose blocks cannot be fetched ends the run's scan without losing the segments before it, a failed batch is split, and the chain's `error` says what each endpoint answered.
