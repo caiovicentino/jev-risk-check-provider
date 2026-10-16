@@ -399,6 +399,11 @@ Reading: the model detects risk that is **present in the content it is given**. 
 | `npm run security:v5` on v0.6.3 (commit `f3516b1`, 2026-10-03) | **11/11 PASS** | the same probes after the evaluation release; per call 5,656 ms end to end (one sample), from credits 1,406 and 634 ms; both settlements by CDP |
 | `eval/replay.ts` on v0.6.0: three copies of one payment at once | **PASS** | one evaluated and settled; two `409 payment_already_used`; a later copy 409 |
 | `eval/replay.ts` on v0.6.2 (commit `c4a5f33`): four spellings of one payment at once (the original, an exact copy, every JSON key reversed, the nonce's hex upper-cased plus an extra field) | **PASS** | one evaluated and settled on Base (`0x6d7f4ac8…`): the re-spelled copy, which CDP accepted; the other three `409 payment_already_used`; a later copy 402 (the facilitator saw the nonce used). On v0.6.1 each spelling was its own claim (security review F1) |
+| `eval/disconnect.ts` on v0.6.15 (commit `a9904bf`, 2026-10-16): a paid request abandoned 300 ms after it left; its payment resent 15 s later | **PASS** | the abandoned request settled nothing; the resend was evaluated and settled once (`0xefea8c38…`) |
+| the same, abandoned after 1.5 s | **FAIL** | the resend got `409 payment_already_used`, and nothing was charged. The client left during admission, which ran before the work was handed to `waitUntil`, so the cancelled request left its payment claimed for a day. Fixed in v0.6.16 |
+| `eval/disconnect.ts` on v0.6.16 (commit `88e3749`): abandoned after 1.5 s | **PASS** | the resend settled once (`0xab5522f0…`) |
+| the same, abandoned after 2.5 s | charged once, verdict lost: the documented limit | the evaluation had finished and settlement was under way when the client left. The payment settled once ($0.0035; the payer's balance confirms it), and the resend was refused (402). Once settlement starts, it completes |
+| `eval/disconnect.ts --credits` on v0.6.16 (commit `d26efee`): a check paid from credits, abandoned after 400 ms | **PASS** | the balance read $0.001 before and after. Cloudflare's tail showed the request `canceled` by the disconnect and, from the work handed to `waitUntil`, the line `client left before its verdict on /v1/risk-check: the debit was refunded` |
 
 The `security:v5` probes cover:
 - **the price table:** the discovery document and the 402 carry the seven per-network prices, and none mismatches. Base is offered through EIP-3009, so any wallet can pay it gaslessly;
@@ -541,6 +546,8 @@ npx tsx scripts/redact-evidence.ts --check   # no ScamSniffer-only entry in the 
 # ↓ against production: every evaluation is paid (funded payer key and credit token in ~/.config/paysol)
 PAY_NETWORK=eip155:8453 npm run security:v5    # spends $0.1035: one per-call check and a $0.10 credit pack; reports who settled each
 PAY_NETWORK=eip155:8453 npx tsx eval/replay.ts # single-use payments: $0.0035 (three copies of one payment, one settles)
+PAY_NETWORK=eip155:8453 npx tsx eval/disconnect.ts --abandon-ms 1500  # a client that leaves mid-check: $0.0035 (the resend settles once)
+npx tsx eval/disconnect.ts --credits --abandon-ms 400                   # the same from prepaid credits: free when the debit is refunded
 PAY=none npx tsx eval/bazaar.ts              # the Bazaar listing, read-only; without PAY=none it pays two checks ($0.007)
 npx tsx eval/mcp-pay.ts                      # one real payment through x402check_pay, to x402check's own pay_to, a trusted payee not checked ($0.0035)
 npx tsx eval/pay-guard.ts --n 25 --seed 402  # 25 Bazaar payees checked from prepaid credits ($0.025); nothing paid to them

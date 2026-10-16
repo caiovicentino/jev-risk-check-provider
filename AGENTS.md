@@ -213,6 +213,7 @@ Local dev uses **port 8799**: `npm run dev:worker`.
 Each paid probe spends from the probe payer to our own `pay_to`, or from its prepaid credits:
 - `X402CHECK_BASE=https://x402check.xyz PAY_NETWORK=eip155:8453 npm run security:v5` costs about $0.10;
 - `PAY_NETWORK=eip155:8453 npx tsx eval/replay.ts` costs $0.0035 (single-use payments);
+- `PAY_NETWORK=eip155:8453 npx tsx eval/disconnect.ts` costs $0.0035 (a client that leaves mid-check strands nothing; `--credits` spends nothing when the refund holds);
 - `npx tsx eval/bazaar.ts` costs $0.007 (`PAY=none` reads the listing only);
 - `npx tsx eval/pay-guard.ts --n 25 --seed 402` costs $0.025 in credits;
 - `npx tsx eval/guard.ts` costs nothing (in-process provider).
