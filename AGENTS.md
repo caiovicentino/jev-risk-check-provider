@@ -176,8 +176,8 @@ Run these before committing:
 
 ```bash
 npm run typecheck && npm test                  # provider (and Snap typecheck)
-npm --prefix packages/client test              # SDK
-npm --prefix packages/mcp test                 # MCP (builds the client first)
+npm --prefix packages/client run typecheck && npm --prefix packages/client test   # SDK (CI type-checks its tests too)
+npm --prefix packages/mcp run typecheck && npm --prefix packages/mcp test         # MCP (builds the client first)
 npm --prefix snap run test:only                # Snap, against its built bundle (after a change in snap/src, `npm --prefix snap test` rebuilds it first)
 ```
 

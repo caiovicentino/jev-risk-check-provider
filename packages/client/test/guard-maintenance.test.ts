@@ -18,13 +18,20 @@ const BLOCK = { tier: "critical" as const, score: 2, categories: ["known_scam_ad
 function evmSigner() {
   const key = privateKeyToAccount(generatePrivateKey());
   const signed: Hex[] = [];
-  const spy = { ...key, signTransaction: async (tx: never, opts?: never) => {
-    const raw = await key.signTransaction(tx, opts);
-    signed.push(raw);
-    return raw;
-  } };
+  const spy = {
+    ...key,
+    signTransaction: async (tx: Parameters<typeof key.signTransaction>[0], opts?: Parameters<typeof key.signTransaction>[1]) => {
+      const raw = await key.signTransaction(tx, opts);
+      signed.push(raw);
+      return raw;
+    },
+  };
   return { key, spy, signed };
 }
+
+/** The guarded account's signTransaction, which the spy always has. */
+const signTx = (account: ReturnType<typeof evmSigner>["spy"], options: Parameters<typeof guardAccount>[1]) =>
+  (guardAccount(account, options).signTransaction as NonNullable<ReturnType<typeof guardAccount<typeof account>>["signTransaction"]>);
 
 async function refused(p: Promise<unknown>): Promise<GuardVerdict> {
   try {
@@ -41,7 +48,7 @@ describe("A1: only the fields the standard serializer reads are signed", () => {
     for (const extra of [{ calls: [{ to: DRAINER, value: 0n, data: "0x" }] }, { feeCurrency: DRAINER }]) {
       const api = boundProvider(() => LOW);
       const { spy, signed } = evmSigner();
-      const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTransaction({ chainId: 8453, nonce: 0, gas: 300_000n, maxFeePerGas: 10n ** 10n, maxPriorityFeePerGas: 1n, ...extra } as never));
+      const v = await refused(signTx(spy, { pinnedKeys: false, fetch: api.fetch })({ chainId: 8453, nonce: 0, gas: 300_000n, maxFeePerGas: 10n ** 10n, maxPriorityFeePerGas: 1n, ...extra } as never));
       assert.deepEqual([v.action, v.code, signed.length, api.seen.length], ["not_verified", "invalid_transaction", 0, 0]);
     }
   });
@@ -90,7 +97,7 @@ describe("M2: the fee cap reads the fee the transaction pays", () => {
       const api = boundProvider(() => LOW);
       const { spy, signed } = evmSigner();
       const tx = { type, chainId: 8453, to: BOB, value: 1n, nonce: 0, gas: 21_000n, gasPrice: 10n ** 14n, maxFeePerGas: 0n, ...(type === "eip2930" ? { accessList: [] } : {}) };
-      const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch, maxFeeWei: 10n ** 15n }).signTransaction(tx as never));
+      const v = await refused(signTx(spy, { pinnedKeys: false, fetch: api.fetch, maxFeeWei: 10n ** 15n })(tx as never));
       assert.deepEqual([v.code, signed.length], ["fee_cap", 0]);
     });
   }
@@ -124,13 +131,13 @@ describe("A3: a call to a precompile or system contract is not signed unread", (
       functionName: "execTransaction",
       args: ["0x0000000000000000000000000000000000000064", 10n ** 20n, inner, 0, 0n, 0n, 0n, "0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000", sig],
     });
-    const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTransaction({ type: "eip1559", chainId: 42161, nonce: 0, gas: 200_000n, maxFeePerGas: 10n ** 8n, maxPriorityFeePerGas: 1n, to: "0x5555555555555555555555555555555555555555", value: 0n, data } as never));
+    const v = await refused(signTx(spy, { pinnedKeys: false, fetch: api.fetch })({ type: "eip1559", chainId: 42161, nonce: 0, gas: 200_000n, maxFeePerGas: 10n ** 8n, maxPriorityFeePerGas: 1n, to: "0x5555555555555555555555555555555555555555", value: 0n, data } as never));
     assert.deepEqual([v.action, signed.length], ["not_verified", 0]);
   });
   test("a transaction with calldata to a precompile, naming nobody, is not signed on nothing", async () => {
     const api = boundProvider(() => LOW);
     const { spy, signed } = evmSigner();
-    const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTransaction({ type: "eip1559", chainId: 8453, nonce: 0, gas: 50_000n, maxFeePerGas: 10n ** 8n, maxPriorityFeePerGas: 1n, to: "0x0000000000000000000000000000000000000004", value: 0n, data: "0xdeadbeef" } as never));
+    const v = await refused(signTx(spy, { pinnedKeys: false, fetch: api.fetch })({ type: "eip1559", chainId: 8453, nonce: 0, gas: 50_000n, maxFeePerGas: 10n ** 8n, maxPriorityFeePerGas: 1n, to: "0x0000000000000000000000000000000000000004", value: 0n, data: "0xdeadbeef" } as never));
     assert.deepEqual([v.action, signed.length], ["not_verified", 0]);
   });
 });
@@ -175,7 +182,7 @@ describe("L2: delegations the simulation does not apply", () => {
     const api = boundProvider(() => LOW);
     const { key, spy, signed } = evmSigner();
     const authorization = await key.signAuthorization({ contractAddress: BOB, chainId: 8453, nonce: 1 });
-    const v = await refused(guardAccount(spy, { pinnedKeys: false, fetch: api.fetch }).signTransaction({ type: "eip7702", chainId: 8453, nonce: 0, gas: 100_000n, maxFeePerGas: 10n ** 8n, maxPriorityFeePerGas: 1n, to: key.address, value: 0n, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [DRAINER, 1n] }), authorizationList: [authorization] } as never));
+    const v = await refused(signTx(spy, { pinnedKeys: false, fetch: api.fetch })({ type: "eip7702", chainId: 8453, nonce: 0, gas: 100_000n, maxFeePerGas: 10n ** 8n, maxPriorityFeePerGas: 1n, to: key.address, value: 0n, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [DRAINER, 1n] }), authorizationList: [authorization] } as never));
     assert.deepEqual([v.action, v.code, signed.length], ["not_verified", "not_simulated", 0]);
   });
 });
