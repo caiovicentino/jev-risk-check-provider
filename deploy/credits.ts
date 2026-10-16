@@ -1,5 +1,5 @@
 import { formatUsd, priceMicro, SIMULATION_PRICE, simulates, toMicro } from "./pricing.js";
-import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, readCapped, recordSettlement, settlementReceipt, settlementReused, type Admission } from "./http-util.js";
+import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, paymentUnavailable, readCapped, recordSettlement, settlementReceipt, settlementReused, type Admission } from "./http-util.js";
 import { paymentVersion } from "./payment-claims.js";
 import type { Stack } from "./protected.js";
 import type { DurableObjectState, WorkerEnv } from "./runtime.js";
@@ -275,8 +275,7 @@ export async function handleCredits(request: Request, env: WorkerEnv, stack: Sta
       ...(payment ? { paymentHeader: payment } : {}),
     });
   } catch (err) {
-    console.error(`payment processing failed on /v1/credits: ${String(err).slice(0, 200)}`);
-    return json(500, { error: "payment_processing_failed" });
+    return paymentUnavailable("/v1/credits", err);
   }
   if (result.type === "payment-error") return new Response(typeof result.response.body === "string" ? result.response.body : JSON.stringify(result.response.body), { status: result.response.status, headers: result.response.headers });
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });

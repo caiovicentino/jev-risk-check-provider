@@ -2,6 +2,16 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.12 — 2026-10-16: a facilitator outage no longer breaks the 402 challenge
+
+Two monitors (CarbonMonitor and lumiere's prober) got a 500 from `POST /v1/risk-check/batch` on 2026-10-15. Cloudflare's analytics show both. The cause, reproduced locally: when a facilitator's `/supported` hung, the routing table came late (the stack waits 4 s, each facilitator had 5 s), so the stack was built with every network. x402 then refused to build a challenge that offers a network no reachable facilitator supports. Every unpaid probe and paid request on that isolate got a 500 until the facilitator answered again.
+
+- A facilitator's `/supported` now has 3 s, under the stack's 4 s wait, and a failure is remembered for 30 s. Routing leaves the hung facilitator's networks out, and the stack build reuses that answer instead of waiting again.
+- When the routing table is late anyway, the stack uses the last table the isolate computed, not every network. That also keeps a network known to lose money out of the challenge.
+- A stack build that fails is routed again once, from fresh answers.
+- If the payment stack still cannot build a challenge or read a payment, the answer is `503 payment_unavailable` with `Retry-After: 10` (`/v1/credits` too), never a 500. Nothing is charged.
+- `test/stack-resilience.test.ts`: with one facilitator hung, the unpaid challenge is a 402 that lists only the networks the others serve.
+
 ## v0.6.11 — 2026-10-16: dependency updates
 
 Dependabot's monthly PRs #22–#24 could not pass CI: their regenerated root lockfile left out `utf-8-validate`, so `npm ci` refused it. The same updates are applied here with a consistent lockfile, at the versions Dependabot proposed (each public for at least 7 days; newer patches published in the last days are not taken).

@@ -49,6 +49,12 @@ export async function allChecked(res: Response): Promise<boolean> {
 }
 
 /** Reads a request body up to `max` bytes while streaming (null when larger: never fully buffered). */
+/** The payment stack could not build a challenge or read a payment (a facilitator down): nothing was charged, retry shortly. */
+export function paymentUnavailable(path: string, err: unknown): Response {
+  console.error(`payment processing failed on ${path}: ${String(err).slice(0, 200)}`);
+  return json(503, { error: "payment_unavailable", detail: "the payment facilitators could not be reached; nothing was charged, retry shortly" }, { "Retry-After": "10" });
+}
+
 export async function readCapped(request: Request, max: number): Promise<Uint8Array | null> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > max) return null;

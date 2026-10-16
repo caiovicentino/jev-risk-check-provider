@@ -11,7 +11,7 @@ import { createContractIntel } from "../src/contract-intel.js";
 import { kitWatchLookup } from "./kit-watch.js";
 import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice, SIMULATION_PRICE } from "./pricing.js";
-import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, readCapped, recordSettlement, settlementReceipt, settlementReused } from "./http-util.js";
+import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, paymentUnavailable, readCapped, recordSettlement, settlementReceipt, settlementReused } from "./http-util.js";
 import { paymentVersion } from "./payment-claims.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
 import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
@@ -149,8 +149,14 @@ export function scopedFacilitator(inner: FacilitatorClient, allow: (network: str
 }
 
 const TEN_MINUTES = 10 * 60 * 1000;
-/** A facilitator's /supported answers within this, or it counts as down for this build (a hung one must not stall every route). */
-const SUPPORTED_DEADLINE_MS = 5000;
+/**
+ * A facilitator's /supported answers within this, or it counts as down for this build (a hung one
+ * must not stall every route). It stays under the stack's wait for the routing table (4 s), so a
+ * hung facilitator leaves the table instead of making it late.
+ */
+const SUPPORTED_DEADLINE_MS = 3000;
+/** A /supported that failed is not asked again for this long: routing and the stack build agree on it, and neither waits twice. */
+const SUPPORTED_RETRY_MS = 30_000;
 /** verify and settle wait longer: a settlement confirms on-chain, and a timeout there would charge without a verdict. */
 const FACILITATOR_TIMEOUT_MS = 30_000;
 
@@ -168,8 +174,12 @@ function memoSupported(inner: FacilitatorClient): FacilitatorClient {
     getSupported: () => {
       if (!entry || Date.now() - entry.at > TEN_MINUTES) {
         const value = withDeadline(inner.getSupported(), SUPPORTED_DEADLINE_MS, "facilitator /supported");
-        entry = { at: Date.now(), value };
-        value.catch(() => (entry = null));
+        const mine = { at: Date.now(), value };
+        entry = mine;
+        // A failure is remembered briefly, then asked again.
+        value.catch(() => {
+          if (entry === mine) entry = { at: Date.now() - TEN_MINUTES + SUPPORTED_RETRY_MS, value };
+        });
       }
       return entry.value;
     },
@@ -305,6 +315,8 @@ function candidateFor(entry: FacilitatorEntry, index: number, kinds: Kind[], fee
 
 /** Which facilitator settles each mainnet network, at what cost and margin (cached 10 min). */
 let routingCache: { at: number; value: Promise<PaymentRoute[]> } | null = null;
+/** The last table this isolate computed: the stack's fallback when a new one is late (never every network blindly). */
+let lastRoutes: PaymentRoute[] | null = null;
 export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): Promise<PaymentRoute[]> {
   if (!injected && routingCache && Date.now() - routingCache.at < TEN_MINUTES) return routingCache.value;
   const facilitators = injected ?? mainnetFacilitators(env);
@@ -349,6 +361,7 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
   if (injected) return value;
   const entry = { at: Date.now(), value };
   routingCache = entry;
+  value.then((routes) => void (lastRoutes = routes), () => undefined);
   // A facilitator that failed is retried within a minute, not ten: recovery is picked up quickly.
   value.then(
     () => {
@@ -573,10 +586,11 @@ export function usageFor(path: string): Record<string, unknown> {
   };
 }
 
-export async function ensureStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): Promise<Stack> {
+export async function ensureStack(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>, rerouted = false): Promise<Stack> {
   // The routing table (cached 10 min) decides the facilitator order; a slow or failed lookup
-  // falls back to the default order, and the stack is rebuilt once the table changes.
-  const routes = await Promise.race([paymentRouting(env).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 4000))]);
+  // falls back to the last table this isolate computed (or, on a new isolate, the default order),
+  // and the stack is rebuilt once the table changes.
+  const routes = (await Promise.race([paymentRouting(env).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 4000))])) ?? lastRoutes;
   const key = JSON.stringify([stackKey(env), routes?.map((r) => [r.network, r.offered ? r.facilitator : null]) ?? null]);
   if (cached?.key === key) return cached.stack;
   if (pending?.key !== key) {
@@ -594,9 +608,20 @@ export async function ensureStack(env: WorkerEnv, feeds?: () => Promise<ThreatIn
   }
   const current = pending;
   const { stack, ok } = await current.promise;
-  // A stack whose facilitators could not be reached is used once, never cached: the next request retries.
-  if (ok) cached = { key, stack };
-  else if (pending === current) pending = null;
+  if (ok) {
+    cached = { key, stack };
+    return stack;
+  }
+  if (pending === current) pending = null;
+  // A facilitator that failed its /supported while the table still routes networks to it makes the
+  // build fail, and the 402 challenge itself would throw (x402 refuses an option no loaded
+  // facilitator supports): two monitors got a 500 that way on 2026-10-15. Route again from fresh
+  // answers, once, so the stack offers what can be served now.
+  if (!rerouted) {
+    routingCache = null;
+    return ensureStack(env, feeds, true);
+  }
+  // Still failing: used once, never cached (the next request retries); its errors are a 503.
   return stack;
 }
 
@@ -657,8 +682,8 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
     try {
       const probe = await stack.http.processHTTPRequest({ adapter: fetchAdapter(request, {}), path, method: request.method });
       if (probe.type === "payment-error") return withRequestError(instructionsToResponse(probe.response), text.trim() === "" ? null : { status: invalid.status, ...invalid.body });
-    } catch {
-      return json(500, { error: "payment_processing_failed" });
+    } catch (err) {
+      return paymentUnavailable(path, err);
     }
     return json(402, { error: "payment_required" });
   }
@@ -688,8 +713,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   try {
     result = await stack.http.processHTTPRequest(httpCtx);
   } catch (err) {
-    console.error(`payment processing failed on ${path}: ${String(err).slice(0, 200)}`);
-    return json(500, { error: "payment_processing_failed" });
+    return paymentUnavailable(path, err);
   }
   // 3. Evaluate, then settle; the result is released only after settlement succeeds.
   if (result.type === "payment-error") return instructionsToResponse(result.response);
