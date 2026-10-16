@@ -5,6 +5,9 @@
 //   creation, assign, nonce withdrawals and authority), SPL Token and Token-2022 (transfers,
 //   approvals, authority changes, closing), and the Associated Token Account program, whose
 //   create instruction names a token account's owner (enforced on-chain).
+// - Lamports sent to an account this transaction creates or assigns go to whoever controls that
+//   account: the withdraw authority a Stake Initialize sets, the owner an InitializeAccount sets,
+//   a nonce authority, the base of a seed-derived account, or else its owner program.
 // - Any other program that receives the signer's account is a call to that program.
 //
 // Nothing is guessed. A token or system instruction the signer authorizes but this file does
@@ -23,6 +26,17 @@ export const STAKE_PROGRAM = "Stake11111111111111111111111111111111111111";
 const VOTE_PROGRAM = "Vote111111111111111111111111111111111111111";
 const BPF_UPGRADEABLE_LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111";
+/** Native programs whose accounts' lamports answer to authorities this file does not read. */
+const AUTHORITY_OWNERS = new Set([
+  VOTE_PROGRAM,
+  BPF_UPGRADEABLE_LOADER,
+  ADDRESS_LOOKUP_TABLE_PROGRAM,
+  "BPFLoader2111111111111111111111111111111111",
+  "LoaderV411111111111111111111111111111111111",
+  "Config1111111111111111111111111111111111111",
+]);
+/** Rent-exempt minimum of an account of `space` bytes: (128 + space) × 3480 × 2 lamports. */
+const rentExempt = (space: bigint): bigint => (128n + space) * 6960n;
 /** Native programs a seed-derived account may be assigned to without handing it to a third party's code. */
 const NATIVE_OWNERS = new Set([SYSTEM_PROGRAM, STAKE_PROGRAM, VOTE_PROGRAM]);
 /** Base fee per signature, and the compute limits the runtime applies without SetComputeUnitLimit. */
@@ -277,6 +291,19 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
   let unitLimit: number | undefined;
   let unitPrice = 0n;
   let computeInstructions = 0;
+  // Lamports leaving the signer, settled after every instruction is read: an account this
+  // transaction creates or assigns is controlled by its owner program or the authority its
+  // initialization names, never by its own (fresh) address.
+  const funded: Array<{ to: string; lamports?: string | undefined; how: string }> = [];
+  /** The owner program an account is given here (CreateAccount*, Assign*, AllocateWithSeed). */
+  const ownerOf = new Map<string, string>();
+  const spaceOf = new Map<string, bigint>();
+  /** A seed-derived account's base: it alone moves a system account's lamports (TransferWithSeed). */
+  const seedBase = new Map<string, string>();
+  const nonceAuthority = new Map<string, string>();
+  const stakeAuthority = new Map<string, { withdrawer: string; custodian?: string | undefined }>();
+  const tokenInit = new Map<string, { kind: "account" | "mint" | "multisig"; owner?: string | undefined }>();
+  const closeAuthority = new Map<string, string>();
   message.instructions.forEach((ix, n) => {
     const program = keys[ix.programIndex] as string;
     const d = ix.data;
@@ -308,40 +335,50 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         case 0: // CreateAccount [funder, new] lamports, space, owner
         case 3: {
           // CreateAccountWithSeed [funder, new, base?] base, seed, lamports, space, owner
-          if (op === 0 && d.length !== 52) return unread("a System CreateAccount");
+          const seed = op === 3 && d.length >= 44 ? Number(u64(d, 36)) : 0;
+          const at = op === 0 ? 4 : 44 + seed;
+          if ((op === 0 && d.length !== 52) || (op === 3 && (d.length < 44 || d.length !== 92 + seed))) return unread(`a System CreateAccount${op === 3 ? "WithSeed" : ""}`);
           const target = to(1);
-          if (account(0) === signer && target && target !== signer) {
-            out.findings.push({ kind: "native_transfer", to: target, ...(op === 0 ? { lamports: u64(d, 4).toString() } : {}), how: "funds a new account" });
-          }
+          if (!target) return;
+          ownerOf.set(target, base58Encode(d.subarray(at + 16, at + 48)));
+          spaceOf.set(target, u64(d, at + 8));
+          if (op === 3) seedBase.set(target, base58Encode(d.subarray(4, 36)));
+          if (account(0) === signer && target !== signer) funded.push({ to: target, lamports: u64(d, at).toString(), how: "funds a new account" });
           return;
         }
         case 1: {
           // Assign [account] owner
           if (d.length !== 36) return unread("a System Assign");
           if (account(0) === signer) out.danger.push(`System Assign hands the signer's own account to program ${base58Encode(d.subarray(4, 36))}: that program would control everything the account holds`);
+          else if (account(0)) ownerOf.set(account(0) as string, base58Encode(d.subarray(4, 36)));
           return;
         }
+        case 9: // AllocateWithSeed [account, base] base, seed, space, owner: it assigns the account too.
         case 10: {
           // AssignWithSeed [account, base] base, seed, owner: the base signs for the seed-derived account.
-          if (account(0) !== signer && account(1) !== signer) return;
           const length = d.length >= 44 ? Number(u64(d, 36)) : -1;
-          if (length < 0 || d.length !== 44 + length + 32) return unread("a System AssignWithSeed");
-          const owner = base58Encode(d.subarray(44 + length, 76 + length));
-          if (!NATIVE_OWNERS.has(owner)) out.danger.push(`System AssignWithSeed hands the signer's seed-derived account ${account(0)} to program ${owner}: that program would control everything the account holds`);
+          const end = op === 9 ? 44 + length + 8 : 44 + length;
+          if (length < 0 || d.length !== end + 32) return unread(`a System ${op === 9 ? "Allocate" : "Assign"}WithSeed`);
+          const owner = base58Encode(d.subarray(end, end + 32));
+          if (account(0)) ownerOf.set(account(0) as string, owner);
+          if (op === 9 && account(0)) spaceOf.set(account(0) as string, u64(d, 44 + length));
+          if ((account(0) === signer || account(1) === signer) && !NATIVE_OWNERS.has(owner)) {
+            out.danger.push(`System ${op === 9 ? "Allocate" : "Assign"}WithSeed hands the signer's seed-derived account ${account(0)} to program ${owner}: that program would control everything the account holds`);
+          }
           return;
         }
         case 2: {
           // Transfer [from, to] lamports
           if (d.length !== 12) return unread("a System Transfer");
           const target = to(1);
-          if (account(0) === signer && target && target !== signer) out.findings.push({ kind: "native_transfer", to: target, lamports: u64(d, 4).toString(), how: "System transfer" });
+          if (account(0) === signer && target && target !== signer) funded.push({ to: target, lamports: u64(d, 4).toString(), how: "System transfer" });
           return;
         }
         case 11: {
           // TransferWithSeed [from, base, to] lamports, seed, owner
           if (d.length < 12) return unread("a System TransferWithSeed");
           const target = to(2);
-          if (account(1) === signer && target && target !== signer) out.findings.push({ kind: "native_transfer", to: target, lamports: u64(d, 4).toString(), how: "System transfer with seed" });
+          if (account(1) === signer && target && target !== signer) funded.push({ to: target, lamports: u64(d, 4).toString(), how: "System transfer with seed" });
           return;
         }
         case 4:
@@ -353,7 +390,7 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           // WithdrawNonceAccount [nonce, to, recent blockhashes, rent, authority] lamports
           if (d.length !== 12) return unread("a System WithdrawNonceAccount");
           const target = to(1);
-          if (account(4) === signer && target && target !== signer) out.findings.push({ kind: "native_transfer", to: target, lamports: u64(d, 4).toString(), how: "nonce account withdrawal" });
+          if (account(4) === signer && target && target !== signer) funded.push({ to: target, lamports: u64(d, 4).toString(), how: "nonce account withdrawal" });
           return;
         }
         case 7: {
@@ -363,9 +400,10 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           if (account(1) === signer && next !== signer) out.danger.push(`it hands the authority of nonce account ${account(0)} to ${next}`);
           return;
         }
-        case 6: // InitializeNonceAccount
+        case 6: // InitializeNonceAccount [nonce, recent blockhashes, rent] authority: it alone withdraws the lamports.
+          if (d.length === 36 && account(0)) nonceAuthority.set(account(0) as string, base58Encode(d.subarray(4, 36)));
+          return;
         case 8: // Allocate
-        case 9: // AllocateWithSeed
         case 12: // UpgradeNonceAccount
           return;
         default:
@@ -423,7 +461,7 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         case 9: {
           // CloseAccount [account, destination, owner, ...signers]: its lamports (all of it, for wrapped SOL) go to destination
           const destination = account(1);
-          if (authorizes(2, 3) && destination && destination !== signer) out.findings.push({ kind: "native_transfer", to: destination, how: "closing a token account sends it the account's lamports" });
+          if (authorizes(2, 3) && destination && destination !== signer) funded.push({ to: destination, how: "closing a token account sends it the account's lamports" });
           return;
         }
         case 7:
@@ -438,15 +476,32 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         case 15: // BurnChecked
           if (involves) out.notes.push(`it burns tokens (instruction ${n + 1})`);
           return;
+        case 1: // InitializeAccount [account, mint, owner, rent]
+        case 16: // InitializeAccount2 [account, mint, rent] owner
+        case 18: {
+          // InitializeAccount3 [account, mint] owner: the owner can close the account and take its lamports.
+          const owner = op === 1 ? account(2) : d.length === 33 ? base58Encode(d.subarray(1, 33)) : undefined;
+          if (account(0)) tokenInit.set(account(0) as string, { kind: "account", owner });
+          return;
+        }
         case 0: // InitializeMint
-        case 1: // InitializeAccount
+        case 20: // InitializeMint2
+          if (account(0)) tokenInit.set(account(0) as string, { kind: "mint" });
+          return;
+        case 2: // InitializeMultisig
+        case 19: // InitializeMultisig2
+          if (account(0)) tokenInit.set(account(0) as string, { kind: "multisig" });
+          return;
+        case 25: {
+          // Token-2022 InitializeMintCloseAuthority [mint] COption<Pubkey>: the close authority takes a closed mint's lamports.
+          if (program !== TOKEN_2022_PROGRAM) return unread(`${name} instruction ${op}`);
+          if (d[1] === 1 && d.length === 34 && account(0)) closeAuthority.set(account(0) as string, base58Encode(d.subarray(2, 34)));
+          return;
+        }
         case 5: // Revoke
         case 10: // FreezeAccount
         case 11: // ThawAccount
-        case 16: // InitializeAccount2
         case 17: // SyncNative
-        case 18: // InitializeAccount3
-        case 20: // InitializeMint2
         case 21: // GetAccountDataSize
         case 22: // InitializeImmutableOwner
         case 23: // AmountToUiAmount
@@ -458,9 +513,17 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
     }
 
     if (program === STAKE_PROGRAM) {
+      const op = d.length >= 4 ? u32(d, 0) : -1;
+      // Initialize [stake, rent] Authorized { staker, withdrawer }, Lockup { unix_timestamp, epoch, custodian }:
+      // the withdrawer controls the lamports, and a lockup's custodian alone can lift the lockup.
+      if (op === 0 && d.length === 116 && account(0)) {
+        const lockup = u64(d, 68) !== 0n || u64(d, 76) !== 0n;
+        stakeAuthority.set(account(0) as string, { withdrawer: base58Encode(d.subarray(36, 68)), ...(lockup ? { custodian: base58Encode(d.subarray(84, 116)) } : {}) });
+      }
+      // InitializeChecked [stake, rent, staker, withdrawer]
+      if (op === 9 && account(0) && account(3)) stakeAuthority.set(account(0) as string, { withdrawer: account(3) as string });
       if (!involves) return;
-      if (d.length < 4) return unread("a Stake instruction");
-      const op = u32(d, 0);
+      if (op < 0) return unread("a Stake instruction");
       const kinds = ["staker", "withdrawer"];
       switch (op) {
         case 1: {
@@ -493,7 +556,7 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           // Withdraw [stake, recipient, clock, stake history, withdraw authority, (custodian)] lamports
           if (d.length !== 12) return unread("a Stake Withdraw");
           const recipient = account(1);
-          if (account(4) === signer && recipient && recipient !== signer) out.findings.push({ kind: "native_transfer", to: recipient, lamports: u64(d, 4).toString(), how: "stake withdrawal" });
+          if (account(4) === signer && recipient && recipient !== signer) funded.push({ to: recipient, lamports: u64(d, 4).toString(), how: "stake withdrawal" });
           return;
         }
         case 6: // SetLockup
@@ -534,12 +597,97 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
     // Any other program that receives the signer's account can act with the signer's authority.
     if (involves && !out.findings.some((f) => f.kind === "program_call" && f.program === program)) out.findings.push({ kind: "program_call", program });
   });
+  settleFunding(out, signer, funded, { ownerOf, spaceOf, seedBase, nonceAuthority, stakeAuthority, tokenInit, closeAuthority });
   // The fee payer is the first static account: signatures plus the priority fee (price × limit, in micro-lamports).
   if (message.staticAccounts[0] === signer) {
     const limit = BigInt(Math.min(unitLimit ?? DEFAULT_UNITS_PER_INSTRUCTION * (message.instructions.length - computeInstructions), MAX_COMPUTE_UNITS));
     out.maxFeeLamports = LAMPORTS_PER_SIGNATURE * BigInt(message.header.signatures) + (unitPrice * limit + 999_999n) / 1_000_000n;
   }
   return out;
+}
+
+type Controls = {
+  ownerOf: ReadonlyMap<string, string>;
+  spaceOf: ReadonlyMap<string, bigint>;
+  seedBase: ReadonlyMap<string, string>;
+  nonceAuthority: ReadonlyMap<string, string>;
+  stakeAuthority: ReadonlyMap<string, { withdrawer: string; custodian?: string | undefined }>;
+  tokenInit: ReadonlyMap<string, { kind: "account" | "mint" | "multisig"; owner?: string | undefined }>;
+  closeAuthority: ReadonlyMap<string, string>;
+};
+
+/**
+ * Each payment of the signer's lamports, to whoever controls the receiving account:
+ * - an account this transaction does not give an owner: the account itself (its key);
+ * - a system account: its key, a seed-derived account's base, or a nonce account's authority;
+ * - a stake account: the withdraw authority its Initialize sets (none here: anyone could set it, so unreadable);
+ * - a token account: the owner its InitializeAccount sets; a new mint or multisig keeps at most its
+ *   rent-exempt minimum (a Token-2022 mint's close authority takes it); anything else is unreadable;
+ * - an account of a native program with its own authorities (Vote, loaders, lookup tables): unreadable;
+ * - any other program: that program, checked as a contract call.
+ */
+function settleFunding(out: SolanaAnalysis, signer: string, funded: ReadonlyArray<{ to: string; lamports?: string | undefined; how: string }>, c: Controls): void {
+  const lamportsInto = (account: string): bigint | undefined => {
+    let total = 0n;
+    for (const f of funded) {
+      if (f.to !== account) continue;
+      if (f.lamports === undefined) return undefined;
+      total += BigInt(f.lamports);
+    }
+    return total;
+  };
+  const pay = (to: string, lamports: string | undefined, how: string) => {
+    if (to !== signer) out.findings.push({ kind: "native_transfer", to, ...(lamports !== undefined ? { lamports } : {}), how });
+  };
+  for (const f of funded) {
+    const owner = c.ownerOf.get(f.to);
+    if (owner === undefined || owner === SYSTEM_PROGRAM) {
+      const authority = c.nonceAuthority.get(f.to);
+      const base = owner === SYSTEM_PROGRAM ? c.seedBase.get(f.to) : undefined;
+      if (authority !== undefined) pay(authority, f.lamports, `${f.how}: nonce account ${f.to}, whose authority alone withdraws it`);
+      else if (base !== undefined) pay(base, f.lamports, `${f.how}: seed-derived account ${f.to}, which only its base ${base} can move`);
+      else pay(f.to, f.lamports, f.how);
+      continue;
+    }
+    if (owner === STAKE_PROGRAM) {
+      const authority = c.stakeAuthority.get(f.to);
+      if (!authority) {
+        out.unreadable.push(`lamports into stake account ${f.to}, which this transaction does not initialize (anyone could then set its withdraw authority)`);
+        continue;
+      }
+      if (authority.custodian !== undefined && authority.custodian !== signer) {
+        const lock = `stake account ${f.to} is locked up, and only custodian ${authority.custodian} can lift the lockup`;
+        if (!out.danger.includes(lock)) out.danger.push(lock);
+      }
+      pay(authority.withdrawer, f.lamports, `${f.how}: stake account ${f.to}, whose withdraw authority is ${authority.withdrawer}`);
+      continue;
+    }
+    if (owner === TOKEN_PROGRAM || owner === TOKEN_2022_PROGRAM) {
+      const init = c.tokenInit.get(f.to);
+      if (init?.kind === "account" && init.owner !== undefined) {
+        pay(init.owner, f.lamports, `${f.how}: token account ${f.to}, which its owner ${init.owner} can close to take its lamports`);
+        continue;
+      }
+      const space = c.spaceOf.get(f.to);
+      const total = lamportsInto(f.to);
+      if ((init?.kind === "mint" || init?.kind === "multisig") && space !== undefined && total !== undefined && total <= rentExempt(space)) {
+        const closer = init.kind === "mint" ? c.closeAuthority.get(f.to) : undefined;
+        if (closer !== undefined) pay(closer, f.lamports, `${f.how}: mint ${f.to}, whose close authority ${closer} can take its lamports`);
+        continue;
+      }
+      out.unreadable.push(
+        init === undefined || init.kind === "account"
+          ? `lamports into token account ${f.to}, which this transaction does not initialize with an owner`
+          : `more than the rent-exempt minimum into new ${init.kind} ${f.to}`,
+      );
+      continue;
+    }
+    if (AUTHORITY_OWNERS.has(owner)) {
+      out.unreadable.push(`lamports into account ${f.to} of native program ${owner}, whose authorities this guard does not read`);
+      continue;
+    }
+    if (!out.findings.some((x) => x.kind === "program_call" && x.program === owner)) out.findings.push({ kind: "program_call", program: owner });
+  }
 }
 
 /** Whether bytes are a Solana transaction message: signing them as a "message" would authorize that transaction. */
