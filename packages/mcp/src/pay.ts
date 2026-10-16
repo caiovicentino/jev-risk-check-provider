@@ -8,14 +8,13 @@
 // word. One payment per call, within the operator's per-payment cap and budget; `max_usd` can
 // only lower them. A cancelled call (MCP cancellation, or the client's time limit) signs nothing.
 import { isIP } from "node:net";
-import { decodePaymentResponseHeader } from "@x402/fetch";
 import { isSafeId, type FetchLike, type X402CheckClient } from "@x402check/client";
 import { createGuard, type GuardVerdict } from "@x402check/client/guard";
 import { z } from "zod";
 import { readLimited } from "./body.js";
 import { boundClient, CREDIT_BUDGET_EXHAUSTED, type CreditMeter } from "./credits.js";
 import { isPublicAddress } from "./net.js";
-import { PaymentRefused, type Payer, type PaymentRefusalKind, type ResourcePayment, type SignedPayment } from "./payer.js";
+import { PaymentRefused, paymentAccepted, settlementReceipt, type Payer, type PaymentRefusalKind, type ResourcePayment, type SignedPayment } from "./payer.js";
 import { clean, paymentView } from "./render.js";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
@@ -65,7 +64,9 @@ export const payInput = {
 export const payOutput = {
   outcome: z
     .enum(OUTCOMES)
-    .describe("paid · no_payment_required (the resource answered without asking) · refused (nothing signed) · payment_rejected (sent, but answered 402 again) · failed"),
+    .describe(
+      "paid (sent and accepted: a 2xx whose receipt, if any, does not say it failed) · no_payment_required (the resource answered without asking) · refused (nothing signed) · payment_rejected (sent, but answered 402 again) · failed (see payment_sent and error)",
+    ),
   payment_sent: z.boolean().describe("True when a signed payment authorization was sent (it can be settled even when the response is lost)."),
   action: z.enum(ACTIONS).optional().describe("x402check's verdict on the payee, checked right before signing."),
   user_approved: z.boolean().optional().describe("A warn the user approved (true) or did not (false) in the client: never the agent's answer."),
@@ -256,15 +257,16 @@ function shownMediaType(raw: string | null | undefined): string | undefined {
   return type && MEDIA_TYPE.test(type) ? type : undefined;
 }
 
-/** The settlement receipt of the paid response (PAYMENT-RESPONSE), when it decodes. */
-function receiptOf(res: Response): Record<string, unknown> | undefined {
-  const header = res.headers.get("PAYMENT-RESPONSE") ?? res.headers.get("X-PAYMENT-RESPONSE");
-  if (!header) return undefined;
-  try {
-    return decodePaymentResponseHeader(header) as unknown as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
+/**
+ * Why an answer below 400 to a sent payment does not confirm it (the payer keeps the authorization
+ * outstanding): a redirect, or a 2xx whose receipt says the payment failed or cannot be read.
+ */
+function unconfirmedWhy(status: number, receipt: Record<string, unknown> | null | undefined): string {
+  if (status >= 300) return `the resource answered the signed payment with a redirect (HTTP ${status}), which this server does not follow, so the payment is not confirmed`;
+  if (status < 200) return `the resource answered the signed payment with HTTP ${status}, which does not confirm it`;
+  return receipt === null
+    ? `the resource answered HTTP ${status}, but its settlement receipt could not be read, so the payment is not confirmed`
+    : `the resource answered HTTP ${status}, but its settlement receipt says the payment was not settled`;
 }
 
 /** The jti of an attestation the guard already verified (the verdict is not not_verified). */
@@ -410,13 +412,15 @@ export async function runPay(args: PayArgs, deps: PayDeps): Promise<PayOutcome> 
     error = err;
   }
   const body = res ? await readBody(res, deps.timeoutMs, signal) : undefined;
-  const receipt = res && sent ? receiptOf(res) : undefined;
-  const view = paymentView(receipt, { spent_usd: payer.spentUsd(), budget_usd: payer.budgetUsd });
+  const receipt = res && sent ? settlementReceipt(res) : undefined;
+  const view = paymentView(receipt ?? undefined, { spent_usd: payer.spentUsd(), budget_usd: payer.budgetUsd });
   const cancelled = signal?.aborted === true;
   const until = sent && signed?.validUntil !== undefined ? new Date(signed.validUntil * 1000).toISOString() : undefined;
 
+  // "paid" exactly when the payer counts the payment accepted and clears its record; any other
+  // answer leaves the authorization outstanding, and is reported so.
   let outcome: PayStructured["outcome"];
-  if (res) outcome = !sent ? "no_payment_required" : res.status === 402 ? "payment_rejected" : res.status >= 400 ? "failed" : "paid";
+  if (res) outcome = !sent ? "no_payment_required" : res.status === 402 ? "payment_rejected" : paymentAccepted(res) ? "paid" : "failed";
   else outcome = !sent && error instanceof PaymentRefused ? "refused" : "failed";
 
   const check = verdict?.checks[0];
@@ -472,6 +476,11 @@ export async function runPay(args: PayArgs, deps: PayDeps): Promise<PayOutcome> 
     next = until
       ? `Next: the payment was not accepted (see the response), but the signed authorization stays valid until ${until}, and the payee can still settle it until then. Do not pay this resource again before then; after that, check the payer's USDC balance before paying again.`
       : "Next: the payment was not accepted (see the response), but the signed authorization may still be settled until it expires. Do not pay this resource again before then, and check the payer's USDC balance before paying again.";
+  } else if (outcome === "failed" && res && res.status < 400) {
+    // Answered, but not with an acceptance: the signed authorization stays valid until it expires.
+    code = "payment_unconfirmed";
+    message = unconfirmedWhy(res.status, receipt);
+    next = `Next: the payment may still be settled. Do not pay again until the payer's USDC balance shows whether it was.${expiryNote}`;
   } else if (outcome === "failed" && res) {
     next = `Next: the resource failed after the payment was sent (HTTP ${res.status}). x402 servers normally settle only successful responses: check the receipt and the payer's balance before paying again.${expiryNote}`;
   }
