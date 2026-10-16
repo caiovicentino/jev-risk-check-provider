@@ -130,11 +130,14 @@ export function didFetch(doc: unknown, status = 200): { fetch: FetchLike; calls:
 /**
  * A provider stub that signs, for each request, claims bound exactly as the real provider binds
  * them (subject, interaction, payment, domain, chain, simulation, request_hash), plus optional
- * extra routes (e.g. a Solana RPC). `decide` picks the verdict per request.
+ * extra routes (e.g. a Solana RPC). `decide` picks the verdict per request; `simulation` the
+ * status signed for a request with a transaction (default "ok"; production signs "unsupported"
+ * on chains it does not simulate).
  */
 export function boundProvider(
   decide: (request: import("../src/types.js").RiskCheckRequest) => { tier: "low" | "medium" | "high" | "critical"; score: number; categories: string[] },
   extra?: (url: string, init: FetchInitLike) => Response | Promise<Response> | undefined,
+  simulation: "ok" | "reverted" | "unavailable" | "unsupported" = "ok",
 ) {
   const signer = providerStyleSigner();
   const seen: import("../src/types.js").RiskCheckRequest[] = [];
@@ -154,7 +157,7 @@ export function boundProvider(
         sanctions: { list: "ofac-sdn", as_of: "2026-09-23", status: "not_listed" },
         ...(network ? { onchain: { status: "ok", network, activity: "some" } } : {}),
         model: "jev-wallet-risk/v6",
-        ...(request.transaction ? { simulation: { status: "ok", network } } : {}),
+        ...(request.transaction ? { simulation: { status: simulation, network } } : {}),
         ...(request.domain ? { domain: { host: normalizeHost(request.domain), registrable: normalizeHost(request.domain), official: false } } : {}),
       },
     });

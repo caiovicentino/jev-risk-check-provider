@@ -11,8 +11,13 @@
 //   unpinned attestation), or locally proven danger → it throws `X402CheckBlockedError` and
 //   nothing is signed.
 // - What the guard cannot read is never signed: opaque bytes and hashes, calldata it cannot
-//   decode on the signer's own account, a transaction it cannot simulate, a delegation valid
-//   on every chain, and any signing method of the account it does not intercept.
+//   decode on the signer's own account, a batch it does not read in full, a transaction the
+//   provider did not simulate (the attestation must say `simulation.status: "ok"`; a simulated
+//   revert is blocked), a delegation valid on every chain, and any signing method of the
+//   account it does not intercept.
+// - Every counterparty a request names is checked (up to 50, in batches), or nothing is signed.
+// - A transaction is normalized before the check as viem serializes it (`to` "" is a creation,
+//   amounts read with BigInt semantics, calldata in `data`), and the normalized copy is signed.
 // - `warn` → it signs only if `onWarn` approves. Without `onWarn`, it refuses.
 // - Every attestation is verified against the pinned issuer and its pinned keys, and bound to
 //   the exact request (`request_hash`), so an old or foreign `allow` cannot unlock this signature.
@@ -31,17 +36,17 @@
 //
 // Pay for the checks with prepaid credits (`creditToken`): never with a per-call payer
 // that uses the guarded account itself, or each check would need a guarded signature.
-import { createClient, type X402CheckClient } from "./client.js";
+import { createClient, MAX_BATCH, type X402CheckClient } from "./client.js";
 import { interpret, type Action, type Interpretation } from "./interpret.js";
 import { DEFAULT_ISSUER, verifyAttestation } from "./verify.js";
 import { X402CHECK_KEY_THUMBPRINTS } from "./keys.js";
 import { normalizeHost, toCaip2 } from "./normalize.js";
-import type { FetchLike, PaymentBinding, RiskCheckRequest, RiskCheckResult } from "./types.js";
+import type { AttestationClaims, FetchLike, PaymentBinding, RiskCheckRequest, RiskCheckResult } from "./types.js";
 import { decodeTransaction } from "./decode/tx.js";
 import { decodeTypedData } from "./decode/typed.js";
 import { decodePersonalSign } from "./decode/personal.js";
 import { buildRiskCheckBodies, type RiskCheckBody } from "./decode/request.js";
-import type { Decoded } from "./decode/util.js";
+import { MAX_UINT256, parseUint, type Decoded } from "./decode/util.js";
 import {
   accountKeys,
   ADDRESS_LOOKUP_TABLE_PROGRAM,
@@ -90,6 +95,8 @@ export interface GuardCheck {
   request: RiskCheckRequest;
   result?: RiskCheckResult | undefined;
   interpretation: Interpretation;
+  /** The attestation's claims, when it verified (bound to `request`). */
+  claims?: AttestationClaims | undefined;
 }
 
 export interface GuardVerdict {
@@ -104,9 +111,10 @@ export interface GuardVerdict {
   reasons: string[];
   /**
    * Why it was refused: "blocked", "not_verified", "warn_declined", "local_danger",
-   * "raw_hash_signing", "opaque_signature", "not_simulated", "unreadable_self_call", "no_chain",
-   * "every_chain_authorization", "fee_cap", "unguarded_method", "uncopyable", "undecodable",
-   * "unreadable_instruction".
+   * "raw_hash_signing", "opaque_signature", "not_simulated", "simulation_reverted",
+   * "unreadable_self_call", "no_chain", "every_chain_authorization", "fee_cap",
+   * "unguarded_method", "uncopyable", "undecodable", "invalid_transaction",
+   * "too_many_counterparties", "unreadable_instruction".
    */
   code?: string | undefined;
   /** One per checked address (primary first). Empty when nothing needed checking. */
@@ -207,6 +215,77 @@ const EVERY_CHAIN_CHECKS = ["eip155:1", "eip155:8453"];
 /** Account members that sign or send: intercepted, or refused unless passed through by name. */
 const SIGNING_METHOD = /^(sign|send|execute|transfer|write|approve|permit|swap|withdraw|deploy)/i;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+/** Counterparties checked for one EVM signature (in batches of MAX_BATCH); more is refused, never partly checked. */
+const MAX_EVM_CHECKS = 50;
+/** The transaction types viem serializes; another type is a format this guard does not read. */
+const TRANSACTION_TYPES = new Set(["legacy", "eip2930", "eip1559", "eip4844", "eip7702"]);
+/** Fields viem serializes as unsigned integers (numberToHex: BigInt semantics). */
+const AMOUNT_FIELDS = ["value", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "maxFeePerBlobGas"] as const;
+const HEX_BYTES = /^0[xX](?:[0-9a-fA-F]{2})*$/;
+const GAS_PER_BLOB = 131_072n;
+
+/**
+ * A transaction field read as viem reads it (numberToHex: BigInt semantics, a number must be a
+ * safe integer): the value, undefined when absent, null when viem would refuse or misread it.
+ */
+function viemInteger(value: unknown): bigint | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "bigint") return value >= 0n && value <= MAX_UINT256 ? value : null;
+  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+  if (typeof value === "string") return parseUint(value) ?? null;
+  return null;
+}
+
+/**
+ * The transaction exactly as viem serializes it, so the guard and the signer can never read it
+ * differently; the copy returned is what is checked and what is signed:
+ * - `to` absent, null, "" or "0x" is a contract creation (viem writes "0x"): the key is dropped.
+ *   Any other `to` must be 0x and 40 hex digits (viem checks a mixed-case checksum itself).
+ * - Amounts are read with BigInt semantics (whitespace, 0x/0X) and written back as bigints;
+ *   `nonce` and `chainId` as safe-integer numbers. A transaction without `chainId` gets
+ *   `options.chainId`, the chain it is checked on (never a pre-EIP-155 signature valid everywhere).
+ * - Calldata is `data`, or `input` when `data` is absent (`input` is dropped: viem ignores it).
+ * Anything else (a non-hex `data`, an unsafe number, an unknown `type`) is refused.
+ */
+function normalizeTransaction(input: unknown, fallbackChainId: number | undefined): { tx: Record<string, unknown> } | { reason: string } {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return { reason: "the transaction is not an object" };
+  const tx: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  const to = tx.to;
+  if (to === undefined || to === null || to === "" || to === "0x" || to === "0X") delete tx.to;
+  else if (typeof to !== "string" || !EVM_ADDRESS.test(to)) return { reason: "its recipient (to) is not 0x followed by 40 hex digits" };
+  const data = tx.data ?? tx.input;
+  delete tx.input;
+  if (data === undefined || data === null || data === "") delete tx.data;
+  else if (data instanceof Uint8Array) tx.data = `0x${Array.from(data, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  else if (typeof data === "string" && HEX_BYTES.test(data)) tx.data = `0x${data.slice(2).toLowerCase()}`;
+  else return { reason: "its calldata is not 0x-prefixed hex bytes" };
+  for (const field of AMOUNT_FIELDS) {
+    const value = viemInteger(tx[field]);
+    if (value === null) return { reason: `its ${field} is not an unsigned integer as viem reads one` };
+    if (value === undefined) delete tx[field];
+    else tx[field] = value;
+  }
+  for (const field of ["nonce", "chainId"] as const) {
+    const value = viemInteger(tx[field]);
+    if (value === null || (value !== undefined && value > BigInt(Number.MAX_SAFE_INTEGER))) return { reason: `its ${field} is not a safe integer` };
+    if (value === undefined) delete tx[field];
+    else tx[field] = Number(value);
+  }
+  if (tx.chainId === undefined && fallbackChainId !== undefined && Number.isSafeInteger(fallbackChainId) && fallbackChainId > 0) tx.chainId = fallbackChainId;
+  if (tx.chainId === 0) return { reason: "its chainId is 0, which names no chain (a legacy signature would be valid on every chain)" };
+  if (tx.type !== undefined && !(typeof tx.type === "string" && TRANSACTION_TYPES.has(tx.type))) return { reason: "its type is not one viem serializes (legacy, eip2930, eip1559, eip4844, eip7702)" };
+  return { tx };
+}
+
+/** The most a normalized transaction can charge in fees, in wei (gas, plus blob gas). */
+function maxFeeOf(tx: Record<string, unknown>): bigint {
+  const gas = tx.gas as bigint | undefined;
+  const price = (tx.maxFeePerGas ?? tx.gasPrice) as bigint | undefined;
+  let fee = gas !== undefined && price !== undefined ? gas * price : 0n;
+  const blobs = Array.isArray(tx.blobVersionedHashes) ? tx.blobVersionedHashes.length : Array.isArray(tx.blobs) ? tx.blobs.length : 0;
+  if (blobs > 0 && typeof tx.maxFeePerBlobGas === "bigint") fee += BigInt(blobs) * GAS_PER_BLOB * tx.maxFeePerBlobGas;
+  return fee;
+}
 
 function sameAddress(a: string, b: string): boolean {
   return /^0x/i.test(a) && /^0x/i.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -336,11 +415,17 @@ export function createGuard(options: GuardOptions = {}) {
     return { action, signed: action === "allow", kind, summary, reasons, checks, ...(code ? { code } : {}) };
   }
 
-  /** Checks the requests and combines the verdicts: the worst one decides. */
+  /** Checks the requests (a batch call per MAX_BATCH) and combines the verdicts: the worst one decides. */
   async function evaluate(kind: SigningKind, summary: string, requests: RiskCheckRequest[]): Promise<GuardVerdict> {
     let results: RiskCheckResult[];
     try {
-      results = requests.length === 1 ? [await client.check(requests[0] as RiskCheckRequest)] : await client.checkBatch(requests);
+      if (requests.length === 1) {
+        results = [await client.check(requests[0] as RiskCheckRequest)];
+      } else {
+        const batches: RiskCheckRequest[][] = [];
+        for (let i = 0; i < requests.length; i += MAX_BATCH) batches.push(requests.slice(i, i + MAX_BATCH));
+        results = (await Promise.all(batches.map((batch) => client.checkBatch(batch)))).flat();
+      }
     } catch (err) {
       const interpretation = interpret(err);
       return verdictOf(kind, summary, "not_verified", interpretation.reasons, [{ request: requests[0] as RiskCheckRequest, interpretation }], "not_verified");
@@ -349,13 +434,38 @@ export function createGuard(options: GuardOptions = {}) {
       requests.map(async (request, i) => {
         const result = results[i];
         const verification = await verifyAttestation(result?.jws, { issuer: options.issuer, request, maxAgeSeconds: 300, fetch: options.fetch, pinnedKeys });
-        return { request, result, interpretation: interpret(result, { verification }) };
+        return { request, result, interpretation: interpret(result, { verification }), ...(verification.valid ? { claims: verification.claims } : {}) };
       }),
     );
     const worst = checks.reduce((w, c) => (SEVERITY[c.interpretation.action] > SEVERITY[w.interpretation.action] ? c : w));
     const action = worst.interpretation.action;
     const reasons = [...worst.interpretation.reasons, ...checks.filter((c) => c !== worst && c.interpretation.action !== "allow").flatMap((c) => c.interpretation.reasons)];
     return verdictOf(kind, summary, action, reasons, checks, action === "block" ? "blocked" : action === "not_verified" ? "not_verified" : undefined);
+  }
+
+  /**
+   * A transaction is signed on its simulation, not on an address check alone: the verified
+   * attestation of the check that carried it must say `checks.simulation.status: "ok"`. A
+   * simulated revert is blocked; anything else (a chain the provider does not simulate, a failed
+   * simulation, none at all) is not verified.
+   */
+  function requireSimulation(verdict: GuardVerdict): GuardVerdict {
+    if (verdict.action === "block" || verdict.action === "not_verified") return verdict;
+    const simulated = verdict.checks.find((c) => c.request.transaction !== undefined);
+    const simulation = simulated?.claims?.checks?.simulation;
+    const status = typeof simulation?.status === "string" ? simulation.status : undefined;
+    if (status === "ok") return verdict;
+    if (status === "reverted") {
+      return { ...verdict, action: "block", signed: false, code: "simulation_reverted", reasons: ["the transaction reverts in the provider's simulation: it is not signed", ...verdict.reasons] };
+    }
+    const why = status === undefined ? "the attestation carries no simulation" : `the provider's simulation is "${status}"${status === "unsupported" ? " (a chain it does not simulate)" : ""}`;
+    return {
+      ...verdict,
+      action: "not_verified",
+      signed: false,
+      code: "not_simulated",
+      reasons: [`its effects were not simulated (${why}); a transaction is not signed on an address check alone`, ...verdict.reasons],
+    };
   }
 
   /** Decodes a signature request and checks it: never throws, even on failure (the verdict says so). */
@@ -414,23 +524,24 @@ export function createGuard(options: GuardOptions = {}) {
     let selfCall = false;
     if (request.kind === "transaction") {
       kind = "transaction";
-      const tx = request.transaction;
-      const chainId = tx.chainId ?? options.chainId;
-      const data = tx.data ?? tx.input;
-      hasData = typeof data === "string" && data !== "" && data !== "0x";
-      hasValue = (toBigInt(tx.value) ?? 0n) > 0n;
-      deployment = tx.to === undefined || tx.to === null;
+      // Read exactly as viem will serialize it (guardAccount signs this same normalized copy).
+      const normalized = normalizeTransaction(request.transaction, options.chainId);
+      if ("reason" in normalized) {
+        return verdictOf(kind, "a transaction that cannot be read as it would be signed", "not_verified", [`${normalized.reason}: what the guard reads and what the key signs could differ, so it is not signed`], [], "invalid_transaction");
+      }
+      const tx = normalized.tx;
+      const chainId = tx.chainId as number | undefined;
+      const data = tx.data as string | undefined;
+      hasData = data !== undefined && data !== "0x";
+      hasValue = ((tx.value as bigint | undefined) ?? 0n) > 0n;
+      deployment = tx.to === undefined;
       selfCall = typeof tx.to === "string" && tx.to.toLowerCase() === request.from.toLowerCase();
       decoded = decodeTransaction({ from: request.from, to: tx.to, value: hexValue(tx.value), data }, chainId);
-      if (chainId === undefined || chainId === null) {
+      if (chainId === undefined) {
         return verdictOf(kind, decoded.summary, "not_verified", ["the transaction carries no chainId: a pre-EIP-155 transaction is valid on every chain, and the checks need its chain (set chainId or options.chainId)"], [], "no_chain");
       }
-      if (options.maxFeeWei !== undefined) {
-        const gas = toBigInt(tx.gas);
-        const price = toBigInt(tx.maxFeePerGas ?? tx.gasPrice);
-        if (gas !== null && price !== null && gas * price > options.maxFeeWei) {
-          return verdictOf(kind, decoded.summary, "block", [`the transaction can charge up to ${gas * price} wei in fees, above the cap of ${options.maxFeeWei} wei (maxFeeWei)`], [], "fee_cap");
-        }
+      if (options.maxFeeWei !== undefined && maxFeeOf(tx) > options.maxFeeWei) {
+        return verdictOf(kind, decoded.summary, "block", [`the transaction can charge up to ${maxFeeOf(tx)} wei in fees, above the cap of ${options.maxFeeWei} wei (maxFeeWei)`], [], "fee_cap");
       }
     } else if (request.kind === "typed_data") {
       kind = "typed_data";
@@ -464,7 +575,11 @@ export function createGuard(options: GuardOptions = {}) {
       const why = decoded.simulationSkipped ?? "contract deployments are not simulated, and this one carries value";
       return verdictOf(kind, decoded.summary, "not_verified", [`its effects could not be simulated (${why}); a transaction that moves value or calls code is not signed on an address check alone`], [], "not_simulated");
     }
-    const bodies = buildRiskCheckBodies(decoded, options.origin);
+    // Every counterparty, or none: one left unchecked could be the one that is paid.
+    const bodies = buildRiskCheckBodies(decoded, options.origin, MAX_EVM_CHECKS + 1);
+    if (bodies.length > MAX_EVM_CHECKS) {
+      return verdictOf(kind, decoded.summary, "not_verified", [`it names more than ${MAX_EVM_CHECKS} counterparties; at most ${MAX_EVM_CHECKS} are checked, and none is left unchecked`], [], "too_many_counterparties");
+    }
     if (bodies.length === 0) {
       // Only provably inert requests pass with nothing to check.
       if (kind === "transaction" && selfCall && hasData) {
@@ -472,7 +587,8 @@ export function createGuard(options: GuardOptions = {}) {
       }
       return verdictOf(kind, decoded.summary, "allow", [decoded.localNote ?? "nothing to check: no counterparty"], []);
     }
-    return evaluate(kind, decoded.summary, bodies.map(withAgentContext));
+    const verdict = await evaluate(kind, decoded.summary, bodies.map(withAgentContext));
+    return kind === "transaction" ? requireSimulation(verdict) : verdict;
   }
 
   const solanaNetwork = options.solanaNetwork ?? SOLANA_MAINNET;
@@ -720,9 +836,25 @@ export function guardAccount<A extends GuardableAccount>(account: A, options: Gu
   if (account.signTransaction) {
     const sign = account.signTransaction.bind(account);
     wrapped.signTransaction = async (transaction: any, opts?: any) => {
-      const tx = await copied(transaction ?? {}, "transaction", options);
-      await guard.enforce({ kind: "transaction", from, transaction: tx });
-      return sign(tx, opts);
+      const copy = await copied(transaction ?? {}, "transaction", options);
+      // The normalized copy (viem's reading of every field) is what is checked and what is signed.
+      const normalized = normalizeTransaction(copy, options.chainId);
+      if ("reason" in normalized) {
+        return refuse(
+          {
+            action: "not_verified",
+            signed: false,
+            kind: "transaction",
+            summary: "a transaction that cannot be read as it would be signed",
+            reasons: [`${normalized.reason}: what the guard reads and what the key signs could differ, so it is not signed`],
+            code: "invalid_transaction",
+            checks: [],
+          },
+          options,
+        );
+      }
+      await guard.enforce({ kind: "transaction", from, transaction: normalized.tx });
+      return sign(normalized.tx, opts);
     };
   }
   if (account.signTypedData) {
