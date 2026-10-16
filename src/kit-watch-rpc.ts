@@ -62,11 +62,12 @@ async function postBatch(doFetch: typeof fetch, url: string, requests: readonly 
   }
 }
 
-export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; timeoutMs?: number; batch?: number; blockBatch?: number | undefined } = {}): KitWatchRpc {
+export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; scanEndpoints?: readonly string[]; timeoutMs?: number; batch?: number; blockBatch?: number | undefined } = {}): KitWatchRpc {
   const doFetch = opts.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => fetch(input, init));
   const readUrls = endpointsFor(chain, READ_ENDPOINTS, opts.rpc);
   const simUrls = endpointsFor(chain, SIMULATION_ENDPOINTS, opts.rpc);
-  const scanUrls = endpointsFor(chain, SCAN_ENDPOINTS, opts.scan);
+  // `scanEndpoints` replaces the list outright (tests); `scan` puts an operator's URL first.
+  const scanUrls = opts.scanEndpoints ? [...opts.scanEndpoints] : endpointsFor(chain, SCAN_ENDPOINTS, opts.scan);
   const timeoutMs = opts.timeoutMs ?? 20000;
   // Base's official RPC refuses batches over 10 calls.
   const maxBatch = opts.batch ?? 10;
@@ -111,8 +112,9 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     return json.result?.[0]?.calls?.[0] ?? null;
   };
 
+  // The head comes from the endpoints in the same rotation, so no one of them takes every request.
   const head = async (): Promise<number> => {
-    const json = (await rpcWithFallback(scanUrls, { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, timeoutMs, doFetch)) as { result?: string };
+    const json = (await rpcWithFallback(scanOrder(), { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, timeoutMs, doFetch)) as { result?: string };
     const n = Number.parseInt(json.result ?? "", 16);
     if (!Number.isFinite(n)) throw new Error("bad block number");
     return n;

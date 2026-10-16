@@ -83,6 +83,8 @@ test("code reads: what one endpoint leaves unanswered goes to the next, healthie
   assert.deepEqual(tries, [["eth-mainnet.public.blastapi.io", 20], ["ethereum-rpc.publicnode.com", 20], ["mainnet.gateway.tenderly.co", 10], ["eth.drpc.org", 3], ["eth.drpc.org", 3], ["eth.drpc.org", 3], ["eth.drpc.org", 3]]);
 });
 
+// Three scan endpoints (two that serve no evaluation, then publicnode, which does): the sequences below are exact.
+const ETH_SCAN = ["https://eth-mainnet.public.blastapi.io", "https://mainnet.gateway.tenderly.co", "https://ethereum-rpc.publicnode.com"];
 test("blocks: batches follow the blocks' JSON size, and each batch is handed over before the next is fetched", async () => {
   const events: string[] = [];
   let pad = "ab".repeat(400_000); // ~800 KB of calldata per block
@@ -97,7 +99,7 @@ test("blocks: batches follow the blocks' JSON size, and each batch is handed ove
     }
     return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [{ hash: "0x01", from: DEPLOYER, to: addr(1), nonce: "0x5", input: `0x${pad}` }] } }))));
   }) as unknown as typeof fetch;
-  const rpc = kitWatchRpc("eip155:1", { fetchImpl });
+  const rpc = kitWatchRpc("eip155:1", { fetchImpl, scanEndpoints: ETH_SCAN });
   const got: number[] = [];
   await rpc.eachBlocks(100, 109, (blocks) => {
     events.push(`hand ${blocks.length}`);
@@ -125,7 +127,7 @@ test("blocks: a batch no endpoint serves is split, and stays that small for the 
     if (req.length > 2) return new Response("too large", { status: 413 });
     return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
   }) as unknown as typeof fetch;
-  const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 7 });
+  const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 7, scanEndpoints: ETH_SCAN });
   const got: number[] = [];
   await rpc.eachBlocks(100, 109, (blocks) => void got.push(...blocks.map((b) => Number.parseInt(b.number, 16))));
   assert.deepEqual(got, Array.from({ length: 10 }, (_, i) => 100 + i), "every block, in order");
@@ -133,7 +135,7 @@ test("blocks: a batch no endpoint serves is split, and stays that small for the 
   assert.equal(rpc.blockBatchSize(), 1, "the next run starts at the size that worked");
 
   const down = (async (url: string) => (url.includes("tenderly") ? new Response("[]") : new Response("busy", { status: 503 }))) as unknown as typeof fetch;
-  await assert.rejects(kitWatchRpc("eip155:1", { fetchImpl: down, blockBatch: 1 }).eachBlocks(100, 100, () => undefined), (err: Error) => {
+  await assert.rejects(kitWatchRpc("eip155:1", { fetchImpl: down, blockBatch: 1, scanEndpoints: ETH_SCAN }).eachBlocks(100, 100, () => undefined), (err: Error) => {
     assert.match(err.message, /^blocks 100-100 unavailable \(eth-mainnet\.public\.blastapi\.io: HTTP 503; mainnet\.gateway\.tenderly\.co: incomplete; ethereum-rpc\.publicnode\.com: HTTP 503\)$/);
     return true;
   });
@@ -589,7 +591,7 @@ test("blocks: an endpoint that answers 429 is not asked again in the run; when a
     if ([...limiting].some((name) => url.includes(name))) return new Response("slow down", { status: 429 });
     return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
   }) as unknown as typeof fetch;
-  const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 1 });
+  const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 1, scanEndpoints: ETH_SCAN });
   await rpc.eachBlocks(100, 103, () => undefined);
   // Block 100 alone, then 101-103 in one batch (small blocks grow it): BlastAPI is asked once.
   assert.deepEqual(asked, ["eth-mainnet.public.blastapi.io", "mainnet.gateway.tenderly.co", "mainnet.gateway.tenderly.co"]);
@@ -599,4 +601,15 @@ test("blocks: an endpoint that answers 429 is not asked again in the run; when a
   await assert.rejects(rpc.eachBlocks(104, 110, () => undefined), /^Error: blocks 104-110 unavailable \(eth-mainnet\.public\.blastapi\.io: HTTP 429 earlier in this run; mainnet\.gateway\.tenderly\.co: HTTP 429; ethereum-rpc\.publicnode\.com: HTTP 429\)$/);
   assert.deepEqual(asked, ["mainnet.gateway.tenderly.co", "ethereum-rpc.publicnode.com"], "nothing more for BlastAPI, and no smaller retries");
   assert.equal(rpc.blockBatchSize(), batch, "a rate limit does not shrink the batch");
+});
+
+test("scan endpoints: those that serve paid evaluations come last, after every one that does not", async () => {
+  const { SCAN_ENDPOINTS, RPC_ENDPOINTS, SIMULATION_ENDPOINTS } = await import("../src/rpc.js");
+  for (const [chain, list] of Object.entries(SCAN_ENDPOINTS)) {
+    const evaluation = new Set([...(RPC_ENDPOINTS[chain] ?? []), ...(SIMULATION_ENDPOINTS[chain] ?? [])]);
+    const firstEvaluation = list.findIndex((u) => evaluation.has(u));
+    assert.ok(firstEvaluation > 0, `${chain}: at least one endpoint that serves no evaluation, first`);
+    assert.ok(list.slice(firstEvaluation).every((u) => evaluation.has(u)), `${chain}: nothing after the evaluation endpoints`);
+    assert.equal(new Set(list).size, list.length, `${chain}: no duplicates`);
+  }
 });
