@@ -718,6 +718,19 @@ function renderBatch(decoded: Decoded, items: BatchItem[], kind: RequestKind, ho
   }
   const failed = entries.filter((entry) => entry.item.status !== "ok");
   const simulation = batchSimulation(items);
+  // More counterparties than one request checks: the rest were not checked, so it is not an all-clear.
+  const unchecked = candidates.length - entries.length;
+  if (worst && unchecked > 0 && !isAlarming(worst.item.verdict)) {
+    return failureContent(
+      decoded,
+      host,
+      kind,
+      "not fully checked — NOT verified",
+      `${unchecked} of the ${candidates.length} addresses in this ${kind} were not checked (at most ${MAX_CHECKS} are checked per request), so it was NOT verified.`,
+      entries,
+      simulation,
+    );
+  }
   if (!worst || (failed.length > 0 && !isAlarming(worst.item.verdict))) {
     // Fail closed: an address that could not be verified is never an all-clear.
     return failureContent(
@@ -836,15 +849,14 @@ export const NOT_SENT_TEXT =
 
 function involvedSection(others: Candidate[]): Child {
   if (others.length === 0) return null;
-  return (
-    <Section>
-      {others.slice(0, MAX_CHECKS - 1).map((candidate) => (
-        <Row label={`Also involved: ${ROLE_LABEL[candidate.role]}`} variant="warning">
-          <Address address={candidate.address as `0x${string}`} />
-        </Row>
-      ))}
-    </Section>
-  );
+  const hidden = others.length - (MAX_CHECKS - 1);
+  const rows: JSXElement[] = others.slice(0, MAX_CHECKS - 1).map((candidate) => (
+    <Row label={`Also involved: ${ROLE_LABEL[candidate.role]}`} variant="warning">
+      <Address address={candidate.address as `0x${string}`} />
+    </Row>
+  ));
+  if (hidden > 0) rows.push(<Text color="warning">{`Also involved: ${hidden} more address${hidden === 1 ? "" : "es"}, not shown.`}</Text>);
+  return <Section>{rows}</Section>;
 }
 
 /**

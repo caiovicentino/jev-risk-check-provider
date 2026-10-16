@@ -632,15 +632,16 @@ export function isIgnorableAddress(address: string): boolean {
 }
 
 /**
- * Orders candidates by risk, removes duplicates, ignorable and excluded
- * addresses, and keeps at most `limit`.
+ * Orders candidates by risk and removes duplicates, ignorable and excluded
+ * addresses. Every counterparty is kept: how many are checked is the caller's
+ * decision (the Snap checks MAX_CHECKS; the signing guard checks all or none).
  *
  * @param candidates - Candidate addresses.
  * @param exclude - Addresses never checked (e.g. the user).
- * @param limit - Maximum candidates (primary + batch).
+ * @param limit - Maximum candidates (primary + batch). Default: all of them.
  * @returns Selected candidates, primary first.
  */
-export function selectCandidates(candidates: Candidate[], exclude: (string | undefined)[] = [], limit = 3): Candidate[] {
+export function selectCandidates(candidates: Candidate[], exclude: (string | undefined)[] = [], limit = Number.POSITIVE_INFINITY): Candidate[] {
   const skip = new Set(exclude.filter((value): value is string => Boolean(value)));
   const best = new Map<string, Candidate>();
   for (const candidate of candidates) {

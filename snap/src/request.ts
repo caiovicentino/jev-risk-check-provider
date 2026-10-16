@@ -159,14 +159,15 @@ function cleanPayment(input?: Payment): Payment | undefined {
 }
 
 /**
- * Builds one POST body per checked address (primary first, at most 3). Empty
- * when there is nothing to check.
+ * Builds one POST body per checked address (primary first, at most `limit`).
+ * Empty when there is nothing to check.
  *
  * @param decoded - The decoded request.
  * @param origin - The request origin, if any.
+ * @param limit - The most bodies built (default MAX_CHECKS, the Snap's batch).
  * @returns The bodies to send.
  */
-export function buildRiskCheckBodies(decoded: Decoded, origin?: unknown): RiskCheckBody[] {
+export function buildRiskCheckBodies(decoded: Decoded, origin?: unknown, limit = MAX_CHECKS): RiskCheckBody[] {
   if (!decoded.counterparty) return [];
   const host = originHost(origin);
   // The requesting site is the primary domain; a signed message with no origin
@@ -180,7 +181,7 @@ export function buildRiskCheckBodies(decoded: Decoded, origin?: unknown): RiskCh
     ...(decoded.reason ? { reason: decoded.reason } : {}),
     rank: 0,
   };
-  const candidates = [primary, ...decoded.others].slice(0, MAX_CHECKS);
+  const candidates = [primary, ...decoded.others].slice(0, limit);
   // The transaction is simulated once, with the primary item: the provider
   // requires an eip155 chain, and a batch must not simulate it N times.
   const transaction = decoded.transaction && decoded.chain?.startsWith("eip155:") ? decoded.transaction : undefined;

@@ -156,8 +156,26 @@ function dynamicAt(hex: string, headOffset: number, base = 0): number | undefine
   return relative === undefined ? undefined : base + relative;
 }
 
+/**
+ * Records why an array or batch was not read in full (Action.opaque): what is
+ * not decoded is never treated as absent.
+ *
+ * @param cut - Receives the reason.
+ * @param count - Items the calldata declares (or holds).
+ * @param read - Items decoded.
+ * @param what - What the items are, for the reason.
+ */
+function truncated(cut: string[] | undefined, count: number, read: number, what: string): void {
+  if (!cut || read >= count) return;
+  const reason =
+    read === MAX_ARRAY && count > MAX_ARRAY
+      ? `the request carries ${count} ${what}; only the first ${MAX_ARRAY} were decoded`
+      : `${count - read} of the ${count} ${what} could not be decoded`;
+  if (!cut.includes(reason)) cut.push(reason);
+}
+
 /** `bytes[]` whose length word is at `offset`. */
-function bytesArrayAt(hex: string, offset: number | undefined): string[] | undefined {
+function bytesArrayAt(hex: string, offset: number | undefined, cut?: string[]): string[] | undefined {
   if (offset === undefined) return undefined;
   const count = smallAt(hex, offset);
   if (count === undefined) return undefined;
@@ -165,14 +183,15 @@ function bytesArrayAt(hex: string, offset: number | undefined): string[] | undef
   const items: string[] = [];
   for (let index = 0; index < Math.min(count, MAX_ARRAY); index += 1) {
     const item = bytesAt(hex, dynamicAt(hex, base + index * 32, base));
-    if (item === undefined) return items.length > 0 ? items : undefined;
+    if (item === undefined) break;
     items.push(item);
   }
-  return items;
+  truncated(cut, count, items.length, "calls");
+  return items.length > 0 || count === 0 ? items : undefined;
 }
 
 /** `address[]` whose length word is at `offset`. */
-function addressArrayAt(hex: string, offset: number | undefined, warnings: string[]): string[] | undefined {
+function addressArrayAt(hex: string, offset: number | undefined, warnings: string[], cut?: string[]): string[] | undefined {
   if (offset === undefined) return undefined;
   const count = smallAt(hex, offset);
   if (count === undefined) return undefined;
@@ -182,10 +201,11 @@ function addressArrayAt(hex: string, offset: number | undefined, warnings: strin
     if (address === undefined) break;
     out.push(address);
   }
+  truncated(cut, count, out.length, "call targets");
   return out;
 }
 
-function uintArrayAt(hex: string, offset: number | undefined): bigint[] | undefined {
+function uintArrayAt(hex: string, offset: number | undefined, cut?: string[]): bigint[] | undefined {
   if (offset === undefined) return undefined;
   const count = smallAt(hex, offset);
   if (count === undefined) return undefined;
@@ -195,6 +215,7 @@ function uintArrayAt(hex: string, offset: number | undefined): bigint[] | undefi
     if (value === undefined) break;
     out.push(value);
   }
+  truncated(cut, count, out.length, "call values");
   return out;
 }
 
@@ -676,7 +697,8 @@ function decodeInner(calls: InnerCall[], ctx: Ctx): Action[] {
 
 function multicall(argsOffset: number) {
   return (args: string, call: Call, ctx: Ctx): Action => {
-    const items = bytesArrayAt(args, dynamicAt(args, argsOffset));
+    const cut: string[] = [];
+    const items = bytesArrayAt(args, dynamicAt(args, argsOffset), cut);
     if (!items) return { ...plainCall(call, ctx, "malformed multicall"), warnings: ["multicall calldata could not be decoded"] };
     const inner = decodeInner(
       items.map((data) => ({ sender: call.sender, to: call.to, value: 0n, data })),
@@ -684,6 +706,7 @@ function multicall(argsOffset: number) {
     );
     return combine("Multicall", `Multicall on ${call.to} with ${items.length} inner call(s)`, inner, {
       candidates: call.value > 0n ? [contractCandidate(call, ctx)] : [],
+      opaque: cut,
     });
   };
 }
@@ -731,8 +754,16 @@ function multiSend(args: string, call: Call, ctx: Ctx): Action {
     calls.push({ sender: call.sender, to, value, data, delegate: operation === 1 });
     position = start + Number(length) * 2;
   }
+  // MultiSend executes every packed call: calls past the limit, or bytes left
+  // that do not parse, are calls this decoder did not read.
+  const opaque =
+    position >= packed.length
+      ? []
+      : calls.length >= MAX_ARRAY
+        ? [`the multiSend batch holds more than ${MAX_ARRAY} calls; only the first ${MAX_ARRAY} were decoded`]
+        : [`${(packed.length - position) / 2} bytes of the multiSend batch could not be decoded`];
   const inner = decodeInner(calls, ctx);
-  return combine("Safe multiSend", `Safe multiSend batch of ${calls.length} call(s)`, inner);
+  return combine("Safe multiSend", `Safe multiSend batch of ${calls.length} call(s)`, inner, { opaque });
 }
 
 function safeExecTransaction(args: string, call: Call, ctx: Ctx): Action {
@@ -769,14 +800,15 @@ function routerRecipient(address: string, call: Call): string | undefined {
 
 function universalRouter(args: string, call: Call, ctx: Ctx): Action {
   const commands = bytesAt(args, dynamicAt(args, 0));
-  const inputs = bytesArrayAt(args, dynamicAt(args, 32));
+  const cut: string[] = [];
+  const inputs = bytesArrayAt(args, dynamicAt(args, 32), cut);
   if (commands === undefined || inputs === undefined) {
     return { ...plainCall(call, ctx, "malformed Universal Router execute"), warnings: ["Universal Router calldata could not be decoded"] };
   }
-  return routerPlan(commands, inputs, call, ctx, "Universal Router execute");
+  return routerPlan(commands, inputs, call, ctx, "Universal Router execute", cut);
 }
 
-function routerPlan(commands: string, inputs: string[], call: Call, ctx: Ctx, title: string): Action {
+function routerPlan(commands: string, inputs: string[], call: Call, ctx: Ctx, title: string, cut: string[]): Action {
   const warnings: string[] = [];
   const danger: string[] = [];
   const candidates: Candidate[] = [];
@@ -815,6 +847,7 @@ function routerPlan(commands: string, inputs: string[], call: Call, ctx: Ctx, ti
     });
   };
   const count = Math.min(commands.length / 2, MAX_ARRAY);
+  truncated(cut, commands.length / 2, count, "Universal Router commands");
   for (let index = 0; index < count; index += 1) {
     const command = parseInt(commands.slice(index * 2, index * 2 + 2), 16) & 0x3f;
     const input = inputs[index] ?? "";
@@ -876,7 +909,9 @@ function routerPlan(commands: string, inputs: string[], call: Call, ctx: Ctx, ti
       case 0x0d: {
         notes.push("PERMIT2_TRANSFER_FROM_BATCH");
         const array = dynamicAt(input, 0);
-        const items = array === undefined ? 0 : Math.min(smallAt(input, array) ?? 0, MAX_ARRAY);
+        const declared = array === undefined ? 0 : (smallAt(input, array) ?? 0);
+        const items = Math.min(declared, MAX_ARRAY);
+        truncated(cut, declared, items, "Permit2 batch transfers");
         for (let item = 0; item < items && array !== undefined; item += 1) {
           const base = array + 32 + item * 128;
           const token = addressAt(input, base + 96, warnings);
@@ -886,16 +921,20 @@ function routerPlan(commands: string, inputs: string[], call: Call, ctx: Ctx, ti
       }
       case 0x21: {
         notes.push("EXECUTE_SUB_PLAN");
-        if (ctx.depth < MAX_DEPTH) {
-          const subCommands = bytesAt(input, dynamicAt(input, 0));
-          const subInputs = bytesArrayAt(input, dynamicAt(input, 32));
-          if (subCommands !== undefined && subInputs !== undefined) {
-            const sub = routerPlan(subCommands, subInputs, call, { ...ctx, depth: ctx.depth + 1 }, "sub-plan");
-            candidates.push(...sub.candidates);
-            warnings.push(...sub.warnings);
-            danger.push(...sub.danger);
-          }
+        if (ctx.depth >= MAX_DEPTH) {
+          cut.push(`a Universal Router sub-plan nested more than ${MAX_DEPTH} levels deep was not decoded`);
+          break;
         }
+        const subCommands = bytesAt(input, dynamicAt(input, 0));
+        const subInputs = bytesArrayAt(input, dynamicAt(input, 32), cut);
+        if (subCommands === undefined || subInputs === undefined) {
+          cut.push("a Universal Router sub-plan could not be decoded");
+          break;
+        }
+        const sub = routerPlan(subCommands, subInputs, call, { ...ctx, depth: ctx.depth + 1 }, "sub-plan", cut);
+        candidates.push(...sub.candidates);
+        warnings.push(...sub.warnings);
+        danger.push(...sub.danger);
         break;
       }
       default:
@@ -910,6 +949,7 @@ function routerPlan(commands: string, inputs: string[], call: Call, ctx: Ctx, ti
     candidates,
     warnings,
     danger,
+    opaque: cut,
   };
 }
 
@@ -922,6 +962,7 @@ function smartAccountExecute7579(args: string, call: Call, ctx: Ctx): Action {
   const callType = mode.slice(0, 2);
   const account = call.to;
   const calls: InnerCall[] = [];
+  const cut: string[] = [];
   if (callType === "00" || callType === "ff") {
     const single = callType === "00";
     const minimum = single ? 104 : 40;
@@ -935,7 +976,8 @@ function smartAccountExecute7579(args: string, call: Call, ctx: Ctx): Action {
     });
   } else if (callType === "01") {
     const array = dynamicAt(execution, 0);
-    const count = array === undefined ? 0 : Math.min(smallAt(execution, array) ?? 0, MAX_ARRAY);
+    const declared = array === undefined ? 0 : (smallAt(execution, array) ?? 0);
+    const count = Math.min(declared, MAX_ARRAY);
     const base = (array ?? 0) + 32;
     for (let index = 0; index < count; index += 1) {
       const tuple = dynamicAt(execution, base + index * 32, base);
@@ -947,6 +989,7 @@ function smartAccountExecute7579(args: string, call: Call, ctx: Ctx): Action {
       if (target === undefined || value === undefined || data === undefined) break;
       calls.push({ sender: account, to: target, value, data });
     }
+    truncated(cut, declared, calls.length, "batched calls");
   } else if (callType === "fe") {
     return emptyAction("Smart-account staticcall", `Smart-account execute on ${account}: a read-only staticcall (no state change).`);
   } else {
@@ -957,6 +1000,7 @@ function smartAccountExecute7579(args: string, call: Call, ctx: Ctx): Action {
     "Smart-account execute",
     `Smart-account execute (ERC-7579 ${callType === "01" ? "batch" : callType === "ff" ? "delegatecall" : "single call"}) on ${account}`,
     inner,
+    { opaque: cut },
   );
 }
 
@@ -974,9 +1018,10 @@ function executeSingle(args: string, call: Call, ctx: Ctx): Action {
 function executeBatchArrays(withValues: boolean) {
   return (args: string, call: Call, ctx: Ctx): Action => {
     const warnings: string[] = [];
-    const targets = addressArrayAt(args, dynamicAt(args, 0), warnings);
-    const values = withValues ? uintArrayAt(args, dynamicAt(args, 32)) : undefined;
-    const datas = bytesArrayAt(args, dynamicAt(args, withValues ? 64 : 32));
+    const cut: string[] = [];
+    const targets = addressArrayAt(args, dynamicAt(args, 0), warnings, cut);
+    const values = withValues ? uintArrayAt(args, dynamicAt(args, 32), cut) : undefined;
+    const datas = bytesArrayAt(args, dynamicAt(args, withValues ? 64 : 32), cut);
     if (!targets || !datas || (withValues && !values)) {
       return { ...plainCall(call, ctx, "malformed executeBatch"), warnings: ["smart-account executeBatch calldata could not be decoded"] };
     }
@@ -986,13 +1031,14 @@ function executeBatchArrays(withValues: boolean) {
       value: values?.[index] ?? 0n,
       data: datas[index] ?? "",
     }));
-    return combine("Smart-account executeBatch", `Smart-account executeBatch on ${call.to}`, decodeInner(calls, ctx), { warnings });
+    return combine("Smart-account executeBatch", `Smart-account executeBatch on ${call.to}`, decodeInner(calls, ctx), { warnings, opaque: cut });
   };
 }
 
 function executeBatchTuples(args: string, call: Call, ctx: Ctx): Action {
   const array = dynamicAt(args, 0);
-  const count = array === undefined ? 0 : Math.min(smallAt(args, array) ?? 0, MAX_ARRAY);
+  const declared = array === undefined ? 0 : (smallAt(args, array) ?? 0);
+  const count = Math.min(declared, MAX_ARRAY);
   const base = (array ?? 0) + 32;
   const calls: InnerCall[] = [];
   const warnings: string[] = [];
@@ -1008,7 +1054,9 @@ function executeBatchTuples(args: string, call: Call, ctx: Ctx): Action {
   if (calls.length === 0 && count > 0) {
     return { ...plainCall(call, ctx, "malformed executeBatch"), warnings: ["smart-account executeBatch calldata could not be decoded"] };
   }
-  return combine("Smart-account executeBatch", `Smart-account executeBatch on ${call.to}`, decodeInner(calls, ctx), { warnings });
+  const cut: string[] = [];
+  truncated(cut, declared, calls.length, "batched calls");
+  return combine("Smart-account executeBatch", `Smart-account executeBatch on ${call.to}`, decodeInner(calls, ctx), { warnings, opaque: cut });
 }
 
 /**
@@ -1048,7 +1096,8 @@ function executeWithOperation(title: string) {
  * @returns The decoded action.
  */
 function crossChainSelfCalls(args: string, call: Call, ctx: Ctx): Action {
-  const items = bytesArrayAt(args, dynamicAt(args, 0));
+  const cut: string[] = [];
+  const items = bytesArrayAt(args, dynamicAt(args, 0), cut);
   if (!items) {
     return { ...plainCall(call, ctx, "malformed executeWithoutChainIdValidation"), warnings: ["executeWithoutChainIdValidation calldata could not be decoded"] };
   }
@@ -1058,6 +1107,7 @@ function crossChainSelfCalls(args: string, call: Call, ctx: Ctx): Action {
   );
   return combine("Smart wallet self-calls (every chain)", `Smart wallet ${call.to} calls itself ${items.length} time(s) with executeWithoutChainIdValidation, valid on EVERY chain`, inner, {
     warnings: ["executeWithoutChainIdValidation is replayable on every chain the wallet is deployed on"],
+    opaque: cut,
   });
 }
 

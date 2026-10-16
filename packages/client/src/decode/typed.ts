@@ -722,13 +722,25 @@ function analyzeSeaportOrder(ctx: Ctx, order: CanonStruct): OrderAnalysis {
   };
 }
 
-function flattenTree(value: CanonValue, out: CanonStruct[], depth = 0): void {
-  if (out.length >= MAX_TREE_ORDERS || depth > 30) return;
+/**
+ * The orders of a bulk-listing tree, at most MAX_TREE_ORDERS + 1 (one more
+ * than are inspected, so a larger tree is known to be larger).
+ *
+ * @param value - The tree (nested arrays of orders).
+ * @param out - Receives the orders.
+ * @param depth - Current depth.
+ * @returns False when the tree nests deeper than is read.
+ */
+function flattenTree(value: CanonValue, out: CanonStruct[], depth = 0): boolean {
+  if (out.length > MAX_TREE_ORDERS) return true;
+  if (depth > 30) return false;
   if (Array.isArray(value)) {
-    for (const item of value) flattenTree(item, out, depth + 1);
-    return;
+    let complete = true;
+    for (const item of value) complete = flattenTree(item, out, depth + 1) && complete;
+    return complete;
   }
   if (isCanonStruct(value)) out.push(value);
+  return true;
 }
 
 function verifyingCandidate(ctx: Ctx, kind: Interaction): Candidate[] {
@@ -754,9 +766,14 @@ function decodeSeaport(ctx: Ctx): Decoded | undefined {
   // BulkOrder: a Merkle tree (nested fixed arrays) of OrderComponents.
   if (baseType(declared(ctx, ctx.primaryType, "tree")) !== "OrderComponents") return undefined;
   const orders: CanonStruct[] = [];
-  flattenTree(ctx.message.tree, orders);
-  const analyses = orders.map((order) => analyzeSeaportOrder(ctx, order)).filter((analysis) => !analysis.empty);
-  if (orders.length >= MAX_TREE_ORDERS) ctx.warnings.push(`the bulk listing is large; only the first ${MAX_TREE_ORDERS} orders were inspected`);
+  const complete = flattenTree(ctx.message.tree, orders);
+  // Every order of the tree can be fulfilled with this one signature: one not inspected is not signed blind.
+  if (orders.length > MAX_TREE_ORDERS) markOpaque(ctx, `the bulk listing holds more than ${MAX_TREE_ORDERS} orders; only the first ${MAX_TREE_ORDERS} were inspected`);
+  if (!complete) markOpaque(ctx, "the bulk listing's tree nests deeper than x402check reads");
+  const analyses = orders
+    .slice(0, MAX_TREE_ORDERS)
+    .map((order) => analyzeSeaportOrder(ctx, order))
+    .filter((analysis) => !analysis.empty);
   const parts = analyses.slice(0, 3).map((analysis, index) => `order ${index + 1}: ${analysis.summary}`);
   return orderResult(
     ctx,
@@ -1408,6 +1425,7 @@ const KEY_RANKS: Record<string, { rank: number; role: Role }> = {
   spender: { rank: RANK.approval, role: "spender" },
   operator: { rank: RANK.approval, role: "operator" },
   delegate: { rank: RANK.approval, role: "delegate" },
+  delegatee: { rank: RANK.approval, role: "delegate" },
   to: { rank: RANK.transfer, role: "recipient" },
   recipient: { rank: RANK.transfer, role: "recipient" },
   receiver: { rank: RANK.transfer, role: "recipient" },
@@ -1418,6 +1436,33 @@ const KEY_RANKS: Record<string, { rank: number; role: Role }> = {
 function keyRank(key: string): { rank: number; role: Role } | undefined {
   const lower = key.toLowerCase();
   return hasOwn(KEY_RANKS, lower) ? KEY_RANKS[lower] : undefined;
+}
+
+/** An unrecognized struct that names a grantee and an amount grants that address the amount. */
+const GRANTEE_FIELD_RE = /^(?:spender|delegatee|operator)$/iu;
+const GRANT_AMOUNT_FIELD_RE = /^(?:value|amount|allowance)$/iu;
+
+type Grant = { field: string; amount: bigint | undefined; unlimited: boolean; label: string; phrase: string };
+
+/**
+ * The allowance an unrecognized typed-data struct grants (e.g. Aave's credit
+ * delegation, DelegationWithSig(delegatee, value, nonce, deadline)): a
+ * top-level address field named spender, delegatee or operator next to a
+ * uint field named value, amount or allowance. It is checked like a permit,
+ * unlimited from 2^255 (or 10^30 base units), not as a plain message.
+ *
+ * @param ctx - Decoding context.
+ * @returns The grant, or undefined.
+ */
+function grantOf(ctx: Ctx): Grant | undefined {
+  const fields = ctx.types[ctx.primaryType] ?? [];
+  const grantee = fields.find((field) => field.type === "address" && GRANTEE_FIELD_RE.test(field.name));
+  const amountField = fields.find((field) => /^uint\d{0,3}$/u.test(field.type) && GRANT_AMOUNT_FIELD_RE.test(field.name));
+  if (!grantee || !amountField) return undefined;
+  const amount = num(ctx.message, amountField.name);
+  if (amount === 0n) return undefined;
+  const allowance = describeAllowance(amount, UNLIMITED_UINT256, ctx.warnings);
+  return { field: grantee.name, amount, unlimited: allowance.unlimited, label: allowance.label, phrase: allowance.phrase };
 }
 
 /**
@@ -1497,6 +1542,8 @@ function decodeGeneric(ctx: Ctx): Decoded {
   }
   const visits: AddressVisit[] = [];
   collectAddressFields(ctx.types, ctx.primaryType, ctx.message, "", visits);
+  // collectAddressFields stops past 512 addresses: the rest were not read.
+  if (visits.length > 512) markOpaque(ctx, "the typed data names more than 512 addresses; the rest were not read");
   const skip = new Set([ctx.signer, ctx.verifyingContract].filter(Boolean));
   const usable = visits.filter((visit) => !skip.has(visit.address) && !isIgnorableAddress(visit.address));
   const head = `EIP-712 signature (${ctx.method}, ${domainLabel(ctx)}, primary type ${quote(ctx.primaryType || "unknown", 40)})`;
@@ -1504,23 +1551,30 @@ function decodeGeneric(ctx: Ctx): Decoded {
   const action = `Typed data: ${capText(ctx.primaryType || "unknown", 40)}`;
   const preferred = usable.filter((visit) => keyRank(visit.key) !== undefined);
   const chosen = preferred.length > 0 ? preferred : usable.slice(0, 1);
+  const grant = grantOf(ctx);
   if (chosen.length > 0) {
     const candidates: Candidate[] = chosen.map((visit, index) => {
       const info = keyRank(visit.key);
+      const granted = grant !== undefined && visit.path === grant.field;
       return {
         address: visit.address,
         role: info?.role ?? "counterparty",
-        interaction: kind,
-        rank: (info?.rank ?? RANK.contract) - index * 0.001,
-        reason: `named in field "${capText(visit.path, 60)}"`,
+        interaction: granted ? interaction("permit_signature", grant.unlimited) : kind,
+        rank: (granted ? (grant.unlimited ? RANK.unlimitedApproval : RANK.approval) : (info?.rank ?? RANK.contract)) - index * 0.001,
+        reason: granted ? `granted ${capText(grant.phrase, 80)} in field "${capText(visit.path, 60)}"` : `named in field "${capText(visit.path, 60)}"`,
+        ...(granted ? { unlimited: grant.unlimited, amountLabel: grant.label } : {}),
+        ...(granted && grant.amount !== undefined ? { payment: payment({ network: ctx.chain, pay_to: visit.address, amount: grant.amount.toString() }) } : {}),
       };
     });
     const first = chosen[0] as { path: string; address: string };
+    const granted = grant !== undefined && chosen.some((visit) => visit.path === grant.field);
     return done(
       ctx,
       {
         action,
-        summary: `${head}: counterparty taken from field "${capText(first.path, 60)}" = ${first.address}.${details ? ` Fields: ${details}.` : ""}`,
+        summary: `${head}: counterparty taken from field "${capText(first.path, 60)}" = ${first.address}${
+          granted ? `; it grants field "${capText(grant.field, 40)}" ${grant.phrase}` : ""
+        }.${details ? ` Fields: ${details}.` : ""}`,
       },
       candidates,
     );
