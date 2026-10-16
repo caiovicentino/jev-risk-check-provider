@@ -202,8 +202,8 @@ describe("L3: --tarball checks the packed .tgz itself", () => {
     assert.match(content([...files, "package/.npmrc"]), /unexpected file in the tarball: \.npmrc/);
     assert.match(content([...files, "other/x.js"]), /unexpected entry in the tarball, outside package\/: other\/x\.js/);
     const twice = content([...files, "package/package.json"]);
+    // Refused for the duplicate itself; what tar then prints for that member differs between bsdtar and GNU tar.
     assert.match(twice, /the tarball holds package\/package\.json more than once/);
-    assert.match(twice, /package\/package\.json cannot be read as JSON/, "tar prints both copies");
   });
 
   test("the command: exit 0 for a tarball that passes, 1 for one that does not, 2 for a usage error", () => {
