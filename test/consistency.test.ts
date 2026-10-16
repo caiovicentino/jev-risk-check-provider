@@ -107,6 +107,14 @@ test("prices a buyer reads (site, READMEs, MCP texts) are the ones deploy/pricin
   assert.ok(seen >= 20, `only ${seen} price statements found: the patterns no longer match the texts`);
 });
 
+test("the MCP payer's cap per check covers every price a check can cost", () => {
+  const cap = Number(/export const MAX_CHECK_PAYMENT_USD = ([\d.]+);/.exec(read("packages/mcp/src/payer.ts"))?.[1]);
+  assert.ok(Number.isFinite(cap) && cap > 0, "MAX_CHECK_PAYMENT_USD in packages/mcp/src/payer.ts");
+  for (const network of MAINNET_NETWORKS) {
+    assert.ok(Math.max(networkPrice(network), SIMULATION_PRICE) <= cap, `${network}: a check costs more than the MCP payer pays for one (MAX_CHECK_PAYMENT_USD)`);
+  }
+});
+
 test("the client parses addresses and chains as the provider does", () => {
   const subjects = [
     "0x1111111111111111111111111111111111111111",

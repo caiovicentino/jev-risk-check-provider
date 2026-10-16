@@ -399,6 +399,9 @@ function paymentNextStep(refusal: PaymentRefused | undefined, error: unknown, pa
         return `Next: the price exceeds this server's per-payment cap (${dollars(payer?.maxPaymentUsd ?? 0)}; X402CHECK_MAX_PAYMENT_USD). Do not proceed without a check.`;
       case "no_payable_option":
         return "Next: this server can only pay USDC on EVM networks (Base first), and none was offered. Do not proceed without a check.";
+      case "untrusted_check_payee":
+      case "over_check_price":
+        return "Next: the x402check API asked to be paid differently than x402check is paid (another address, or more than a check costs), so nothing was paid. Tell the operator (X402CHECK_BASE_URL); do not proceed without a check.";
       default:
         return "Next: the payment could not be created; ask the operator to check X402CHECK_PAYER_KEY. Do not proceed without a check.";
     }

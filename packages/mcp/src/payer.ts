@@ -4,10 +4,16 @@
 //
 // Why a payment was refused is recorded by this module's own hooks, in per-call state, and read
 // from there: never from the text of an error, which can carry the 402's own (third-party) fields.
+//
+// x402check's own checks are paid only to x402check's pay_to, and never more than a check costs:
+// a hijacked API origin cannot collect more. A resource that answered with anything but success
+// to a signed authorization gets no new one for the same payee until that one expires: it may
+// still settle it.
 import { findDefaultAsset } from "@x402/evm";
 import { ExactEvmScheme } from "@x402/evm/exact/client";
 import { wrapFetchWithPayment, x402Client, x402HTTPClient, type PaymentRequirements } from "@x402/fetch";
 import type { FetchLike } from "@x402check/client";
+import { X402CHECK_PAY_TO } from "@x402check/client/guard";
 import { privateKeyToAccount } from "viem/accounts";
 import { readLimited } from "./body.js";
 import { NonPublicAddressError, publicOnlyFetch, type Resolver } from "./net.js";
@@ -22,6 +28,12 @@ export const PREFERRED_NETWORK = "eip155:8453";
 export const MAX_AUTHORIZATION_SECONDS = 900;
 /** The most of a 402 response body read before paying (x402 v2 challenges travel in the PAYMENT-REQUIRED header). */
 export const MAX_CHALLENGE_BYTES = 64 * 1024;
+/**
+ * The most one check may cost, in USD: x402check's dearest network charges $0.009 per check, and a
+ * simulated check costs the network's price or $0.005, whichever is higher. A check's 402 asking
+ * for more is refused (test/consistency.test.ts keeps this above every published price).
+ */
+export const MAX_CHECK_PAYMENT_USD = 0.01;
 
 export type PaymentRefusalKind =
   | "budget_exhausted"
@@ -42,7 +54,13 @@ export type PaymentRefusalKind =
   /** The host name resolves to a non-public address. */
   | "private_address"
   /** The call was cancelled before anything was sent with a signature. */
-  | "cancelled";
+  | "cancelled"
+  /** A check's 402 names a payee other than x402check's pay_to. */
+  | "untrusted_check_payee"
+  /** A check's 402 asks for more than a check costs (MAX_CHECK_PAYMENT_USD). */
+  | "over_check_price"
+  /** An earlier authorization to the same payee for the same resource was not accepted and has not expired. */
+  | "authorization_outstanding";
 
 /** A payment this server refused or could not make. The message never contains secrets. */
 export class PaymentRefused extends Error {
@@ -71,6 +89,10 @@ export interface PayerOptions {
   fetch?: typeof globalThis.fetch | undefined;
   /** DNS resolution for resource hosts when `fetch` is not set (default: the system resolver). For tests. */
   resolve?: Resolver | undefined;
+  /** Who a check's 402 may be paid to (x402check's API). Default: x402check's own pay_to. */
+  checkPayees?: readonly string[] | undefined;
+  /** The most one check may cost, in USD. Default MAX_CHECK_PAYMENT_USD. */
+  maxCheckPaymentUsd?: number | undefined;
 }
 
 export interface Payer {
@@ -147,6 +169,8 @@ const TEXT = {
   redirected: "the response came from a redirect (the configured fetch followed it), and redirects are refused",
   privateAddress: "the host name resolves to a private, loopback, link-local or reserved address",
   unreadable: "the x402 payment could not be created from the resource's 402 response",
+  checkPayee: "the check's 402 names a payee that is not x402check's pay_to, so it was not paid",
+  checkPrice: "the check's 402 asks for more than any check costs, so it was not paid",
 } as const;
 
 // Marks why a request was aborted: compared by identity, never by text.
@@ -227,6 +251,16 @@ function signedInfo(paymentPayload: unknown): SignedPayment {
   };
 }
 
+/** A resource as payments are remembered: origin and path (the query and fragment may vary per call). */
+function resourceOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
 /** Whether `err`, or an error in its `cause` chain, is an instance of `type` (identity, never text). */
 function causedBy(err: unknown, type: new (...args: never[]) => Error): boolean {
   let e: unknown = err;
@@ -298,6 +332,12 @@ interface CallState {
   signed: boolean;
   /** The request carrying the signed authorization was handed to the network. */
   sent: boolean;
+  /** A resource payment: the resource (origin and path) it pays for. */
+  resource?: string | undefined;
+  /** The (network, payee, resource) of the authorization signed in this call. */
+  paid?: string | undefined;
+  /** Until when that authorization can be settled (unix seconds). */
+  validUntil?: number | undefined;
 }
 
 function refuse(state: CallState, kind: PaymentRefusalKind, message: string): PaymentRefused {
@@ -403,8 +443,13 @@ export function createPayer(options: PayerOptions): Payer {
   const budgetUsd = usdAmount("X402CHECK_BUDGET_USD", options.budgetUsd, DEFAULT_BUDGET_USD);
   const budgetMicro = BigInt(Math.round(budgetUsd * 1e6));
   const maxMicro = BigInt(Math.round(maxPaymentUsd * 1e6));
+  const maxCheckMicro = BigInt(Math.round(usdAmount("maxCheckPaymentUsd", options.maxCheckPaymentUsd, MAX_CHECK_PAYMENT_USD) * 1e6));
+  const checkPayees = (options.checkPayees ?? X402CHECK_PAY_TO).map((p) => p.toLowerCase());
   let spentMicro = 0n;
   const secret = key.slice(2).toLowerCase();
+  /** (network, payee, resource) → until when an authorization the resource did not accept can be settled (unix seconds). */
+  const outstanding = new Map<string, number>();
+  const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 
   // Among the options the x402 client kept, the one this payer pays: within the cap, with an
   // acceptable lifetime, Base first.
@@ -431,9 +476,27 @@ export function createPayer(options: PayerOptions): Payer {
         if (signal?.aborted) return stopWith("cancelled", TEXT.cancelled);
         const cost = priceMicro(r);
         if (cost === undefined) return stopWith("no_payable_option", TEXT.unpayable);
+        if (!gate) {
+          // x402check's own checks: only to its pay_to, and never more than a check costs.
+          if (!checkPayees.includes(String(r.payTo).toLowerCase())) return stopWith("untrusted_check_payee", TEXT.checkPayee);
+          if (cost > maxCheckMicro) return stopWith("over_check_price", TEXT.checkPrice);
+        }
         if (cost > maxMicro) return stopWith("over_max_payment", TEXT.overCap);
         if (!lifetimeOk(r)) return stopWith("authorization_too_long", tooLong(r));
         if (spentMicro + cost > budgetMicro) return stopWith("budget_exhausted", TEXT.budget);
+        if (gate && state.resource !== undefined) {
+          // The resource did not accept an earlier authorization to this payee that can still be settled.
+          const paid = `${r.network}|${String(r.payTo).toLowerCase()}|${state.resource}`;
+          const until = outstanding.get(paid);
+          if (until !== undefined && until > nowSeconds()) {
+            return stopWith(
+              "authorization_outstanding",
+              `an authorization this server signed for this payee and resource was not accepted, and it can still be settled until ${new Date(until * 1000).toISOString()}: nothing new is signed until then`,
+            );
+          }
+          if (until !== undefined) outstanding.delete(paid);
+          state.paid = paid;
+        }
         if (gate) {
           // Decided on exactly what would be signed, right before signing. A failure refuses.
           const description = paymentRequired.resource?.description;
@@ -461,8 +524,10 @@ export function createPayer(options: PayerOptions): Payer {
       })
       .onAfterPaymentCreation(async ({ paymentPayload }) => {
         state.signed = true;
+        const info = signedInfo(paymentPayload);
+        state.validUntil = info.validUntil;
         try {
-          onSigned?.(signedInfo(paymentPayload));
+          onSigned?.(info);
         } catch {
           // reporting only
         }
@@ -522,9 +587,19 @@ export function createPayer(options: PayerOptions): Payer {
         return authorize(payment);
       };
       const fetchResource = boundedFetch(resourceFetch, state, { timeoutMs, signal, onSent, refuseRedirects: true });
+      state.resource = resourceOf(url);
+      // A sent authorization the resource did not answer with success can still be settled: no new one to that payee until it expires.
+      const settle = (status: number | undefined): void => {
+        if (!state.sent || state.paid === undefined) return;
+        if (status !== undefined && status >= 200 && status < 300) outstanding.delete(state.paid);
+        else outstanding.set(state.paid, state.validUntil ?? nowSeconds() + MAX_AUTHORIZATION_SECONDS);
+      };
       try {
-        return await wrapFetchWithPayment(fetchResource, makeClient(state, gate, signal, onSigned))(url, init);
+        const res = await wrapFetchWithPayment(fetchResource, makeClient(state, gate, signal, onSigned))(url, init);
+        settle(res.status);
+        return res;
       } catch (err) {
+        settle(undefined);
         throw failure(state, err);
       }
     },

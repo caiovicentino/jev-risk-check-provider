@@ -320,6 +320,10 @@ const REFUSAL_NEXT: Record<Exclude<PaymentRefusalKind, "not_authorized">, string
   redirected: "Next: the response came from a redirect, and this server does not follow redirects. Nothing was paid.",
   private_address: "Next: pass an https URL on a public host: this host resolves to a private, loopback, link-local or reserved address. Nothing was paid.",
   cancelled: "Next: the call was cancelled before anything was sent with a signature. Nothing was paid.",
+  authorization_outstanding:
+    "Next: nothing new was signed. The resource did not accept an earlier signed payment to this payee, which it can still settle until it expires (see the error): do not pay it again by any other means, and check the payer's USDC balance after that time.",
+  untrusted_check_payee: "Next: the payee could not be checked, because x402check's API asked to be paid at an address that is not x402check's. Nothing was paid; tell the operator.",
+  over_check_price: "Next: the payee could not be checked, because x402check's API asked for more than a check costs. Nothing was paid; tell the operator.",
 };
 
 /** Runs one guarded payment. Never throws for a payment problem: the outcome says what happened. */

@@ -110,6 +110,7 @@ claude mcp add x402check -e X402CHECK_PAYER_KEY=0xYOUR_DEDICATED_WALLET_KEY -- n
 ### Security: the payer key is a hot key
 
 - **Use a dedicated wallet that holds only a small USDC balance on Base,** for example a few dollars. Never use a wallet that holds anything else. The server signs payments to x402check without asking anyone: for its own checks, and for resources on x402check's own site (`X402CHECK_BASE_URL`). Payments to any other payee, including a site that names x402check's `pay_to`, are signed only after x402check allows them (or the user approves a warning).
+- **A check is paid only to x402check, and never more than a check costs** (at most $0.01, above every published price). A 402 from the API origin that names another payee, or asks for more, is not paid (`untrusted_check_payee`, `over_check_price`): a hijacked API domain cannot collect from the payer.
 - **The payer needs no ETH.** The x402 "exact" scheme is gasless for the payer: it signs a USDC transfer authorization (EIP-3009), and the facilitator settles it.
 - **Spending is bounded.** `X402CHECK_MAX_PAYMENT_USD` caps each payment (x402 spend controls). `X402CHECK_BUDGET_USD` caps the total for the process: the payer's, and separately what checks spend from prepaid credits.
 - **A signed authorization is short-lived.** It is valid for at most 15 minutes (the 402's `maxTimeoutSeconds`, capped at 900), so a payee that holds one back can settle it only within that window.
@@ -203,7 +204,7 @@ Arguments: `url`, `method` (`GET` by default), `body`, `headers`, `max_usd`, `co
 | `paid` | x402check cleared the payee, and the payment was signed, sent and answered. |
 | `no_payment_required` | The resource answered without a 402: returned as is, nothing checked or paid. |
 | `refused` | Nothing was sent with a signature. Refusals come from x402check's verdict, the user, `max_usd`, the cap, the budget (the payer's, or the credits' for the check), no payable option, an unsupported x402 version, a too long-lived authorization, an oversized or slow 402, a redirect, a private host, a cancelled call, a bad URL or a missing payer. `error.code` says which. |
-| `payment_rejected` | The payment was sent, but the resource answered 402 again. The signed authorization can still be settled until `payment.valid_until`: do not pay that resource again before then. |
+| `payment_rejected` | The payment was sent, but the resource answered 402 again. The signed authorization can still be settled until `payment.valid_until`: do not pay that resource again before then. Until then the server refuses to sign another payment to that payee for that resource (`authorization_outstanding`), whatever the resource's response says. The same holds after a failed response or a lost connection once a payment was sent. |
 | `failed` | The resource could not be reached, or it failed after the payment was sent. `payment_sent` says whether a signed payment went out; such a payment may still be settled until `payment.valid_until`. |
 
 ```text
