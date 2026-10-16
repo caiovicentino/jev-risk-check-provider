@@ -445,9 +445,10 @@ export function createGuard(options: GuardOptions = {}) {
 
   /**
    * A transaction is signed on its simulation, not on an address check alone: the verified
-   * attestation of the check that carried it must say `checks.simulation.status: "ok"`. A
-   * simulated revert is blocked; anything else (a chain the provider does not simulate, a failed
-   * simulation, none at all) is not verified.
+   * attestation of the check that carried it must say `checks.simulation.status: "ok"`. Anything
+   * else is not verified: a simulated revert (its effects are unknown, which is not evidence of
+   * danger: it may depend on a transaction not mined yet), a chain the provider does not simulate,
+   * a failed simulation, or none at all.
    */
   function requireSimulation(verdict: GuardVerdict): GuardVerdict {
     if (verdict.action === "block" || verdict.action === "not_verified") return verdict;
@@ -456,7 +457,13 @@ export function createGuard(options: GuardOptions = {}) {
     const status = typeof simulation?.status === "string" ? simulation.status : undefined;
     if (status === "ok") return verdict;
     if (status === "reverted") {
-      return { ...verdict, action: "block", signed: false, code: "simulation_reverted", reasons: ["the transaction reverts in the provider's simulation: it is not signed", ...verdict.reasons] };
+      return {
+        ...verdict,
+        action: "not_verified",
+        signed: false,
+        code: "simulation_reverted",
+        reasons: ["the transaction reverts in the provider's simulation at the latest block, so what it would do cannot be verified: it is not signed (one that depends on a pending transaction can be checked again once that is mined)", ...verdict.reasons],
+      };
     }
     const why = status === undefined ? "the attestation carries no simulation" : `the provider's simulation is "${status}"${status === "unsupported" ? " (a chain it does not simulate)" : ""}`;
     return {

@@ -361,7 +361,8 @@ async function main(): Promise<void> {
       }
     })();
     if (!known) return add("deploy", "warn", `production runs ${deployed}, unknown to the repository`);
-    const code = run("git", ["log", "--format=%h %s", `${deployed}..origin/main`, "--", "src", "deploy", "package.json", "package-lock.json"]).trim();
+    // The Worker also bundles parts of the SDK (packages/client/src: the Solana decoder, interpret, redaction).
+    const code = run("git", ["log", "--format=%h %s", `${deployed}..origin/main`, "--", "src", "deploy", "packages/client/src", "package.json", "package-lock.json"]).trim();
     const all = Number(run("git", ["rev-list", "--count", `${deployed}..origin/main`]).trim());
     add("deploy", code ? "warn" : "info", code ? `main has code production does not run: ${code.split("\n").length} commit(s): ${code.split("\n").slice(0, 3).join(" | ")}` : `main is ${all} docs/test commit(s) ahead of production`);
   });

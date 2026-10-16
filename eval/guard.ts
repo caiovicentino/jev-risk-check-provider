@@ -158,14 +158,23 @@ async function main(): Promise<void> {
     const simRefused = simDone.filter((r) => (r.action === "block" || r.action === "warn")).length;
     const simBlocked = simDone.filter((r) => r.action === "block").length;
     const w = wilson(simBlocked, simDone.length);
+    // This run's own simulation (latest block): what executes now, and what an autonomous agent's key
+    // would not sign among it (since client 0.5.0 a transaction is signed only on an "ok" simulation).
+    const okNow = g.filter((r) => r.simulation === "ok");
+    const okNowRefused = okNow.filter((r) => r.action !== "allow").length;
+    const wNow = wilson(okNowRefused, okNow.length);
+    const pct = (x: { p: number; lo: number; hi: number }) => `${(x.p * 100).toFixed(1)}% (95% CI ${(x.lo * 100).toFixed(1)}–${(x.hi * 100).toFixed(1)}%)`;
     return {
       transactions: g.length,
       verdicts: { allow: by("allow"), warn: by("warn"), block: by("block"), not_verified: by("not_verified") },
       refused_for_an_autonomous_agent: `${refused}/${done.length}`,
+      not_signed: `${g.length - by("allow")}/${g.length}`,
+      simulated_now: { ok: okNow.length, reverted: g.filter((r) => r.simulation === "reverted").length, other: g.filter((r) => r.simulation !== "ok" && r.simulation !== "reverted").length },
+      among_simulated_ok_now: { transactions: okNow.length, not_signed: `${okNowRefused}/${okNow.length}`, not_signed_rate: pct(wNow), blocked: `${okNow.filter((r) => r.action === "block").length}/${okNow.length}` },
       among_simulated_ok_in_the_simulation_eval: {
         transactions: simulatedOk.length,
         blocked: `${simBlocked}/${simDone.length}`,
-        blocked_rate: `${(w.p * 100).toFixed(1)}% (95% CI ${(w.lo * 100).toFixed(1)}–${(w.hi * 100).toFixed(1)}%)`,
+        blocked_rate: pct(w),
         blocked_or_warned: `${simRefused}/${simDone.length}`,
       },
       [label === "legit" ? "refusals" : "signed"]: g
@@ -186,7 +195,7 @@ async function main(): Promise<void> {
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   // ScamSniffer-only entries (GPL) are written as hashes: the report is committed.
   writeFileSync(`${EVAL_EVIDENCE_DIR}/guard-report.json`, JSON.stringify(redactScamSniffer(report, await scamSnifferOnly()), null, 2));
-  console.log(JSON.stringify({ drainer: report.drainer.verdicts, drainer_sim_ok: report.drainer.among_simulated_ok_in_the_simulation_eval, legit: report.legit.verdicts, legit_sim_ok: report.legit.among_simulated_ok_in_the_simulation_eval }, null, 1));
+  console.log(JSON.stringify({ drainer: report.drainer.verdicts, drainer_not_signed: report.drainer.not_signed, drainer_ok_now: report.drainer.among_simulated_ok_now, legit: report.legit.verdicts, legit_not_signed: report.legit.not_signed, legit_ok_now: report.legit.among_simulated_ok_now, legit_sim_ok: report.legit.among_simulated_ok_in_the_simulation_eval }, null, 1));
 }
 
 main().catch((err) => {

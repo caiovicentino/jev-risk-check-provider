@@ -115,6 +115,19 @@ Each was re-fetched and handed to the guard as the signature request an agent's 
 - **The one legitimate refusal** is a transaction whose calldata is too large to simulate (it also reverted in the simulation run). Since v0.6.0 the guard refuses such a transaction (`not_simulated`) rather than sign it on an address check alone.
 - **Denominators.** A reverting transaction cannot trigger the simulation rules, so the legitimate rate is stated on the 49 that move assets and the 84 that execute. The drainer and legitimate samples take up to 3 transactions per contract; the Wilson intervals treat transactions as independent, so the contract-level figure is the more conservative one (legitimate: 0 of 30 counterparties refused, 0.0–11.4%).
 
+**Re-measured with client 0.5.0** (unreleased; `guard-client-0.5.0-report.json`, 2026-10-16, the same 284 cases, 281 re-fetched). Since 0.5.0 a transaction is signed only when its attestation says the simulation ran (`ok`), so a transaction that reverts at the latest block is no longer signed (`simulation_reverted`, not verified): what it would do is unknown, and a drain can be written to revert in simulation and succeed on-chain. The cases are now more than two weeks old, and most of them revert at the latest block:
+
+| Transactions (simulated in this run, at the latest block) | Not signed | Signed |
+|---|---|---|
+| Drainer transactions that execute | **22/33 (66.7%, 95% CI 49.6–80.2%)**, all blocked | 11 |
+| Drainer transactions that revert now | 22/22 (not verified) | 0 |
+| Legitimate transactions that execute | **0/59 (0.0–6.1%)** | 59 |
+| Legitimate transactions that revert now | 166/166 (not verified) | 0 |
+
+- **What changed:** among transactions that execute, nothing: no legitimate one is refused, and the drainers blocked are the same 22 transactions. Every transaction that reverts is now refused instead of signed; in the 0.4.0 re-run of 2026-10-03 (`guard-report.json`), 22 drainer and 159 legitimate transactions that reverted were signed (they could not execute).
+- **The cost for an agent:** a transaction that reverts only because it depends on one not yet mined (an approval, then the swap that uses it) is refused until that one is mined, and can then be checked again.
+- **Production** has not been re-run with 0.5.0: the two legitimate transactions it checked revert at the latest block, so 0.5.0 would not sign them.
+
 **In production** (`eval/guard-production.ts`, `guard-production-report.json`):
 - the guard against `https://x402check.xyz`, paid from prepaid credits ($0.005 per simulated check), agreed with the in-process guard on **4/4** transactions: 2 drainers blocked, 2 legitimate allowed, in 0.6–2.3 s;
 - **both legitimate transactions revert at the latest block** (`simulation_reverted`), so production has not yet exercised a legitimate transaction that executes;

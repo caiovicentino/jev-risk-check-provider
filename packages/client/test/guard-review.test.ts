@@ -199,7 +199,7 @@ describe("finding 4: a transaction is signed on its simulation, not on an addres
   for (const [status, action, code] of [
     ["unsupported", "not_verified", "not_simulated"],
     ["unavailable", "not_verified", "not_simulated"],
-    ["reverted", "block", "simulation_reverted"],
+    ["reverted", "not_verified", "simulation_reverted"],
   ] as const) {
     test(`simulation "${status}" → ${action} (${code})`, async () => {
       const api = boundProvider(() => LOW, undefined, status);
