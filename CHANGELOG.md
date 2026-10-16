@@ -4,7 +4,7 @@ Each release's full notes and evidence are on the [releases page](https://github
 
 ## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — unreleased (prepared 2026-10-02, extended 2026-10-16; a publish needs the owner's passkey)
 
-The SDK and MCP review of 2026-10-16 found eight issues; all are fixed here, each with a regression test that fails without its fix (`packages/client/test/guard-review.test.ts`, `solana-review.test.ts`, `packages/mcp/test/payer-review.test.ts`, `snap/test/unit/truncation.test.ts`).
+The SDK and MCP review of 2026-10-16 found eight issues (three high: a contract creation with value signed unchecked, counterparties past the third left unchecked, and Solana lamports checked against a fresh address instead of the account's controller; one medium; four low); all are fixed here, each with a regression test that fails without its fix (`packages/client/test/guard-review.test.ts`, `solana-review.test.ts`, `packages/mcp/test/payer-review.test.ts`, `snap/test/unit/truncation.test.ts`).
 
 **Client (signing guard):**
 - **What is checked is what is signed.** The EVM guard normalizes a transaction as viem serializes it, and that copy is checked and signed:
@@ -23,7 +23,7 @@ The SDK and MCP review of 2026-10-16 found eight issues; all are fixed here, eac
 **MCP:**
 - **x402check's own checks are paid only to x402check's `pay_to`, at most $0.01 each** (`untrusted_check_payee`, `over_check_price`), so a hijacked API origin cannot collect more; `PayerOptions.checkPayees` and `maxCheckPaymentUsd` override it.
 - **No second authorization while one can settle:** `x402check_pay` signs nothing new to a payee for a resource while an earlier authorization the resource did not accept can still be settled (`authorization_outstanding`).
-- **Build:** `@x402/core` is pinned at 2.28.0; `scripts/check-publish.mjs` builds the package and refuses a tarball holding anything but `package.json`, `README.md`, `LICENSE` and a `dist/` built from `src/`.
+- **Build:** `@x402/core` is pinned at 2.28.0, and the published package carries an `npm-shrinkwrap.json` that pins its whole installed tree from the registry (the server holds a payer key). `scripts/check-publish.mjs` builds the package and refuses a tarball holding anything but `package.json`, `README.md`, `LICENSE`, the shrinkwrap and a `dist/` built from `src/`, or a shrinkwrap with a package not pinned to the registry with an integrity hash.
 
 **Prepared on 2026-10-02:**
 - **The guard exempts payments to x402check only in USDC (client, security review F5):** the trusted-payee cap (250000 atomic units, $0.25 of USDC) applied to any asset; for an 8-decimal token it was not $0.25. Only the asset x402check's challenge asks for on each network (`X402CHECK_PAYMENT_ASSETS`) is exempt now.

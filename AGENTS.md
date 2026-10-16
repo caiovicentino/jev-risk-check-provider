@@ -239,7 +239,7 @@ Each paid probe spends from the probe payer to our own `pay_to`, or from its pre
 ### 3.6 Publish the npm packages (the owner's passkey)
 
 1. Bump `packages/*/package.json`. For the MCP server, also bump both versions in `packages/mcp/server.json`.
-2. Pack: in `packages/client`, run `npm pack`. In `packages/mcp`, set `@x402check/client` to `^<client version>`, run `node scripts/check-publish.mjs` (it refuses a local dependency, builds the package, and refuses a tarball holding anything but `package.json`, `README.md`, `LICENSE` and a `dist/` built from `src/`) then `npm pack`, and restore `package.json`.
+2. Pack: in `packages/client`, run `npm pack`. In `packages/mcp`, once the client is on npm: set `@x402check/client` to `^<client version>`, run `npm install --package-lock-only --ignore-scripts` and `npm shrinkwrap` (the MCP server holds a payer key, so its whole installed tree is pinned from the registry), then `node scripts/check-publish.mjs` (it refuses a local dependency, builds the package, and refuses a tarball holding anything but `package.json`, `README.md`, `LICENSE`, the shrinkwrap and a `dist/` built from `src/`, or a shrinkwrap that does not pin every installed package from the registry with an integrity hash), then `npm pack`. Afterwards delete `npm-shrinkwrap.json` and restore `package.json` and `package-lock.json` (`git checkout -- package.json package-lock.json`): the shrinkwrap is never committed.
 3. Publish each tarball under a pseudo-terminal, so that npm offers the web 2FA link:
 
    ```bash
