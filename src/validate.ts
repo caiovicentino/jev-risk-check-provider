@@ -114,7 +114,7 @@ function validatePayment(raw: unknown): PaymentBinding | Invalid {
     out.asset = p.asset;
   }
   if (p.resource !== undefined) {
-    if (typeof p.resource !== "string" || p.resource.length > MAX_FIELD_LEN.resource || !/^https?:\/\/\S+$/.test(p.resource)) return invalid("payment.resource");
+    if (typeof p.resource !== "string" || codePoints(p.resource) > MAX_FIELD_LEN.resource || !/^https?:\/\/\S+$/.test(p.resource)) return invalid("payment.resource");
     out.resource = p.resource;
   }
   return out;
@@ -184,7 +184,7 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
     req.chain = chain.caip2;
   }
   if (obj.domain !== undefined) {
-    const host = typeof obj.domain === "string" && obj.domain.length <= 2048 ? normalizeHost(obj.domain) : null;
+    const host = typeof obj.domain === "string" && codePoints(obj.domain) <= 2048 ? normalizeHost(obj.domain) : null;
     if (!host) return invalid("domain");
     req.domain = host;
   }
@@ -205,7 +205,7 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
   if (obj.authorization !== undefined) {
     const a = obj.authorization as Record<string, unknown> | null;
     if (!a || typeof a !== "object" || Array.isArray(a) || Object.keys(a).some((k) => k !== "pre_authorized" && k !== "source") || typeof a.pre_authorized !== "boolean") return invalid("authorization");
-    if (a.source !== undefined && (typeof a.source !== "string" || a.source.length > MAX_FIELD_LEN.source)) return invalid("authorization.source");
+    if (a.source !== undefined && (typeof a.source !== "string" || codePoints(a.source) > MAX_FIELD_LEN.source)) return invalid("authorization.source");
     req.authorization = { pre_authorized: a.pre_authorized, source: typeof a.source === "string" ? a.source : undefined };
   }
   if (obj.payment !== undefined) {

@@ -502,9 +502,9 @@ async function main(): Promise<void> {
       const unresolved = unresolvedKeys.size;
       const total = outside.reduce((s, p) => s + p.micro, 0) / 1e6;
       const fmt = (p: OutsidePayment) => `$${(p.micro / 1e6).toFixed(4)} ${short(p.network)} ${p.path} ${p.at.slice(0, 16)} from ${p.payer.slice(0, 10)}… ${p.ua ?? "(no user agent found)"}${p.country ? ` [${p.country}]` : ""}${p.undelivered ? " UNDELIVERED" : ""}`;
-      // A credit pack that settled for a buyer who had left: paid, and its token reached nobody.
+      // A payment that settled for a client who had left: a verdict, or a new credit token, reached nobody.
       const undelivered = found.filter((p) => p.undelivered);
-      if (undelivered.length) add("revenue.undelivered", "warn", `${undelivered.length} credit pack(s) settled for a buyer who left, so the new token reached nobody: ${undelivered.map(fmt).join("; ")} (the owner decides how to make it right)`);
+      if (undelivered.length) add("revenue.undelivered", "warn", `${undelivered.length} payment(s) settled for a client who left, so what it paid for reached nobody (a verdict, or a new credit token on /v1/credits): ${undelivered.map(fmt).join("; ")} (the owner decides how to make it right)`);
       if (baseline) add("revenue", "info", `baseline: ${keys.length} settlements, ${outside.length} from outside payers ($${total.toFixed(4)}), ${ours} probes, ${unresolved} unresolved`);
       else add("revenue", found.length ? "info" : "ok", `${found.length} new outside payment(s)${found.length ? `: ${found.map(fmt).join("; ")}` : ""}; ${ours} probe settlement(s); ${unresolved} unresolved; outside total $${total.toFixed(4)}`);
     });

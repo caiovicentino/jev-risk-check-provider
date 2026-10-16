@@ -289,7 +289,8 @@ export type PaymentRoute = {
   margin_pct: number | null;
   /**
    * Whether the 402 challenge offers the network: a facilitator settles it, accepts the price, and
-   * does not cost more than the price (an unknown fee is offered, and shows a null margin).
+   * does not cost more than the price. A flat-fee facilitator's route is offered; one whose
+   * per-settlement fee table could not be read is not (`fee_unknown`).
    */
   offered: boolean;
   /** Why the network is not offered; the fields above describe the best route there was. */
@@ -355,7 +356,7 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
         facilitators.map((f) =>
           f.fees
             ? f.fees().catch((err: unknown) => {
-                // An unknown fee is offered (with a null margin) but retried within a minute, not ten.
+                // An unread fee table: its routes are not offered (fee_unknown), and it is retried within a minute, not ten.
                 degraded = true;
                 console.error(`facilitator ${f.name} fees failed: ${String(err).slice(0, 160)}`);
                 return null;
@@ -457,10 +458,15 @@ let depsCache: { key: string; deps: HandlerDeps; keyStatus: AttestationKeyStatus
  * cold isolate has none yet: it waits for the first one, at most `waitMs`, so a hung facilitator
  * never holds discovery up. Past the wait it lists every mainnet network, as before.
  */
-export async function routingKnown(env: WorkerEnv, waitMs = 2000): Promise<void> {
-  if (lastRoutes) return;
+export async function routingKnown(env: WorkerEnv, waitMs = 2000, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
+  // Cached for 10 minutes: a table past that is read again, so a crawler-only isolate stays current.
+  const refresh = paymentRouting(env).catch(() => null);
+  if (lastRoutes) {
+    ctx?.waitUntil(refresh);
+    return;
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([paymentRouting(env).catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), waitMs)))]);
+  await Promise.race([refresh, new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), waitMs)))]);
   clearTimeout(timer);
 }
 
@@ -500,11 +506,11 @@ function buildDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): { d
   }
   const contractIntel = env.CONTRACT_INTEL === "off" ? null : createContractIntel({ timeoutMs: 1500 });
   const simulator = env.SIMULATION === "off" ? null : createSimulator({ rpc: simRpc, timeoutMs: 2500, contractIntel });
-  const accepts = buildAccepts(env);
   const plain = (usd: number) => formatUsd(Math.round(usd * 1_000_000)).slice(1);
-  // The networks the 402 challenge offers, as of this isolate's last routing table: one that would
-  // lose money is not advertised (2026-10-16 review). Before the first table, every mainnet network.
-  const offered = () => accepts.map((a) => String(a.network)).filter((n) => lastRoutes?.find((r) => r.network === n)?.offered !== false);
+  // The networks the 402 challenge offers, as of this isolate's last routing table and with the
+  // challenge's own fallback (every facilitator down: every network not known to lose money), so
+  // discovery never lists a network the 402 does not offer, or none while the 402 offers some.
+  const offered = () => buildAccepts(env, undefined, lastRoutes).map((a) => String(a.network));
   const pricing: PricingInfo = {
     unitUsd: plain(networkPrice(BASE_MAINNET)),
     ...(env.SIMULATION !== "off" ? { simulationUsd: plain(SIMULATION_PRICE) } : {}),
@@ -795,6 +801,12 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
     // (or however re-encoded) it is sent.
     const admission = await admitPayment(_env, result.paymentPayload);
     if (!admission.ok) return admission.response;
+    // The client is already gone: nothing is evaluated, and the payment can be sent again.
+    if (request.signal?.aborted) {
+      await admission.finish("unused");
+      console.warn(`client left before its check started on ${path}: nothing evaluated, nothing settled`);
+      return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before the check started" });
+    }
     let res: Response;
     try {
       res = await serve(replay());
@@ -811,10 +823,12 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
       await admission.finish("unused");
       return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5" });
     }
-    // The client is gone: nothing is settled, and the same payment can be sent again.
+    // The client left during its evaluation: nothing is settled and the payment can be sent again,
+    // but it counts against the payer as a refusal does (5 an hour hold it back). Without that, one
+    // authorization abandoned again and again would buy unlimited evaluations (2026-10-16 review).
     if (request.signal?.aborted) {
-      await admission.finish("unused");
-      console.warn(`client left before settlement on ${path}: nothing settled`);
+      await admission.finish("refused");
+      console.warn(`client left during its check on ${path}: nothing settled, counted against the payer`);
       return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before settlement" });
     }
     // Settle before releasing the result: a payload that verifies but cannot settle
@@ -833,7 +847,10 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
           return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already paid for another request; sign a new payment" });
         }
         for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
-        if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction });
+        // A client that left while it settled paid for a verdict it never received: the record says so.
+        const undelivered = request.signal?.aborted === true;
+        if (undelivered) console.warn(`client left while its payment settled on ${path}: the verdict reached nobody`);
+        if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction, ...(undelivered ? { undelivered } : {}) });
         return res;
       }
       reason = settle.errorReason ?? reason;

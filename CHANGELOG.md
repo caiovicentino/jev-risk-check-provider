@@ -2,6 +2,20 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.17 — 2026-10-16: an abandoned check is never a free one
+
+The daily maintenance run's independent review of v0.6.15 and v0.6.16 found one high issue and five low ones; all are fixed here (`test/payments-hardening.test.ts`, `test/discovery-routes.test.ts`, `test/review-1016-prod.test.ts`, `test/fresh-feeds-coldwait.test.ts`).
+
+- **High: an abandoned check was a free evaluation, without limit.** v0.6.16 finished every abandoned request's work and then let the payment be used again: a per-call client that disconnected during its evaluation got its claim released with nothing counted, and a credits caller got its debit back. One signed authorization, or a $0.10 pack, could be abandoned again and again, each time costing an evaluation (a 25-item batch: 25 model calls) and paying nothing. The client never received a verdict, so it was an attack on cost and availability, not a free service. Now:
+  - **per call:** a client gone during its evaluation is still not charged, and the payment can be sent again, but it counts against the payer like a refused settlement: after 5 in an hour, the payer is held back (`429`);
+  - **credits:** once the verdict is produced it is charged, even if the caller left;
+  - **both:** a client already gone when its check would start costs nothing and is not evaluated (`499`).
+- **A per-call payment that settles after its client left** is recorded `undelivered`, like a credit pack, and the daily check lists it.
+- **Discovery follows the challenge's fallback:** with every facilitator down on a new isolate, the 402 offers every network not known to lose money, and `/.well-known/risk-check.json` listed none. It now lists what the 402 offers, and an isolate that only serves discovery refreshes its routing table in the background.
+- **`/status` no longer ends a new isolate's wait for current lists:** when its own wait ran out, the paid checks after it stopped waiting.
+- **Every bounded text field counts characters** (`payment.resource`, `domain`, `authorization.source`), as the published schemas do; v0.6.15 had done it for `context` and `aud` only.
+- **`eval/disconnect.ts --credits`** sends the probe credits' token to production only.
+
 ## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — unreleased (prepared 2026-10-02, extended 2026-10-16; a publish needs the owner's passkey)
 
 The SDK and MCP review of 2026-10-16 found eight issues (three high: a contract creation with value signed unchecked, counterparties past the third left unchecked, and Solana lamports checked against a fresh address instead of the account's controller; one medium; four low); all are fixed here, each with a regression test that fails without its fix (`packages/client/test/guard-review.test.ts`, `solana-review.test.ts`, `packages/mcp/test/payer-review.test.ts`, `snap/test/unit/truncation.test.ts`).

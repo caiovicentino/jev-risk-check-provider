@@ -201,8 +201,9 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
   } else if (request.method === "GET" && path === "/healthz") {
     res = healthz(env);
   } else if (request.method === "GET" && path === "/status") {
-    // It reports what a verdict would use: a cold isolate waits for the current lists as a paid check does.
-    await awaitColdStart();
+    // It reports what a verdict would use: a cold isolate waits for the current lists as a paid check
+    // does, without ending the isolate's cold wait for the paid checks after it.
+    await awaitColdStart({ final: false });
     res = await status(env);
   } else if (request.method === "GET" && path === "/openapi.json") {
     res = json(200, openApi(env), { "Cache-Control": "public, max-age=300" });
@@ -214,7 +215,7 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
   } else if (!paidRoute) {
     // Identity documents, the site and discovery never wait for the payment stack (a hung facilitator).
     // The discovery document that lists networks waits, briefly, for this isolate's first routing table.
-    if (request.method === "GET" && (path === "/.well-known/risk-check.json" || (path === "/" && !(request.headers.get("accept") ?? "").includes("text/html")))) await routingKnown(env);
+    if (request.method === "GET" && (path === "/.well-known/risk-check.json" || (path === "/" && !(request.headers.get("accept") ?? "").includes("text/html")))) await routingKnown(env, undefined, ctx);
     res = await createHandler(ensureDeps(env, feedsFor(env)).deps)(request);
   } else {
     const stack = await ensureStack(env, feedsFor(env));

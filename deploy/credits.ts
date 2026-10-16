@@ -163,8 +163,9 @@ export function creditCostMicro(path: string, body: unknown, simulation: boolean
 
 /**
  * An evaluation paid from credits: debit first (atomic; an overdraw is refused), evaluate,
- * and refund when no verdict was produced or the caller left before it was ready (the same
- * rule as a paid call: never charge for a verdict nobody receives).
+ * and refund when no verdict was produced. A caller gone before its evaluation starts gets the
+ * debit back and nothing is evaluated; once the verdict is produced it is charged, even if the
+ * caller left: refunding an abandoned check would make every evaluation free (2026-10-16 review).
  */
 export async function spendCredits(env: WorkerEnv, token: string, path: string, parsed: unknown, serve: () => Promise<Response>, ctx?: { waitUntil(promise: Promise<unknown>): void }, signal?: AbortSignal): Promise<Response> {
   if (!env.CREDITS) return json(503, { error: "credits_unavailable" });
@@ -186,6 +187,12 @@ export async function spendCredits(env: WorkerEnv, token: string, path: string, 
     if (debit.insufficient) {
       return json(402, { error: "insufficient_credits", balance_usd: formatUsd(debit.micro), cost_usd: formatUsd(cost), top_up: "POST /v1/credits {\"amount_usd\": 1} with this token" });
     }
+    // The caller is already gone: nothing is evaluated, and the debit goes back.
+    if (signal?.aborted) {
+      const back = await refund();
+      console.warn(`client left before its check started on ${path}: nothing evaluated, ${back ? "the debit was refunded" : "the refund failed"}`);
+      return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before the check started" });
+    }
     let res: Response;
     try {
       res = await serve();
@@ -203,12 +210,8 @@ export async function spendCredits(env: WorkerEnv, token: string, path: string, 
       }
       return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5", ...headers });
     }
-    // The caller is gone: the verdict reaches nobody, so it is not charged.
-    if (signal?.aborted) {
-      const back = await refund();
-      console.warn(`client left before its verdict on ${path}: ${back ? "the debit was refunded" : "the refund failed"}`);
-      return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before the result was ready" });
-    }
+    // The caller left during the evaluation: the verdict was produced, so it is charged (it reaches nobody).
+    if (signal?.aborted) console.warn(`client left during its check on ${path}: the verdict was produced and charged`);
     // The simulation surcharge is charged only for simulations that ran.
     const surcharge = env.SIMULATION !== "off" ? await unsimulatedSurcharge(path, parsed, res.clone()) : 0;
     let balance = debit.micro;

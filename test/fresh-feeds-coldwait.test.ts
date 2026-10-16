@@ -14,6 +14,11 @@ test("the first paid request waits at most ~2.5 s, then the isolate stops waitin
   console.warn = (msg: string) => void warnings.push(String(msg));
   try {
     maybeRefreshFeeds({ FEEDS_URL: "https://feeds.example/", RATE: memoryKv() } as never, { waitUntil: () => undefined } as never, EMBEDDED, { fetchImpl: hangingFetch, publicKey: TEST_PUBLIC_KEY });
+    // /status waits as well, but its timeout never ends the wait for the paid checks after it.
+    const status = Date.now();
+    await awaitColdStart({ final: false });
+    assert.ok(Date.now() - status >= 2400, "/status waited");
+    assert.equal(warnings.length, 0, "and said nothing");
     const t = Date.now();
     await awaitColdStart();
     const waited = Date.now() - t;

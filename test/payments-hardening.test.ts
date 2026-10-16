@@ -608,13 +608,24 @@ test("the work handed to waitUntil starts before any state changes: a claim, a d
   const spender = stack(USER, { ok: true, tx: "0x0", settled: 0 });
   const controller = new AbortController();
   const gone = new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ wallet: WALLET }), signal: controller.signal });
+  // A caller gone during its evaluation is charged: the verdict was produced (refunding it would
+  // make an abandoned check a free evaluation, again and again).
   const left = await handleProtected(gone, env, spender, async (r) => {
     controller.abort();
     return createHandler(spender.deps)(r);
   }, ctx);
-  assert.deepEqual([left.status, handed.length], [499, 1], "a caller gone before the result is ready is not charged");
-  const balance = await handleCredits(new Request("https://x402check.xyz/v1/credits", { headers: { Authorization: `Bearer ${token}` } }), env, spender);
-  assert.equal(((await balance.json()) as { balance_usd: string }).balance_usd, "$0.10", "the debit was refunded");
+  assert.deepEqual([left.status, handed.length], [200, 1]);
+  const balanceOf = async () => ((await (await handleCredits(new Request("https://x402check.xyz/v1/credits", { headers: { Authorization: `Bearer ${token}` } }), env, spender)).json()) as { balance_usd: string }).balance_usd;
+  assert.equal(await balanceOf(), "$0.099", "charged for the verdict it left behind");
+  // A caller already gone when its check would start: nothing is evaluated, and the debit goes back.
+  const early = new AbortController();
+  early.abort();
+  let evaluated = 0;
+  const before = await handleProtected(new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ wallet: WALLET }), signal: early.signal }), env, spender, async (r) => {
+    evaluated++;
+    return createHandler(spender.deps)(r);
+  }, ctx);
+  assert.deepEqual([before.status, evaluated, await balanceOf()], [499, 0, "$0.099"]);
 
   // A buyer gone before settlement: nothing settles, and the same payment can buy the pack later.
   const settle = { ok: true, tx: "0xa3", settled: 0 };
@@ -647,4 +658,53 @@ test("a buyer can hold the token before paying: a pack bought as a top-up of a s
   assert.equal(((await bought.json()) as { token?: string }).token, undefined, "the token is never echoed: the buyer already holds it");
   const balance = await handleCredits(new Request("https://x402check.xyz/v1/credits", { headers: { Authorization: `Bearer ${own}` } }), env, stack(USER, { ok: true, tx: "0x0", settled: 0 }));
   assert.equal(((await balance.json()) as { balance_usd: string }).balance_usd, "$0.10");
+});
+
+test("an evaluation abandoned by its client counts against the payer: one authorization cannot buy unlimited free checks", async () => {
+  // 2026-10-16 review: a 499 released the claim without counting anything, so one signed
+  // authorization, abandoned mid-check again and again, bought unlimited evaluations.
+  const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((s) => new PaymentClaim(s)) };
+  const settle = { ok: true, tx: "0xb1", settled: 0 };
+  const s = stack(USER, settle);
+  const header = payment(USER, "0x50");
+  let evaluations = 0;
+  const abandon = async () => {
+    const controller = new AbortController();
+    const r = new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": header }, body: JSON.stringify({ wallet: WALLET }), signal: controller.signal });
+    return handleProtected(r, env, s, async (inner) => {
+      evaluations++;
+      controller.abort();
+      return createHandler(s.deps)(inner);
+    });
+  };
+  const statuses: number[] = [];
+  for (let i = 0; i < 7; i++) statuses.push((await abandon()).status);
+  assert.deepEqual(statuses.slice(0, 5), [499, 499, 499, 499, 499]);
+  assert.ok(statuses.slice(5).every((st) => st === 429), `then the payer is held back: ${statuses.join(",")}`);
+  assert.equal(evaluations, 5, "five evaluations, not seven");
+  assert.equal(settle.settled, 0);
+  // A client already gone before its check starts costs nothing and counts nothing.
+  const env2: WorkerEnv = { PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)) };
+  const gone = new AbortController();
+  gone.abort();
+  let ran = 0;
+  for (let i = 0; i < 7; i++) {
+    const res = await handleProtected(new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": payment(USER, "0x51") }, body: JSON.stringify({ wallet: WALLET }), signal: gone.signal }), env2, s, async (inner) => {
+      ran++;
+      return createHandler(s.deps)(inner);
+    });
+    assert.equal(res.status, 499);
+  }
+  assert.equal(ran, 0);
+  // A client that leaves while its payment settles: charged, and the record says the verdict reached nobody.
+  const kv = memoryKv();
+  const leaving = new AbortController();
+  const base = stack(USER, { ok: true, tx: "0xb2", settled: 0 });
+  const settling = { ...base, http: { ...base.http, processSettlement: async (...a: Parameters<Stack["http"]["processSettlement"]>) => {
+    leaving.abort();
+    return base.http.processSettlement(...a);
+  } } } as Stack;
+  const paid = await handleProtected(new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": payment(USER, "0x52") }, body: JSON.stringify({ wallet: WALLET }), signal: leaving.signal }), { ...env2, RATE: kv }, settling, (r) => createHandler(settling.deps)(r));
+  assert.equal(paid.status, 200);
+  assert.equal((JSON.parse(kv.data.get("st:eip155:8453:0xb2") ?? "{}") as { undelivered?: boolean }).undelivered, true);
 });

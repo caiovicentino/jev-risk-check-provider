@@ -8,8 +8,9 @@
 //   npx tsx eval/disconnect.ts --credits [--abandon-ms 600]
 //
 // With --credits the check is paid from the probe credits (the token in ~/.config/paysol, never
-// printed): a caller gone before the verdict is ready must get its debit back, so the balance read
-// after the run equals the one before. That costs nothing when it holds ($0.001 when it does not).
+// printed, sent to production only): since 0.6.17 a check abandoned before it starts is refunded,
+// and one abandoned during its evaluation is charged once (its verdict was produced). It costs at
+// most $0.001, never more.
 //
 // Cost: one check on the payment network ($0.0035 on Base), paid by the probe payer to
 // x402check's own pay_to. If the abandoned request had been settled, the resend is refused
@@ -28,14 +29,16 @@ const RESEND_AFTER_MS = 15_000;
 
 /** The credits variant: one check abandoned mid-evaluation, then the balance compared. */
 async function credits(deployed: { version?: string; commit?: string }): Promise<void> {
+  // The token is a bearer secret with a balance: it goes to production only, never to another X402CHECK_BASE.
+  if (new URL(BASE).origin !== "https://x402check.xyz") throw new Error("--credits sends the probe credits' token: run it against https://x402check.xyz only");
   const token = readFileSync(`${homedir()}/.config/paysol/x402check-credit-token`, "utf8").trim();
-  const balance = async () => ((await (await fetch(`${BASE}/v1/credits`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { balance_usd?: string }).balance_usd ?? null;
+  const balance = async () => ((await (await fetch(`${BASE}/v1/credits`, { headers: { Authorization: `Bearer ${token}` }, redirect: "manual" })).json()) as { balance_usd?: string }).balance_usd ?? null;
   const before = await balance();
   if (!before || Number(before.replace("$", "")) < 0.001) throw new Error(`the probe credits cannot pay for a check (balance ${before ?? "unknown"})`);
   const controller = new AbortController();
   setTimeout(() => controller.abort(), ABANDON_AFTER_MS);
   const started = Date.now();
-  const abandoned = await fetch(`${BASE}/v1/risk-check`, { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: BODY, signal: controller.signal }).then(
+  const abandoned = await fetch(`${BASE}/v1/risk-check`, { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: BODY, signal: controller.signal, redirect: "manual" }).then(
     (res) => ({ status: res.status, charged: res.headers.get("x-credits-charged") }),
     (err: unknown) => ({ status: 0, charged: null, error: String(err instanceof Error ? err.name : err) }),
   );
@@ -43,11 +46,15 @@ async function credits(deployed: { version?: string; commit?: string }): Promise
   await new Promise((r) => setTimeout(r, RESEND_AFTER_MS));
   const after = await balance();
   console.log(`balance ${before} before, ${after} after`);
-  const pass = abandoned.status === 0 && after === before;
-  const report = { timestamp: new Date().toISOString(), base: BASE, version: deployed.version ?? null, commit: deployed.commit ?? null, mode: "credits", abandon_after_ms: ABANDON_AFTER_MS, abandoned, balance_before: before, balance_after: after, pass };
+  // Since 0.6.17 a check abandoned before it starts is refunded, and one abandoned during its evaluation is
+  // charged once (the verdict was produced): never more than the one check, never a free one in a loop.
+  const usd = (v: string | null) => (v ? Number(v.replace("$", "")) : Number.NaN);
+  const charged = Math.round((usd(before) - usd(after)) * 1e6) / 1e6;
+  const pass = abandoned.status === 0 && (charged === 0 || charged === 0.001);
+  const report = { timestamp: new Date().toISOString(), base: BASE, version: deployed.version ?? null, commit: deployed.commit ?? null, mode: "credits", abandon_after_ms: ABANDON_AFTER_MS, abandoned, balance_before: before, balance_after: after, charged_usd: charged, pass };
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   writeFileSync(`${EVAL_EVIDENCE_DIR}/disconnect-credits-v${deployed.version ?? "unknown"}-${ABANDON_AFTER_MS}ms-report.json`, JSON.stringify(report, null, 2));
-  console.log(pass ? "PASS  the abandoned check was not charged" : "FAIL  see the outcomes above");
+  console.log(pass ? `PASS  the abandoned check cost $${charged} (0 when it had not started, one check when its verdict was produced)` : "FAIL  see the outcomes above");
   if (!pass) process.exit(1);
 }
 

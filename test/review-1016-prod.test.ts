@@ -46,6 +46,9 @@ test("lengths count code points, as the published JSON Schema maxLength does", (
   const W = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
   assert.equal(validateRequest({ wallet: W, context: "😀".repeat(4096) }).ok, true, "4,096 emoji: 8,192 UTF-16 units, 4,096 characters");
   assert.deepEqual(validateRequest({ wallet: W, context: "😀".repeat(4097) }), { ok: false, field: "context" });
+  // Every length the published schemas bound, not only context (2026-10-16 maintenance review).
+  assert.equal(validateRequest({ wallet: W, authorization: { pre_authorized: true, source: "😀".repeat(100) } }).ok, true, "source: 100 characters of 128");
+  assert.equal(validateRequest({ wallet: W, payment: { network: "eip155:8453", resource: `https://x.example/${"😀".repeat(400)}` } }).ok, true, "resource: 418 characters of 512");
 });
 
 test("a known resource asked with another method is 405 with Allow, not 404", async () => {
