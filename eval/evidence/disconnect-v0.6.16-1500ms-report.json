@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-10-16T03:34:44.512Z",
+  "base": "https://x402check.xyz",
+  "version": "0.6.16",
+  "commit": "88e3749932b6",
+  "payment_signature_sha256": "61b5ab3e7173f189",
+  "abandon_after_ms": 1500,
+  "resend_after_ms": 15000,
+  "abandoned": {
+    "status": 0,
+    "settled": false,
+    "error": "AbortError"
+  },
+  "resent": {
+    "status": 200,
+    "error": null,
+    "settled": true,
+    "transaction": "0xab5522f058259e67a008a2cd3e95053a68d1d8d34cbadfa887662de269f44f0e"
+  },
+  "pass": true
+}

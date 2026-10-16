@@ -5,11 +5,17 @@
 // later, is evaluated and settled once.
 //
 //   X402CHECK_BASE=https://x402check.xyz PAY_NETWORK=eip155:8453 npx tsx eval/disconnect.ts [--abandon-ms 1500]
+//   npx tsx eval/disconnect.ts --credits [--abandon-ms 600]
+//
+// With --credits the check is paid from the probe credits (the token in ~/.config/paysol, never
+// printed): a caller gone before the verdict is ready must get its debit back, so the balance read
+// after the run equals the one before. That costs nothing when it holds ($0.001 when it does not).
 //
 // Cost: one check on the payment network ($0.0035 on Base), paid by the probe payer to
 // x402check's own pay_to. If the abandoned request had been settled, the resend is refused
 // (409 or 402) and the probe fails: the cost is the same either way.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { numberFlag } from "./flags.js";
@@ -20,8 +26,34 @@ const BODY = JSON.stringify({ wallet: "0x111111111111111111111111111111111111111
 const ABANDON_AFTER_MS = numberFlag("abandon-ms", 1500);
 const RESEND_AFTER_MS = 15_000;
 
+/** The credits variant: one check abandoned mid-evaluation, then the balance compared. */
+async function credits(deployed: { version?: string; commit?: string }): Promise<void> {
+  const token = readFileSync(`${homedir()}/.config/paysol/x402check-credit-token`, "utf8").trim();
+  const balance = async () => ((await (await fetch(`${BASE}/v1/credits`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { balance_usd?: string }).balance_usd ?? null;
+  const before = await balance();
+  if (!before || Number(before.replace("$", "")) < 0.001) throw new Error(`the probe credits cannot pay for a check (balance ${before ?? "unknown"})`);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ABANDON_AFTER_MS);
+  const started = Date.now();
+  const abandoned = await fetch(`${BASE}/v1/risk-check`, { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: BODY, signal: controller.signal }).then(
+    (res) => ({ status: res.status, charged: res.headers.get("x-credits-charged") }),
+    (err: unknown) => ({ status: 0, charged: null, error: String(err instanceof Error ? err.name : err) }),
+  );
+  console.log(`abandoned after ${Date.now() - started} ms: ${abandoned.status === 0 ? "no answer (aborted)" : `HTTP ${abandoned.status}`}`);
+  await new Promise((r) => setTimeout(r, RESEND_AFTER_MS));
+  const after = await balance();
+  console.log(`balance ${before} before, ${after} after`);
+  const pass = abandoned.status === 0 && after === before;
+  const report = { timestamp: new Date().toISOString(), base: BASE, version: deployed.version ?? null, commit: deployed.commit ?? null, mode: "credits", abandon_after_ms: ABANDON_AFTER_MS, abandoned, balance_before: before, balance_after: after, pass };
+  mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
+  writeFileSync(`${EVAL_EVIDENCE_DIR}/disconnect-credits-v${deployed.version ?? "unknown"}-${ABANDON_AFTER_MS}ms-report.json`, JSON.stringify(report, null, 2));
+  console.log(pass ? "PASS  the abandoned check was not charged" : "FAIL  see the outcomes above");
+  if (!pass) process.exit(1);
+}
+
 async function main(): Promise<void> {
   const deployed = (await (await fetch(`${BASE}/healthz`)).json()) as { version?: string; commit?: string };
+  if (process.argv.includes("--credits")) return credits(deployed);
   let signature: string | null = null;
   // The paid retry carries the PAYMENT-SIGNATURE: that request is abandoned shortly after it leaves.
   const abandoning = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {

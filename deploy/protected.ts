@@ -814,6 +814,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
     // The client is gone: nothing is settled, and the same payment can be sent again.
     if (request.signal?.aborted) {
       await admission.finish("unused");
+      console.warn(`client left before settlement on ${path}: nothing settled`);
       return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before settlement" });
     }
     // Settle before releasing the result: a payload that verifies but cannot settle

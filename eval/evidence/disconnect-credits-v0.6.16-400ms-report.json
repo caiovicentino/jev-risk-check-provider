@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-10-16T03:37:54.459Z",
+  "base": "https://x402check.xyz",
+  "version": "0.6.16",
+  "commit": "88e3749932b6",
+  "mode": "credits",
+  "abandon_after_ms": 400,
+  "abandoned": {
+    "status": 0,
+    "charged": null,
+    "error": "AbortError"
+  },
+  "balance_before": "$0.001",
+  "balance_after": "$0.001",
+  "pass": true
+}

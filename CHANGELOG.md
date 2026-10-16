@@ -9,6 +9,7 @@ A paid production probe of v0.6.15 (`eval/disconnect.ts`) abandoned a paid reque
 - **Per call:** admission (the payer's slot and the payment's claim) now runs inside the work handed to `waitUntil`, so a claim taken is always released or marked settled.
 - **Credits:** the debit runs inside it too, and a caller gone before the verdict is ready gets the debit back (499), as a per-call payment is not settled.
 - **Buying credits:** a buyer gone before settlement is not charged (499) and can send the same payment again. Before, the pack settled and its new token reached nobody. A buyer who leaves during the settlement itself still loses the new token, since the money has moved by then. The settlement record marks it `undelivered`, and the daily check lists it for the owner.
+- **Each 499 is logged** (`client left before settlement`, `client left before its verdict`, `buyer left before settlement`), so Workers Logs show how often clients leave.
 
 ## v0.6.15 — 2026-10-16: the production reviews
 

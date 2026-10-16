@@ -205,7 +205,8 @@ export async function spendCredits(env: WorkerEnv, token: string, path: string, 
     }
     // The caller is gone: the verdict reaches nobody, so it is not charged.
     if (signal?.aborted) {
-      await refund();
+      const back = await refund();
+      console.warn(`client left before its verdict on ${path}: ${back ? "the debit was refunded" : "the refund failed"}`);
       return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before the result was ready" });
     }
     // The simulation surcharge is charged only for simulations that ran.
@@ -305,6 +306,7 @@ async function buyPack(env: WorkerEnv, stack: Stack, result: Extract<HTTPProcess
   // The buyer is gone: nothing is settled (a new token would reach nobody), and the payment can be sent again.
   if (signal?.aborted) {
     await admission.finish("unused");
+    console.warn("buyer left before settlement on /v1/credits: nothing settled");
     return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before settlement" });
   }
   let reason = "settlement_failed";
