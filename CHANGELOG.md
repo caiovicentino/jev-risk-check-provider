@@ -2,6 +2,36 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — unreleased (prepared 2026-10-02, extended 2026-10-16; a publish needs the owner's passkey)
+
+The SDK and MCP review of 2026-10-16 found eight issues; all are fixed here, each with a regression test that fails without its fix (`packages/client/test/guard-review.test.ts`, `solana-review.test.ts`, `packages/mcp/test/payer-review.test.ts`, `snap/test/unit/truncation.test.ts`).
+
+**Client (signing guard):**
+- **What is checked is what is signed.** The EVM guard normalizes a transaction as viem serializes it, and that copy is checked and signed:
+  - `to` absent, `""` or `"0x"` is a contract creation, so a creation that carries value is refused however it is spelled;
+  - amounts are read with BigInt semantics and signed as bigints, and `input` is signed as `data`;
+  - a missing `chainId` takes `options.chainId`, never a legacy signature valid on every chain;
+  - anything viem would read differently is refused (`invalid_transaction`);
+  - `maxFeeWei` applies to the signed copy, blob gas included.
+- **Every counterparty is checked, or nothing is signed:** in batches of 25, up to 50 (more is `too_many_counterparties`). A batch the decoders do not read in full is refused as opaque: MultiSend, multicall, ERC-7579 or `executeBatch` past 32 calls or with leftover bytes, Universal Router plans, a Seaport bulk listing past 64 orders.
+- **A transaction is signed on its simulation.** Its verified attestation must say `checks.simulation.status: "ok"`; a simulated revert is blocked (`simulation_reverted`), anything else is `not_simulated`. **This changes behaviour:** a transaction with a counterparty on a chain the provider does not simulate (Avalanche, Monad, Sei, any EVM chain but Ethereum, Base, Polygon, Arbitrum, Optimism and BSC) is no longer signed. x402 payments signed as typed data are unaffected.
+- **Solana: SOL is checked against whoever controls the account it funds.** For an account the transaction creates or assigns, that is the stake withdrawer, the token-account owner, the nonce authority or the seed base, and otherwise the owner program, checked as a contract call. Refused as not verified: uninitialized stake or token accounts, mints or multisigs funded beyond rent, and Vote, loader, lookup-table and Config accounts. Refused locally: a stake lockup under another custodian, and `AllocateWithSeed` of a signer-derived account.
+- **Typed data:** an unrecognized struct that grants a spender, delegatee or operator an amount (Aave's `DelegationWithSig`, for one) is checked as a permit, unlimited from 2^255.
+- **API:** `GuardCheck.claims`; the decoders keep every candidate; `buildRiskCheckBodies(decoded, origin, limit)`.
+- **Not changed (known limits):** a Solana transfer to an existing program-owned account is checked by the account's address; generic typed data with no known role field checks only its first address.
+
+**MCP:**
+- **x402check's own checks are paid only to x402check's `pay_to`, at most $0.01 each** (`untrusted_check_payee`, `over_check_price`), so a hijacked API origin cannot collect more; `PayerOptions.checkPayees` and `maxCheckPaymentUsd` override it.
+- **No second authorization while one can settle:** `x402check_pay` signs nothing new to a payee for a resource while an earlier authorization the resource did not accept can still be settled (`authorization_outstanding`).
+- **Build:** `@x402/core` is pinned at 2.28.0; `scripts/check-publish.mjs` builds the package and refuses a tarball holding anything but `package.json`, `README.md`, `LICENSE` and a `dist/` built from `src/`.
+
+**Prepared on 2026-10-02:**
+- **The guard exempts payments to x402check only in USDC (client, security review F5):** the trusted-payee cap (250000 atomic units, $0.25 of USDC) applied to any asset; for an 8-decimal token it was not $0.25. Only the asset x402check's challenge asks for on each network (`X402CHECK_PAYMENT_ASSETS`) is exempt now.
+- **Chain ids as the provider accepts them (client):** `toCaip2` returns null for a namespace or cluster the provider refuses (`solana:mainnet`, `foo:bar`), so the trust provider leaves such a chain out instead of failing the check.
+- **Sellers can screen the payer before settling (client):** `x402checkTrustProvider()` implements a provider for the proposed x402 trust-provider extension (x402-foundation/x402#2300). It maps a verified, request-bound verdict on the payer's wallet to PASS / FAIL / UNCERTAIN, never PASS for anything it cannot verify, and returns the attestation as `evidence_uri`. A check that did not complete reports why (`not_checked:<reason>`).
+- **Freshness anchors in the types (client):** `checks.sanctions.digest`, `checks.kit_watch` (`complete_through`, `gaps`) and `checks.simulation.at_block`, signed since provider 0.6.1; all optional, older attestations still verify.
+- **`x402check_verify_attestation` and check results show the anchors (MCP):** the OFAC release digest and the per-chain block maps, each value only in its expected format.
+
 ## v0.6.16 — 2026-10-16: a client that leaves never strands its payment
 
 A paid production probe of v0.6.15 (`eval/disconnect.ts`) abandoned a paid request 1.5 s after it left. The resend of the same payment got `409 payment_already_used`, and nothing had been charged. The runtime cancels whatever a request has not handed to `waitUntil`. Admission ran before the hand-off, so a client gone during it left its payment claimed for a day: no money moved, but the signed payment could not be used. Abandoned after 300 ms, during the payment's verification, the same probe passed.
@@ -195,14 +225,6 @@ Deployed from commit `c4a5f33` and checked in production (docs/EVIDENCE.md §7):
   - Addresses x402check never flags are left out of the community address sets (`src/never-flag.ts`): its own `pay_to`, Permit2 and x402's Permit2 proxies, the asset x402 charges in on each EVM network, and the major tokens the simulator values. The manual build also leaves them out of the code fingerprints.
   - The manual MetaMask and ScamSniffer builds read their lists at the resolved commit too.
   - The feeds workflow refuses to sign a manifest that changed implausibly since the published one (`scripts/feeds-guard.mjs`, plain node, checked out from the run's commit). The bounds: OFAC addresses −5% or +50%, MetaMask entries ±20%, no date going backwards or more than a day ahead, and a published manifest to compare with. A manual run with `override` publishes after review.
-
-## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — 2026-10-02 (prepared; not yet on npm: a publish needs the owner's passkey)
-
-- **The guard exempts payments to x402check only in USDC (client, security review F5):** the trusted-payee cap (250000 atomic units, $0.25 of USDC) applied to any asset; for an 8-decimal token it was not $0.25. Only the asset x402check's challenge asks for on each network (`X402CHECK_PAYMENT_ASSETS`) is exempt now.
-- **Chain ids as the provider accepts them (client):** `toCaip2` returns null for a namespace or cluster the provider refuses (`solana:mainnet`, `foo:bar`), so the trust provider leaves such a chain out instead of failing the check.
-- **Sellers can screen the payer before settling (client):** `x402checkTrustProvider()` implements a provider for the proposed x402 trust-provider extension (x402-foundation/x402#2300). It maps a verified, request-bound verdict on the payer's wallet to PASS / FAIL / UNCERTAIN, never PASS for anything it cannot verify, and returns the attestation as `evidence_uri`. A check that did not complete reports why (`not_checked:<reason>`).
-- **Freshness anchors in the types (client):** `checks.sanctions.digest`, `checks.kit_watch` (`complete_through`, `gaps`) and `checks.simulation.at_block`, signed since provider 0.6.1; all optional, older attestations still verify.
-- **`x402check_verify_attestation` and check results show the anchors (MCP):** the OFAC release digest and the per-chain block maps, each value only in its expected format.
 
 ## v0.6.1 — 2026-10-01: freshness anchors
 

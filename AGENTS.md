@@ -178,7 +178,7 @@ Run these before committing:
 npm run typecheck && npm test                  # provider (and Snap typecheck)
 npm --prefix packages/client test              # SDK
 npm --prefix packages/mcp test                 # MCP (builds the client first)
-npm --prefix snap run test:only                # Snap, against its built bundle
+npm --prefix snap run test:only                # Snap, against its built bundle (after a change in snap/src, `npm --prefix snap test` rebuilds it first)
 ```
 
 Commit messages end with the `Co-Authored-By` trailer that the session instructs.
@@ -239,7 +239,7 @@ Each paid probe spends from the probe payer to our own `pay_to`, or from its pre
 ### 3.6 Publish the npm packages (the owner's passkey)
 
 1. Bump `packages/*/package.json`. For the MCP server, also bump both versions in `packages/mcp/server.json`.
-2. Pack: in `packages/client`, run `npm pack`. In `packages/mcp`, set `@x402check/client` to `^<client version>`, run `node scripts/check-publish.mjs` then `npm pack`, and restore `package.json`.
+2. Pack: in `packages/client`, run `npm pack`. In `packages/mcp`, set `@x402check/client` to `^<client version>`, run `node scripts/check-publish.mjs` (it refuses a local dependency, builds the package, and refuses a tarball holding anything but `package.json`, `README.md`, `LICENSE` and a `dist/` built from `src/`) then `npm pack`, and restore `package.json`.
 3. Publish each tarball under a pseudo-terminal, so that npm offers the web 2FA link:
 
    ```bash
@@ -369,7 +369,7 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - credits, per-network prices, routing across CDP, PayAI and Dexter, and the kit watch;
   - Bazaar and x402scan listings, `/openapi.json`.
 - **Audit (2026-09-30):** no critical findings, 11 high. Every finding code can fix is fixed. What remains needs the owner: repository settings, DNS, the git history rewrite, npm names.
-- **Packages:** `@x402check/client` 0.4.0 and `@x402check/mcp` 0.3.0 on npm (2026-09-30, tags `client-v0.4.0`, `mcp-v0.3.0`); the MCP Registry lists 0.3.0 as latest, published by the CI-gated workflow. The repository holds the next versions, not yet published (a publish needs the owner's passkey, §3.6).
+- **Packages:** `@x402check/client` 0.4.0 and `@x402check/mcp` 0.3.0 on npm (2026-09-30, tags `client-v0.4.0`, `mcp-v0.3.0`); the MCP Registry lists 0.3.0 as latest, published by the CI-gated workflow. The repository holds client 0.5.0 and MCP 0.3.1, not yet published (a publish needs the owner's passkey, §3.6). They carry the 2026-10-16 SDK review's fixes: the EVM guard signs the normalized copy it checked, checks every counterparty (up to 50) or nothing, and signs a transaction only on an `ok` simulation, so a transaction with a counterparty on a chain the provider does not simulate is no longer signed; Solana lamports are checked against whoever controls the account they fund; the MCP pays checks only to x402check's `pay_to`, at most $0.01, and signs no second authorization while one can settle.
 - **Solana signing guard** (`guardSolanaSigner`, since `@x402check/client` 0.3.0): decodes each transaction (lookup tables and token-account owners over RPC), refuses owner-change drains locally, and checks recipients, delegates and called programs. 4/4 on 1 real x402 payment and 3 constructed cases (`eval/solana-guard.ts`).
 - **Guarded x402 payments** (`x402check_pay`, since `@x402check/mcp` 0.2.0): the MCP server pays a resource only after x402check clears the exact payee, right before signing. A `warn` goes to the user through elicitation.
   - One real payment through the tool settled on Base (`eval/mcp-pay.ts`), to x402check's own `pay_to`, a trusted payee that is not checked.
