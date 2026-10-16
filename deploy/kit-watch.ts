@@ -401,6 +401,8 @@ export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fet
 }
 
 const FAMILY_TTL_MS = 5 * 60 * 1000;
+/** Addresses one evaluation may look up in the watch (a bulk read takes at most 100 keys). */
+const LOOKUP_MAX = 100;
 let familyCache: { at: number; value: Promise<{ index: FamilyIndex; asOf: string; coverage: KitWatchCoverage }> } | null = null;
 const delegateCache = new Map<WatchChain, { at: number; value: Promise<Record<string, DelegateVerdict>> }>();
 
@@ -507,8 +509,16 @@ export function kitWatchLookup(env: WorkerEnv): KitWatchLookup | null {
     delegate: async (network, delegate) => ((WATCH_CHAINS as readonly string[]).includes(network) ? (await delegates(network as WatchChain))[delegate] : undefined),
     addresses: async (addresses, network) => {
       const out = new Map<string, WatchEntry>();
-      const unique = [...new Set(addresses.map((a) => a.toLowerCase()))].slice(0, 16);
-      const raws = await Promise.all(unique.map((a) => kv.get(KW.address(a), { type: "text", cacheTtl: 60 })));
+      const unique = [...new Set(addresses.map((a) => a.toLowerCase()))];
+      // One bulk read covers 100 addresses. More cannot all be read, and an unread one must not be
+      // signed as clear: the lookup fails, and the verdict says the watch was unavailable.
+      if (unique.length > LOOKUP_MAX) throw new Error(`kit watch: ${unique.length} addresses to look up, at most ${LOOKUP_MAX}`);
+      const keys = unique.map((a) => KW.address(a));
+      // A bulk read is one KV operation; should it fail, the keys are read one by one (at most 100).
+      const read = keys.length
+        ? await kv.get(keys, { type: "text", cacheTtl: 60 }).catch(async () => new Map<string, string | null>(await Promise.all(keys.map(async (k) => [k, await kv.get(k, { type: "text", cacheTtl: 60 })] as const))))
+        : new Map<string, string | null>();
+      const raws = unique.map((a) => read.get(KW.address(a)) ?? null);
       unique.forEach((a, i) => {
         const raw = raws[i];
         if (!raw) return;

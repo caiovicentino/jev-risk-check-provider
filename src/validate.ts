@@ -1,4 +1,4 @@
-import { chainFits, evmChecksumValid, parseSubject } from "./address.js";
+import { chainFits, evmChecksumValid, parseSubject, sameSubject } from "./address.js";
 import { normalizeChain } from "./chains.js";
 import { requestHash } from "./jws.js";
 import { normalizeHost } from "./domain-analysis.js";
@@ -162,6 +162,11 @@ export function validateRequest(body: unknown): Valid<RiskCheckRequest> | Invali
     if (isInvalid(payment)) return payment;
     const effective = subject.caip2 ?? req.chain;
     if (payment.network && effective && payment.network !== effective) return invalid("payment.network");
+    // The payment's network must be able to hold the wallet checked: it becomes the verdict's chain
+    // (2026-10-16 review: an EVM wallet "paid" on Solana skipped the chain-keyed checks).
+    if (payment.network && !chainFits(subject, payment.network)) return invalid("payment.network");
+    // The verdict covers the wallet: a payment to anyone else would be signed but never screened.
+    if (payment.pay_to !== undefined && !sameSubject(payment.pay_to, String(obj.wallet))) return invalid("payment.pay_to");
     req.payment = payment;
   }
   if (obj.interaction !== undefined) {

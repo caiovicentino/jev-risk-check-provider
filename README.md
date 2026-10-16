@@ -128,7 +128,7 @@ curl -X POST https://x402check.xyz/v1/risk-check -H "Content-Type: application/j
 | `domain` | no | hostname or http(s) URL (normalized server-side); the site the payment or signature is for |
 | `context` | no | ≤ 4096 chars: what the agent acted on (tool output, page text, instruction). Untrusted by design. Leave out secrets and personal data: keys, seed phrases and credit tokens are redacted before the model sees it, but nothing else is (see [Data handling](#data-handling)) |
 | `interaction` | no | `{type, unlimited?}`; `type` ∈ `native_transfer`, `token_transfer`, `token_approval`, `nft_approval`, `permit_signature`, `order_signature`, `message_signature`, `contract_call` |
-| `payment` | no | binds the attestation to a payment: `{network, pay_to, amount (base units), asset, resource}` |
+| `payment` | no | binds the attestation to a payment to `wallet`: `{network, pay_to, amount (base units), asset, resource}`. `pay_to` must be `wallet` itself and `network` must be able to hold it, or the request is refused (422) |
 | `aud` | no | ≤ 256 chars; copied into the attestation, never shown to the model |
 | `transaction` | no | EVM `{from, to?, value?, data?}` to simulate; needs an `eip155` chain. `value` is decimal or 0x-hex; `data` is 0x-hex, ≤ 49,152 chars. Simulated on Ethereum, Base, Polygon, Arbitrum, Optimism and BSC |
 | `screening`, `authorization` | no | caller assertions, recorded as `asserted` (can only raise risk) |

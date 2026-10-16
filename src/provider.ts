@@ -14,7 +14,7 @@ import { GRANTING_INTERACTIONS, type Answer, type Evidence, type KitWatchEvidenc
 
 export const PROVIDER_DID_PREFIX = "did:web:";
 export const ATTESTATION_TTL_MS = 60 * 60 * 1000;
-export const PROVIDER_VERSION = "0.6.13";
+export const PROVIDER_VERSION = "0.6.14";
 
 export type ProviderConfig = {
   host: string;
@@ -34,6 +34,8 @@ export type ProviderConfig = {
 
 // Transaction simulation and contract reputation caps.
 export const HIDDEN_RECIPIENT_CAP = 40;
+/** Contract spenders of a simulated transaction checked for source verification. */
+export const MAX_SPENDER_CHECKS = 6;
 /** Logic code byte-identical (up to compiler metadata) to a listed drainer contract's. */
 export const DRAINER_CODE_CAP = 30;
 /** Undisclosed recipient reached through a source-verified contract: review. */
@@ -272,7 +274,8 @@ async function kitWatchEvidence(
   const asOf = await kw.asOf().catch(() => "");
   // Only evidence against an address makes the watch a "hit" (a listed address); notes are reported, not counted.
   const strong = hits.filter((h) => !KIT_WATCH_INFORMATIONAL.has(h.kind));
-  return { as_of: asOf, status: strong.length ? "hit" : failed ? "unavailable" : "clear", ...(await coverageFor(kw, [network])), ...(hits.length ? { hits: hits.slice(0, 10) } : {}) };
+  // Entries from every watched chain apply (who controls an EOA holds on every chain): their coverage is signed.
+  return { as_of: asOf, status: strong.length ? "hit" : failed ? "unavailable" : "clear", ...(await coverageFor(kw, WATCH_CHAINS)), ...(hits.length ? { hits: hits.slice(0, 10) } : {}) };
 }
 
 /** The coverage clock for these chains (the ones the verdict consulted); nothing when unknown. */
@@ -331,6 +334,7 @@ export class Provider {
 
     let feedResults: FeedResult[] = [];
     let feeds: ThreatIntelFeeds = {};
+    let feedsFailed = false;
     try {
       feeds = this.config.feeds ? await this.config.feeds() : {};
       feedResults = checkFeeds(feeds, checks.subject, checks.domain).results;
@@ -340,7 +344,11 @@ export class Provider {
       }
     } catch {
       feedResults = [];
+      feedsFailed = true;
     }
+    // A feed that applies to this request but could not be read is unknown, never clear: a
+    // domain list when a domain was given, an address list when the subject is an EVM address.
+    const feedsUnavailable = feedsFailed || feedResults.some((r) => r.status === "unavailable" && ((r.kind === "domain" && !!checks.domain) || (r.kind === "address" && checks.subject?.format === "evm")));
 
     // A directly listed address is a deterministic verdict: no model call, no sampling.
     if (checks.sanctions.status === "listed") {
@@ -402,15 +410,17 @@ export class Provider {
       console.error(`model call failed: ${String(err).slice(0, 160)}`);
       return fail(String(err));
     }
-    // Approvals granted inside the simulated transaction to contracts: check their
-    // verification too (at most two, bounded latency).
+    // Approvals granted inside the simulated transaction to contracts: check their verification
+    // too, up to MAX_SPENDER_CHECKS. More spenders than that are unknown, never clear: the log order
+    // is the transaction author's to choose (2026-10-16 review).
     let simSpenderUnverified = false;
     let simSpenderVerificationFailed = false;
     if (simulation?.status === "ok" && this.config.contractIntel) {
-      const spenders = [...new Set((simulation.approvals ?? []).filter((a) => a.spender_is_contract === true).map((a) => a.spender))].slice(0, 2);
+      const all = [...new Set((simulation.approvals ?? []).filter((a) => a.spender_is_contract === true).map((a) => a.spender))];
+      const spenders = all.slice(0, MAX_SPENDER_CHECKS);
       const results = await Promise.all(spenders.map((s) => (this.config.contractIntel as ContractIntel)(s, network).catch(() => ({ unavailable: true }) as { verified?: boolean; unavailable?: boolean })));
       simSpenderUnverified = results.some((r) => r.verified === false);
-      simSpenderVerificationFailed = results.some((r) => r.unavailable === true);
+      simSpenderVerificationFailed = results.some((r) => r.unavailable === true) || all.length > MAX_SPENDER_CHECKS;
     }
     if (subjectVerified !== undefined) onchain = { ...onchain, verified: subjectVerified };
     if (!answersComplete(answers, questions)) return fail("jev_malformed_answers", usage);
@@ -477,6 +487,8 @@ export class Provider {
       ...((granting && onchain.is_contract === true && subjectVerificationFailed) || simSpenderVerificationFailed ? ["contract_verification_unavailable"] : []),
       // The watch could not run (a lookup, or the code it reads, failed): never signed as clear.
       ...(kitWatch?.status === "unavailable" ? ["kit_watch_unavailable"] : []),
+      // A community list that applies could not be read.
+      ...(feedsUnavailable ? ["feeds_unavailable"] : []),
       // An EVM grant with no chain named cannot be classified (contract or wallet, delegated or not).
       ...(granting && checks.subject.format === "evm" && !network ? ["chain_unknown"] : []),
     ];
@@ -495,7 +507,8 @@ export class Provider {
         newAddress: onchain.activity === "none",
         phishingDomain: hits.some((h) => h.source === "metamask-phishing-detect" || (h.source === "scamsniffer-domains" && corroborated)),
         communityFlaggedDomain: hits.some((h) => h.source === "scamsniffer-domains" && !corroborated),
-        knownScamAddress: hits.some((h) => h.kind === "address"),
+        // The kit watch reports its own categories (KIT_WATCH_CATEGORIES); this one is the community lists'.
+        knownScamAddress: hits.some((h) => h.kind === "address" && h.source !== "x402check-kit-watch"),
         drainerCode: hits.some((h) => h.kind === "code") || simFindings.includes("known_drainer_code"),
         approvalToEoa,
         unverifiedContract,

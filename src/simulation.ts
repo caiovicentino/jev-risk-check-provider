@@ -98,6 +98,8 @@ export const MAX_LOGS = 3_000;
 export const MAX_FLOWS = 5_000;
 /** Addresses classified per transaction (called contract, recipients, spenders), largest first. */
 export const MAX_PROBE = 40;
+/** Contracts that keep the sender's assets checked for source verification per simulation. */
+export const MAX_SINKS = 8;
 const PROBE_BATCH = 10; // some public RPCs cap JSON-RPC batches at 10 calls
 // A plausible sender balance (value + 0.1 ETH), not an implausible one a contract could test for.
 const BALANCE_HEADROOM = 10n ** 17n;
@@ -586,10 +588,17 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
     // did not name: legitimate sinks (bridges, pools, WETH, staking) are source-verified;
     // drainer contracts that hold stolen funds for later withdrawal usually are not.
     if (outflows.length > 0 && back === "nothing" && hiddenEoa.length === 0 && opts.contractIntel) {
-      const sinks = byAmount
-        .map(([a]) => a)
-        .filter((a) => coverage(a, beneficiaries.get(a) as Flow[], payees) !== "covered" && (isContract(a) || facts.get(a)?.kind === "delegated"))
-        .slice(0, 3);
+      // Known value first: anyone can emit a Transfer of any raw amount of a token they made, so raw
+      // amounts must not decide which sinks are checked (2026-10-16 review: decoys took every slot).
+      // Up to MAX_SINKS are checked; more than that is unknown, never clear.
+      const knownUsd = (a: string) => Math.max(-1, ...(beneficiaries.get(a) ?? []).map((f) => usdBounds(f.asset, f.amount, network)?.[0] ?? -1));
+      const candidates = byAmount
+        .map(([a], i) => ({ a, i, usd: knownUsd(a) }))
+        .filter(({ a }) => coverage(a, beneficiaries.get(a) as Flow[], payees) !== "covered" && (isContract(a) || facts.get(a)?.kind === "delegated"))
+        .sort((x, y) => y.usd - x.usd || x.i - y.i)
+        .map(({ a }) => a);
+      const sinks = candidates.slice(0, MAX_SINKS);
+      if (candidates.length > MAX_SINKS) limits.push("verification_unavailable");
       // A delegated account or an exact forwarding proxy (Safe, EIP-1167, minimal EIP-1967)
       // is judged by the code it runs: fresh Safes are unverified on explorers, their singleton is not.
       const intel = await Promise.all(

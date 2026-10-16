@@ -111,18 +111,25 @@ export function leetNormalize(input: string): string {
     .join("");
 }
 
+/** `input` parsed as an http(s) URL, or null. */
+function httpUrl(input: string): URL | null {
+  try {
+    const url = new URL(input);
+    return url.protocol === "https:" || url.protocol === "http:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Accepts a bare host or an http(s) URL; returns the lowercase hostname or null. */
 export function normalizeHost(input: string): string | null {
   const raw = input.trim();
   if (!raw || raw.length > 2048 || /\s/.test(raw)) return null;
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
-  let url: URL;
-  try {
-    url = new URL(withScheme);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  // An http(s) URL however it is spelled: browsers and fetch take "https:/host", "https:\\host" and
+  // "http:host" to that host, so a lenient spelling must not hide a listed one (2026-10-16 review).
+  // Another scheme ("ftp://", "javascript:") is not a site; anything else is a bare host.
+  const url = httpUrl(raw) ?? (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? null : httpUrl(`https://${raw}`));
+  if (!url) return null;
   const host = url.hostname.replace(/\.$/, "").toLowerCase();
   if (!host || host.length > 253) return null;
   if (host.startsWith("[")) return host; // IPv6 literal

@@ -2,6 +2,26 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.14 — 2026-10-16: the provider core's review
+
+An independent review of the provider core found two high, three medium and three low issues. Each was reproduced in process and is fixed here; `test/review-1016-core.test.ts` keeps them fixed.
+
+- **High: a listed site hidden by a lenient spelling of its URL.** `https:/evil.com/pay`, `https:\\evil.com`, `http:/\evil.com` and `http:evil.com` all reach `evil.com` in browsers and in `fetch`. Our normalizer read them as the host `https`, so a domain on the MetaMask list came out clear (low, 100). The Worker and the SDK (`@x402check/client`) now parse any http(s) URL first, as browsers do, and treat other schemes (`ftp:`, `javascript:`) as no site.
+- **High: verification caps an attacker could fill with decoys.**
+  - Simulation checked the source verification of only the three sinks with the largest raw amounts. Anyone can emit a Transfer of a made-up token with any amount, so decoys took every slot. Up to 8 sinks are now checked, known value first, and more is `simulation_incomplete`.
+  - Only the first two simulated spenders were checked. Now up to 6 are, in any order, and more is `contract_verification_unavailable`.
+  - The kit watch read 16 of the up to 41 counterparties a simulation names, and signed the rest as clear. It now reads up to 100 in one KV operation and refuses more.
+- **Medium: `payment` fields that skipped or bypassed checks.**
+  - `payment.network` named the verdict's chain without the family check `chain` has, so an EVM wallet "paid on Solana" skipped the chain-keyed checks.
+  - A `payment.pay_to` other than `wallet` was signed into the attestation but never screened.
+
+  Both are now refused (422). The SDK already sent `pay_to` equal to `wallet`.
+- **Medium: a community list that could not be read raised no floor.** When the ScamSniffer sets failed to load from KV, the verdict said "unavailable" and still came out low. An applicable list that cannot be read is now `feeds_unavailable`, at least medium (review). That means a domain list when a domain was given, and an address list for an EVM subject.
+- **Low:**
+  - A kit-watch hit no longer also carries the community lists' `known_scam_address` category.
+  - The watch signs the coverage clock of every watched chain, Polygon and other chains included, since their EOA entries apply everywhere.
+  - The model is told that caller assertions (`screening`, `pre_authorized`) never raise trust, as docs/METHODOLOGY.md always said. Before, it was told that a structured pre-authorization made urgency or a larger amount normal.
+
 ## v0.6.13 — 2026-10-16: fixes from the overnight review
 
 An independent review of v0.6.5–v0.6.12 found one medium issue and five low ones; all are fixed here.

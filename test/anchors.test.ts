@@ -56,13 +56,17 @@ function kitWatch(coverage?: KitWatchLookup["coverage"]): KitWatchLookup {
 }
 const onchain = async () => ({ status: "ok" as const, network: "eip155:8453", is_contract: false, activity: "some" as const, tx_count: 3 });
 
-test("the kit watch signs its coverage clock for the chain it consulted, only when it ran and only when known", async () => {
+test("the kit watch signs the coverage clock of every watched chain (who controls an EOA holds on every chain), only when it ran and only when known", async () => {
   const covered = kitWatch(async () => ({ complete_through: { "eip155:1": 23500000, "eip155:8453": 36000005 }, gaps: { "eip155:1": 1 } }));
   const base = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: covered }).evaluate(valid({ wallet: USER, chain: "base" }));
   assert.ok(base.result.checked);
-  assert.deepEqual(base.result.evidence?.kit_watch?.complete_through, { "eip155:8453": 36000005 }, "the chain consulted, not every chain");
-  assert.equal(base.result.evidence?.kit_watch?.gaps, undefined, "no gap on Base");
-  assert.deepEqual(signedChecks(base.result.jws).kit_watch, { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:8453": 36000005 } });
+  // A Base subject is looked up against Base's entries and the EOA entries of every watched chain:
+  // both clocks are signed, with Ethereum's gap (since 0.6.13; before, only the chain consulted).
+  assert.deepEqual(base.result.evidence?.kit_watch?.complete_through, { "eip155:1": 23500000, "eip155:8453": 36000005 });
+  assert.deepEqual(signedChecks(base.result.jws).kit_watch, { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:1": 23500000, "eip155:8453": 36000005 }, gaps: { "eip155:1": 1 } });
+  // A chain the watch does not scan still consults its EOA entries: their clocks are signed too (2026-10-16 review).
+  const polygon = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain: async () => ({ status: "ok" as const, network: "eip155:137", is_contract: false, activity: "some" as const, tx_count: 3 }), kitWatch: covered }).evaluate(valid({ wallet: USER, chain: "polygon" }));
+  assert.deepEqual(signedChecks(polygon.result.jws).kit_watch?.complete_through, { "eip155:1": 23500000, "eip155:8453": 36000005 });
 
   // An EOA with no chain: the watch is consulted on every chain, and states each chain's clock and gaps.
   const anyChain = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, kitWatch: covered }).evaluate(valid({ wallet: USER }));
@@ -87,7 +91,7 @@ test("coverageOf reads the cron's cursor per chain, with the recorded gaps", () 
 test("the coverage clock states the reads still queued and every hole, uncapped (provider 0.6.2)", async () => {
   const queued = kitWatch(async () => ({ complete_through: { "eip155:1": 23500000, "eip155:8453": 36000005 }, gaps: { "eip155:1": 37 }, pending: { "eip155:8453": 4 } }));
   const base = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: queued }).evaluate(valid({ wallet: USER, chain: "base" }));
-  assert.deepEqual(signedChecks(base.result.jws).kit_watch, { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:8453": 36000005 }, pending: { "eip155:8453": 4 } }, "coverage through the clock is not claimed whole while reads wait");
+  assert.deepEqual(signedChecks(base.result.jws).kit_watch, { as_of: "2026-10-01T12:00:00.000Z", status: "clear", complete_through: { "eip155:1": 23500000, "eip155:8453": 36000005 }, gaps: { "eip155:1": 37 }, pending: { "eip155:8453": 4 } }, "coverage through the clock is not claimed whole while reads wait");
   assert.deepEqual(base.result.evidence?.kit_watch?.pending, { "eip155:8453": 4 });
   const anyChain = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, kitWatch: queued }).evaluate(valid({ wallet: USER }));
   assert.deepEqual([signedChecks(anyChain.result.jws).kit_watch?.gaps, signedChecks(anyChain.result.jws).kit_watch?.pending], [{ "eip155:1": 37 }, { "eip155:8453": 4 }]);
