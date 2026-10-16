@@ -33,7 +33,10 @@ test("a published release is used only when the signature, checksum, count, date
   const ok = await verifyPublishedOfac(r.manifest, r.sig, r.ofac, PUBLIC);
   assert.deepEqual(ok.rows, ROWS);
   assert.equal(ok.meta.publish_date, "2026-10-02");
-  await assert.rejects(verifyPublishedOfac(r.manifest, r.sig.slice(0, -2) + "AA", r.ofac, PUBLIC), /signature invalid/);
+  // A character in the middle: the last ones carry padding bits, so a random signature already ending
+  // in "AA" bits (about 1 run in 1,024) made a "tampered" copy identical (a flaky CI run, 2026-10-16).
+  const tampered = r.sig.slice(0, 20) + (r.sig[20] === "A" ? "B" : "A") + r.sig.slice(21);
+  await assert.rejects(verifyPublishedOfac(r.manifest, tampered, r.ofac, PUBLIC), /signature invalid/);
   await assert.rejects(verifyPublishedOfac(r.manifest, r.sig, enc(new TextDecoder().decode(r.ofac).replace("0x1111", "0x9111")), PUBLIC), /checksum mismatch/);
   const miscounted = release(ROWS, { manifestOfac: { addresses: 3 } });
   await assert.rejects(verifyPublishedOfac(miscounted.manifest, miscounted.sig, miscounted.ofac, PUBLIC), /count that disagrees/);
