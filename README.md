@@ -199,7 +199,8 @@ Every evaluation is paid; there is no free tier.
 - Send `Authorization: Bearer x402c_…` with `/v1/risk-check`. Each check costs **$0.001** ($0.005 when a transaction is simulated), debited atomically.
 - Such a check has no 402 round trip and no on-chain settlement, so it is also several times faster.
 - `GET /v1/credits` with the token returns the balance. `POST /v1/credits` with the token tops it up.
-- If a verdict is not produced, the check is refunded.
+- **To hold the token before you pay,** generate it yourself and buy the pack as a top-up of it: `x402c_` and 32 random bytes in base64url (`node -e 'console.log("x402c_"+require("crypto").randomBytes(32).toString("base64url"))'`), sent as `Authorization: Bearer` with the purchase. A token returned in the response is lost if the connection drops while the payment settles.
+- If a verdict is not produced, or the client leaves before it is ready, the check is refunded.
 
 **Per call:**
 - **Price by payment network** (the 402 lists every network it offers): Base **$0.0035**, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009.

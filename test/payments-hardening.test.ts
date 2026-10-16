@@ -638,3 +638,13 @@ test("the work handed to waitUntil starts before any state changes: a claim, a d
   await handleCredits(new Request("https://x402check.xyz/v1/credits", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": payment(USER, "0x43") }, body: JSON.stringify({ amount_usd: 1 }), signal: leaving.signal }), { ...claims, RATE: kv }, settling, ctx);
   assert.equal((JSON.parse(kv.data.get("st:eip155:8453:0xa4") ?? "{}") as { undelivered?: boolean }).undelivered, true);
 });
+
+test("a buyer can hold the token before paying: a pack bought as a top-up of a self-made token credits it", async () => {
+  const env: WorkerEnv = { CREDITS: namespace((st) => new CreditLedger(st)) };
+  const own = `x402c_${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")}`;
+  const bought = await handleCredits(req("/v1/credits", { amount_usd: 0.1 }, { "PAYMENT-SIGNATURE": payment(USER, "0x44"), Authorization: `Bearer ${own}` }), env, stack(USER, { ok: true, tx: "0xa5", settled: 0 }));
+  assert.equal(bought.status, 200);
+  assert.equal(((await bought.json()) as { token?: string }).token, undefined, "the token is never echoed: the buyer already holds it");
+  const balance = await handleCredits(new Request("https://x402check.xyz/v1/credits", { headers: { Authorization: `Bearer ${own}` } }), env, stack(USER, { ok: true, tx: "0x0", settled: 0 }));
+  assert.equal(((await balance.json()) as { balance_usd: string }).balance_usd, "$0.10");
+});

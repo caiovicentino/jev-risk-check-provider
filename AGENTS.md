@@ -125,7 +125,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | What | Where |
 |---|---|
 | Revenue addresses (`pay_to`) | EVM `0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178`, Solana `Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X` |
-| Probe payer (eval spending) | EVM `0xB48057E647B2572f5eAe241b515fBc58B7cE249E`, $0.068 of USDC on Base on 2026-10-16, and $0.003 of probe credits (one `security:v5` run costs about $0.10: the daily routine runs it weekly once the payer holds $0.15). Its keys are in the owner's `~/.config/paysol/`, read only by `eval/paid-fetch.ts` and the money scripts. |
+| Probe payer (eval spending) | EVM `0xB48057E647B2572f5eAe241b515fBc58B7cE249E`, $0.047 of USDC on Base on 2026-10-16 (03:44 UTC), and $0.001 of probe credits (one `security:v5` run costs about $0.10: the daily routine runs it weekly once the payer holds $0.15). Its keys are in the owner's `~/.config/paysol/`, read only by `eval/paid-fetch.ts` and the money scripts. |
 | Facilitators | Coinbase CDP (Base, Polygon, Arbitrum: $0.001 per settlement after 1,000 free a month), PayAI (Sei, and the EVM fallback: gas + 30%; Avalanche when its fee there is below the price), Dexter (Solana, Monad: free). A route that would lose money is never offered. Live routing is in `/status`. |
 
 ### 2.5 Where x402check is listed
