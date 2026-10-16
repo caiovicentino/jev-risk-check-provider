@@ -24,6 +24,9 @@ export const ASSOCIATED_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJ
 export const ADDRESS_LOOKUP_TABLE_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
 export const STAKE_PROGRAM = "Stake11111111111111111111111111111111111111";
 const VOTE_PROGRAM = "Vote111111111111111111111111111111111111111";
+/** The sysvars the Stake program's old account layouts carry; since Stake v5 they are optional, and the program branches on them. */
+const CLOCK_SYSVAR = "SysvarC1ock11111111111111111111111111111111";
+const RENT_SYSVAR = "SysvarRent111111111111111111111111111111111";
 const BPF_UPGRADEABLE_LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111";
 /** Native programs whose accounts' lamports answer to authorities this file does not read. */
@@ -480,7 +483,8 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         case 16: // InitializeAccount2 [account, mint, rent] owner
         case 18: {
           // InitializeAccount3 [account, mint] owner: the owner can close the account and take its lamports.
-          const owner = op === 1 ? account(2) : d.length === 33 ? base58Encode(d.subarray(1, 33)) : undefined;
+          // The token program reads the owner from the first 32 bytes after the tag and ignores the rest.
+          const owner = op === 1 ? account(2) : d.length >= 33 ? base58Encode(d.subarray(1, 33)) : undefined;
           if (account(0)) tokenInit.set(account(0) as string, { kind: "account", owner });
           return;
         }
@@ -495,7 +499,7 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
         case 25: {
           // Token-2022 InitializeMintCloseAuthority [mint] COption<Pubkey>: the close authority takes a closed mint's lamports.
           if (program !== TOKEN_2022_PROGRAM) return unread(`${name} instruction ${op}`);
-          if (d[1] === 1 && d.length === 34 && account(0)) closeAuthority.set(account(0) as string, base58Encode(d.subarray(2, 34)));
+          if (d[1] === 1 && d.length >= 34 && account(0)) closeAuthority.set(account(0) as string, base58Encode(d.subarray(2, 34)));
           return;
         }
         case 5: // Revoke
@@ -514,49 +518,62 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
 
     if (program === STAKE_PROGRAM) {
       const op = d.length >= 4 ? u32(d, 0) : -1;
-      // Initialize [stake, rent] Authorized { staker, withdrawer }, Lockup { unix_timestamp, epoch, custodian }:
+      // Two account layouts since Stake v5 (SIMD-0490, on mainnet since 2026-06-18): the old one carries
+      // sysvars (clock, rent, stake history) after the first accounts, the new one none, and the program
+      // tells them apart by the sysvar's key at that position. So does this.
+      const clockAt = (i: number) => account(i) === CLOCK_SYSVAR;
+      // Initialize [stake, (rent)] Authorized { staker, withdrawer }, Lockup { unix_timestamp, epoch, custodian }:
       // the withdrawer controls the lamports, and a lockup's custodian alone can lift the lockup.
       if (op === 0 && d.length === 116 && account(0)) {
         const lockup = u64(d, 68) !== 0n || u64(d, 76) !== 0n;
         stakeAuthority.set(account(0) as string, { withdrawer: base58Encode(d.subarray(36, 68)), ...(lockup ? { custodian: base58Encode(d.subarray(84, 116)) } : {}) });
       }
-      // InitializeChecked [stake, rent, staker, withdrawer]
-      if (op === 9 && account(0) && account(3)) stakeAuthority.set(account(0) as string, { withdrawer: account(3) as string });
+      // InitializeChecked [stake, rent, staker, withdrawer] (old) or [stake, staker, withdrawer] (v5).
+      if (op === 9 && account(0)) {
+        const withdrawer = account(1) === RENT_SYSVAR ? account(3) : account(2);
+        if (withdrawer) stakeAuthority.set(account(0) as string, { withdrawer });
+      }
       if (!involves) return;
       if (op < 0) return unread("a Stake instruction");
       const kinds = ["staker", "withdrawer"];
       switch (op) {
         case 1: {
-          // Authorize [stake, clock, authority, (custodian)] new authority, which (u32)
+          // Authorize [stake, (clock), authority, (custodian)] new authority, which (u32). The program accepts
+          // any signer among the instruction's accounts as the authority, so the signer's presence is what
+          // counts, never its position.
           if (d.length !== 40) return unread("a Stake Authorize");
           const next = base58Encode(d.subarray(4, 36));
-          if (account(2) === signer && next !== signer) out.danger.push(`Stake Authorize hands the ${kinds[u32(d, 36)] ?? "stake"} authority of ${account(0)} to ${next}`);
+          if (next !== signer) out.danger.push(`Stake Authorize hands the ${kinds[u32(d, 36)] ?? "stake"} authority of ${account(0)} to ${next}`);
           return;
         }
         case 8: {
-          // AuthorizeWithSeed [stake, base, clock, (custodian)] new authority, which, seed, owner
+          // AuthorizeWithSeed [stake, base, (clock), (custodian)] new authority, which, seed, owner: the base signs.
           if (d.length < 40) return unread("a Stake AuthorizeWithSeed");
           const next = base58Encode(d.subarray(4, 36));
           if (account(1) === signer && next !== signer) out.danger.push(`Stake AuthorizeWithSeed hands the ${kinds[u32(d, 36)] ?? "stake"} authority of ${account(0)} to ${next}`);
           return;
         }
         case 10: {
-          // AuthorizeChecked [stake, clock, current authority, new authority, (custodian)] which
-          const next = account(3);
-          if (account(2) === signer && next && next !== signer) out.danger.push(`Stake AuthorizeChecked hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
+          // AuthorizeChecked [stake, (clock), current authority, new authority, (custodian)] which: any signer
+          // among the accounts authorizes it, as for Authorize.
+          const next = clockAt(1) ? account(3) : account(2);
+          if (!next) return unread("a Stake AuthorizeChecked");
+          if (next !== signer) out.danger.push(`Stake AuthorizeChecked hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
           return;
         }
         case 11: {
-          // AuthorizeCheckedWithSeed [stake, base, clock, new authority, (custodian)] which, seed, owner
-          const next = account(3);
-          if (account(1) === signer && next && next !== signer) out.danger.push(`Stake AuthorizeCheckedWithSeed hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
+          // AuthorizeCheckedWithSeed [stake, base, (clock), new authority, (custodian)] which, seed, owner: the base signs.
+          const next = clockAt(2) ? account(3) : account(2);
+          if (!next) return unread("a Stake AuthorizeCheckedWithSeed");
+          if (account(1) === signer && next !== signer) out.danger.push(`Stake AuthorizeCheckedWithSeed hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
           return;
         }
         case 4: {
-          // Withdraw [stake, recipient, clock, stake history, withdraw authority, (custodian)] lamports
+          // Withdraw [stake, recipient, (clock, stake history), withdraw authority, (custodian)] lamports.
           if (d.length !== 12) return unread("a Stake Withdraw");
           const recipient = account(1);
-          if (account(4) === signer && recipient && recipient !== signer) funded.push({ to: recipient, lamports: u64(d, 4).toString(), how: "stake withdrawal" });
+          const authority = clockAt(2) ? account(4) : account(2);
+          if (authority === signer && recipient && recipient !== signer) funded.push({ to: recipient, lamports: u64(d, 4).toString(), how: "stake withdrawal" });
           return;
         }
         case 6: // SetLockup

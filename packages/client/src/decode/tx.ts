@@ -19,6 +19,7 @@ import {
   describeAllowance,
   interaction,
   isIgnorableAddress,
+  isSystemAddress,
   knownToken,
   nativeAmount,
   normalizeChainId,
@@ -1416,6 +1417,16 @@ const CONTROL_FUNCTIONS: Record<string, ControlFunction> = {
  */
 function decodeCall(call: InnerCall, ctx: Ctx): Action {
   if (call.delegate) return delegateCall(call, ctx);
+  // A call to a precompile or system contract (0x01-0xff) that sends value or calldata: what it does is
+  // not an address check's to judge (Arbitrum's ArbSys withdraws ETH to an L1 address in its calldata).
+  // A raw transaction's zero-address `to` is reported before this is reached; this covers the rest,
+  // inner calls and the calls typed data authorizes (a SafeTx).
+  if (isSystemAddress(call.to) && (call.value > 0n || call.data !== "")) {
+    return {
+      ...plainCall(call, ctx, "a call to a precompile or system contract"),
+      opaque: [`a call to the precompile or system contract ${call.to}${call.value > 0n ? `, sending ${nativeAmount(call.value, ctx.chain)},` : ""} was not read`],
+    };
+  }
   if (call.data === "") {
     if (call.value === 0n && call.to === call.sender) {
       return emptyAction("Self-transfer", `A zero-value call to the sending account itself (${call.to}).`);

@@ -114,7 +114,7 @@ export interface GuardVerdict {
    * "raw_hash_signing", "opaque_signature", "not_simulated", "simulation_reverted",
    * "unreadable_self_call", "no_chain", "every_chain_authorization", "fee_cap",
    * "unguarded_method", "uncopyable", "undecodable", "invalid_transaction",
-   * "too_many_counterparties", "unreadable_instruction".
+   * "too_many_counterparties", "malformed", "unreadable_instruction".
    */
   code?: string | undefined;
   /** One per checked address (primary first). Empty when nothing needed checking. */
@@ -219,6 +219,14 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const MAX_EVM_CHECKS = 50;
 /** The transaction types viem serializes; another type is a format this guard does not read. */
 const TRANSACTION_TYPES = new Set(["legacy", "eip2930", "eip1559", "eip4844", "eip7702"]);
+/**
+ * The fields viem's default serializer reads, plus `from`. A chain's own serializer (viem passes
+ * one, e.g. the OP Stack's on Base) reads these the same way and may read others the guard does
+ * not (a Tempo `calls` list, a Celo `feeCurrency`, a zkSync paymaster): any other field is refused.
+ */
+const TRANSACTION_FIELDS = new Set(["type", "chainId", "nonce", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "maxFeePerBlobGas", "to", "value", "data", "input", "accessList", "authorizationList", "blobs", "blobVersionedHashes", "sidecars", "kzg", "from"]);
+/** What viem's wallet actions attach to a transaction and never serialize (objects, not fields). */
+const VIEM_ATTACHMENTS = ["account", "chain", "nonceManager"];
 /** Fields viem serializes as unsigned integers (numberToHex: BigInt semantics). */
 const AMOUNT_FIELDS = ["value", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "maxFeePerBlobGas"] as const;
 const HEX_BYTES = /^0[xX](?:[0-9a-fA-F]{2})*$/;
@@ -250,6 +258,11 @@ function viemInteger(value: unknown): bigint | undefined | null {
 function normalizeTransaction(input: unknown, fallbackChainId: number | undefined): { tx: Record<string, unknown> } | { reason: string } {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return { reason: "the transaction is not an object" };
   const tx: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  for (const key of VIEM_ATTACHMENTS) delete tx[key];
+  for (const key of Object.keys(tx)) {
+    if (tx[key] === undefined) delete tx[key];
+    else if (!TRANSACTION_FIELDS.has(key)) return { reason: `its field "${key.slice(0, 40)}" is not one the standard serializer reads (a chain's own serializer could sign what it holds)` };
+  }
   const to = tx.to;
   if (to === undefined || to === null || to === "" || to === "0x" || to === "0X") delete tx.to;
   else if (typeof to !== "string" || !EVM_ADDRESS.test(to)) return { reason: "its recipient (to) is not 0x followed by 40 hex digits" };
@@ -280,7 +293,10 @@ function normalizeTransaction(input: unknown, fallbackChainId: number | undefine
 /** The most a normalized transaction can charge in fees, in wei (gas, plus blob gas). */
 function maxFeeOf(tx: Record<string, unknown>): bigint {
   const gas = tx.gas as bigint | undefined;
-  const price = (tx.maxFeePerGas ?? tx.gasPrice) as bigint | undefined;
+  // The larger of the two: a legacy or EIP-2930 transaction pays gasPrice even when maxFeePerGas is
+  // set (to 0, say), and an EIP-1559 one pays up to maxFeePerGas.
+  const fees = [tx.maxFeePerGas, tx.gasPrice].filter((v): v is bigint => typeof v === "bigint");
+  const price = fees.length ? fees.reduce((a, b) => (a > b ? a : b)) : undefined;
   let fee = gas !== undefined && price !== undefined ? gas * price : 0n;
   const blobs = Array.isArray(tx.blobVersionedHashes) ? tx.blobVersionedHashes.length : Array.isArray(tx.blobs) ? tx.blobs.length : 0;
   if (blobs > 0 && typeof tx.maxFeePerBlobGas === "bigint") fee += BigInt(blobs) * GAS_PER_BLOB * tx.maxFeePerBlobGas;
@@ -547,6 +563,11 @@ export function createGuard(options: GuardOptions = {}) {
       if (chainId === undefined) {
         return verdictOf(kind, decoded.summary, "not_verified", ["the transaction carries no chainId: a pre-EIP-155 transaction is valid on every chain, and the checks need its chain (set chainId or options.chainId)"], [], "no_chain");
       }
+      // The provider simulates from, to, value and data: delegations a type-4 transaction carries would
+      // change the code it runs, unseen by the simulation, so its "ok" would say nothing.
+      if (Array.isArray(tx.authorizationList) && tx.authorizationList.length > 0) {
+        return verdictOf(kind, decoded.summary, "not_verified", ["it carries EIP-7702 delegations, which the provider's simulation does not apply: what it would do is not verified, so it is not signed"], [], "not_simulated");
+      }
       if (options.maxFeeWei !== undefined && maxFeeOf(tx) > options.maxFeeWei) {
         return verdictOf(kind, decoded.summary, "block", [`the transaction can charge up to ${maxFeeOf(tx)} wei in fees, above the cap of ${options.maxFeeWei} wei (maxFeeWei)`], [], "fee_cap");
       }
@@ -577,6 +598,9 @@ export function createGuard(options: GuardOptions = {}) {
     // A signature over content the decoders mark unreadable (an opaque hash or calldata carrier) is never made blind.
     const opaque = (decoded as Decoded & { opaque?: string | undefined }).opaque;
     if (opaque) return verdictOf(kind, decoded.summary, "not_verified", [`it authorizes content this guard cannot read (${opaque}); nothing unreadable is signed`], [], "opaque_signature");
+    // Malformed as the decoders read it: a strict wallet would refuse it, but the signer behind this
+    // guard may sign what it hashes anyway, unchecked. Never "nothing to check".
+    if (decoded.unsignable) return verdictOf(kind, decoded.summary, "not_verified", [`the request is malformed as this guard reads it (${decoded.unsignable}): what the key would sign cannot be read, so it is not signed`], [], "malformed");
     // A transaction whose effects cannot be simulated (calldata too large, malformed fields) is not signed on an address check alone.
     if (kind === "transaction" && (deployment ? hasValue : decoded.simulationSkipped !== undefined)) {
       const why = decoded.simulationSkipped ?? "contract deployments are not simulated, and this one carries value";
@@ -591,6 +615,11 @@ export function createGuard(options: GuardOptions = {}) {
       // Only provably inert requests pass with nothing to check.
       if (kind === "transaction" && selfCall && hasData) {
         return verdictOf(kind, decoded.summary, "not_verified", ["a call to the signer's own account with calldata this guard cannot read (on an EIP-7702 account it can install modules, add owners or upgrade)"], [], "unreadable_self_call");
+      }
+      // A transaction that moves value or calls code but names nobody this guard can check (a special
+      // address, say) is not signed on nothing; a value-free deployment and a plain self-transfer are inert.
+      if (kind === "transaction" && !deployment && (hasValue || hasData) && !(selfCall && !hasData)) {
+        return verdictOf(kind, decoded.summary, "not_verified", ["it moves value or calls code but names no counterparty this guard can check, so it is not signed on nothing"], [], "not_simulated");
       }
       return verdictOf(kind, decoded.summary, "allow", [decoded.localNote ?? "nothing to check: no counterparty"], []);
     }
@@ -843,7 +872,9 @@ export function guardAccount<A extends GuardableAccount>(account: A, options: Gu
   if (account.signTransaction) {
     const sign = account.signTransaction.bind(account);
     wrapped.signTransaction = async (transaction: any, opts?: any) => {
-      const copy = await copied(transaction ?? {}, "transaction", options);
+      // viem's wallet actions attach the account and chain objects: never serialized, never copied.
+      const plain = transaction && typeof transaction === "object" ? Object.fromEntries(Object.entries(transaction).filter(([k]) => !VIEM_ATTACHMENTS.includes(k))) : transaction;
+      const copy = await copied(plain ?? {}, "transaction", options);
       // The normalized copy (viem's reading of every field) is what is checked and what is signed.
       const normalized = normalizeTransaction(copy, options.chainId);
       if ("reason" in normalized) {

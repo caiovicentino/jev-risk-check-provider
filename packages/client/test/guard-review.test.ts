@@ -244,3 +244,45 @@ describe("finding 5: an unrecognized grant is checked as a permit", () => {
     assert.equal(typedCount(), 0);
   });
 });
+
+describe("maintenance review C1: typed data is read as the signature hashes it", () => {
+  // A type nothing references is not part of the signature (viem ignores it), so it must not make the
+  // request "malformed, nothing to check": a drainer's permit plus one junk type was signed unchecked.
+  const permit = (owner: string, types: Record<string, unknown> = {}) => ({
+    domain: { name: "USD Coin", version: "2", chainId: 8453, verifyingContract: USDC_BASE as Hex },
+    types: {
+      Permit: [
+        { name: "owner", type: "address" },
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+      ...types,
+    },
+    primaryType: "Permit" as const,
+    message: { owner: owner as Hex, spender: DRAINER as Hex, value: maxUint256, nonce: 0n, deadline: 2n ** 255n },
+  });
+  const junk: Record<string, Record<string, unknown>> = {
+    "257 unused types": Object.fromEntries(Array.from({ length: 257 }, (_, i) => [`Junk${i}`, []])),
+    "an unused type with a numeric field name": { Junk: [{ name: 1, type: "uint256" }] },
+    "an unused type with 257 fields": { Junk: Array.from({ length: 257 }, (_, i) => ({ name: `f${i}`, type: "uint256" })) },
+  };
+  for (const [name, types] of Object.entries(junk)) {
+    test(`a drainer permit plus ${name} is checked and blocked`, async () => {
+      const api = boundProvider((r) => (r.wallet.toLowerCase() === DRAINER ? BLOCK : LOW));
+      const key = privateKeyToAccount(generatePrivateKey());
+      const v = await refused(guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(permit(key.address, types) as never));
+      assert.deepEqual([v.action, v.code], ["block", "blocked"]);
+      assert.ok(api.seen.some((r) => r.wallet.toLowerCase() === DRAINER), "the spender was checked");
+    });
+  }
+  test("a type the signature does hash, malformed, is not verified: never nothing to check", async () => {
+    const api = boundProvider(() => LOW);
+    const key = privateKeyToAccount(generatePrivateKey());
+    const bad = { ...permit(key.address), types: { Permit: [{ name: "owner", type: "address" }, { name: 7, type: "address" }] } };
+    const v = await refused(guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(bad as never));
+    assert.deepEqual([v.action, v.code], ["not_verified", "malformed"]);
+    assert.equal(api.seen.length, 0);
+  });
+});

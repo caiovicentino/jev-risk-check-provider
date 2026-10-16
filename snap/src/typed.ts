@@ -252,6 +252,7 @@ function unresolved(ctx: Ctx, action: string, field: string): Decoded {
         summary: `${action} whose "${field}" field is not a valid address, so MetaMask cannot sign it as-is.`,
         ...findings(ctx),
         localNote: `This signature request is malformed (its "${field}" field is invalid), so it cannot be signed as-is and was not checked.`,
+        unsignable: `its "${field}" field is not a valid address`,
       },
       [],
     );
@@ -1536,6 +1537,13 @@ function decodeGeneric(ctx: Ctx): Decoded {
     if (wrapper) payloads.push(wrapper);
   }
   if (payloads.length > 0) markOpaque(ctx, payloadReason(ctx, payloads));
+  // A zkSync-stack transaction (zkSync Era, Abstract) signed as typed data: its recipient is a uint256
+  // that no address reading finds, and its calldata is not decoded here.
+  const primaryFields = ctx.types[ctx.primaryType] ?? [];
+  const hasField = (name: string) => primaryFields.some((field) => field.name === name);
+  if (hasField("txType") && hasField("to") && hasField("value") && hasField("data")) {
+    markOpaque(ctx, "a zkSync-style transaction signed as typed data: its recipient, value and calldata are not read here");
+  }
   if (order) {
     ctx.warnings.push("x402check does not know this order format, so it cannot tell what you give and what you receive: check the amounts and tokens");
   }
@@ -1548,8 +1556,10 @@ function decodeGeneric(ctx: Ctx): Decoded {
   const head = `EIP-712 signature (${ctx.method}, ${domainLabel(ctx)}, primary type ${quote(ctx.primaryType || "unknown", 40)})`;
   const details = scalarFields(ctx, order ? 8 : 6).join("; ");
   const action = `Typed data: ${capText(ctx.primaryType || "unknown", 40)}`;
+  // Every address it names, those in a known role first: an unknown field (a withdrawal's `dst`) can be
+  // the one that is paid. The Snap shows the first few; the signing guard checks them all.
   const preferred = usable.filter((visit) => keyRank(visit.key) !== undefined);
-  const chosen = preferred.length > 0 ? preferred : usable.slice(0, 1);
+  const chosen = [...preferred, ...usable.filter((visit) => keyRank(visit.key) === undefined)];
   const grant = grantOf(ctx);
   if (chosen.length > 0) {
     const candidates: Candidate[] = chosen.map((visit, index) => {
@@ -1636,6 +1646,7 @@ function malformed(signer: string | undefined, method: string, reason: string): 
       danger: [],
       interaction: interaction("message_signature"),
       localNote: `This signature request is malformed (${reason}), so MetaMask cannot sign it as-is. x402check did not check it.`,
+      unsignable: reason,
     },
     signer ? [] : [],
   );
@@ -1707,7 +1718,9 @@ function decodeParsed(parsed: unknown, signer: string | undefined, method: strin
   if (canon.unresolved.length > 0) {
     ctx.danger.push(`x402check could not decode field(s) ${canon.unresolved.slice(0, 3).join(", ")}; do not sign unless you trust the site`);
   }
-  if (canon.truncated) ctx.warnings.push("the typed data is too large to inspect completely");
+  // Not read in full: a part never inspected (one order of a Seaport bulk listing, say) is signed with
+  // the rest, so the request cannot be called checked.
+  if (canon.truncated) markOpaque(ctx, "the typed data is too large to inspect completely");
 
   let decoded: Decoded | undefined;
   switch (ctx.primaryType) {

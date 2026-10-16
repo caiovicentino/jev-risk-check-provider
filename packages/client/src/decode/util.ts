@@ -106,6 +106,12 @@ export type Decoded = {
    * signer must treat it as not verified. The reason is also the first warning.
    */
   opaque?: string | undefined;
+  /**
+   * Set when the decoders read the request as malformed (why). A wallet that validates typed data
+   * strictly refuses to sign it, but another signer may sign what it hashes anyway (viem signs a
+   * typed-data request the decoders could not read): a signer must treat it as not verified.
+   */
+  unsignable?: string | undefined;
 };
 
 export const ZERO_ADDRESS = `0x${"0".repeat(40)}`;
@@ -624,11 +630,22 @@ export function extractAddresses(input: string, exclude: (string | undefined)[] 
 // Candidate selection
 // ---------------------------------------------------------------------------
 
+/**
+ * The zero address and the low addresses chains reserve for precompiles and system contracts
+ * (0x01-0xff: Ethereum's precompiles, Arbitrum's ArbSys at 0x64, which withdraws ETH to an L1
+ * address it takes as an argument). A call to one with value or calldata does something no
+ * address check covers.
+ */
+export function isSystemAddress(address: string): boolean {
+  return /^0x0{38}[0-9a-f]{2}$/u.test(address);
+}
+
 /** Addresses that are never a meaningful counterparty. */
 export function isIgnorableAddress(address: string): boolean {
   if (address === ZERO_ADDRESS) return true;
-  // Precompiles and router sentinels (address(1), address(2), ...).
-  return /^0x0{38}[0-9a-f]{2}$/u.test(address) && BigInt(address) <= 0xffn;
+  // Precompiles and router sentinels (address(1), address(2), ...). Not 0x64 and above: Arbitrum's
+  // system contracts live there (ArbSys at 0x64 withdraws ETH to an L1 address), so they are checked.
+  return /^0x0{38}[0-9a-f]{2}$/u.test(address) && BigInt(address) < 0x64n;
 }
 
 /**

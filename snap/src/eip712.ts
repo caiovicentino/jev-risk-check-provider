@@ -60,18 +60,31 @@ type Context = {
   truncated: boolean;
 };
 
-function parseTypes(raw: unknown): TypedTypes | undefined {
+/**
+ * The types the signature hashes: those reachable from the domain and the primary type, as
+ * EIP-712 encodes them (and viem signs them). A type nothing references is not part of the
+ * signature, so it is ignored, never a reason to call the request malformed: a junk extra type
+ * once made a drainer's permit "malformed, nothing to check" while viem signed the clean permit.
+ */
+function parseTypes(raw: unknown, primaryType: unknown): TypedTypes | undefined {
   if (!isRecord(raw)) return undefined;
-  const entries = Object.entries(raw);
-  if (entries.length > MAX_TYPES) return undefined;
   // Null prototype: "constructor" & co. are never mistaken for declared types.
   const out = Object.create(null) as TypedTypes;
-  for (const [name, fields] of entries) {
+  const pending = ["EIP712Domain", ...(typeof primaryType === "string" ? [primaryType] : [])];
+  let count = 0;
+  while (pending.length > 0) {
+    const name = pending.pop() as string;
+    if (hasOwn(out, name) || !hasOwn(raw, name)) continue;
+    count += 1;
+    if (count > MAX_TYPES) return undefined;
+    const fields = raw[name];
     if (!Array.isArray(fields) || fields.length > MAX_FIELDS) return undefined;
     const list: TypedField[] = [];
     for (const field of fields) {
       if (!isRecord(field) || typeof field.name !== "string" || typeof field.type !== "string") return undefined;
       list.push({ name: field.name, type: field.type });
+      const base = field.type.replace(/(\[\d*\])+$/u, "");
+      if (hasOwn(raw, base) && !hasOwn(out, base)) pending.push(base);
     }
     out[name] = list;
   }
@@ -323,7 +336,7 @@ function canonValue(ctx: Context, type: string, value: unknown, path: string, de
  */
 export function canonicalizeTypedData(input: unknown): Canonical | { error: string } {
   if (!isRecord(input)) return { error: "the typed data is not an object" };
-  const types = parseTypes(input.types);
+  const types = parseTypes(input.types, input.primaryType);
   if (!types) return { error: 'the typed data has no valid "types" definition' };
   const { primaryType } = input;
   if (typeof primaryType !== "string" || primaryType.length === 0 || primaryType.length > 256) {
