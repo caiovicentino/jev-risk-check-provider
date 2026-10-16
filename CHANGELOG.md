@@ -16,7 +16,7 @@ The daily maintenance run's independent review of v0.6.15 and v0.6.16 found one 
 - **Every bounded text field counts characters** (`payment.resource`, `domain`, `authorization.source`), as the published schemas do; v0.6.15 had done it for `context` and `aud` only.
 - **`eval/disconnect.ts --credits`** sends the probe credits' token to production only.
 
-## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — unreleased (prepared 2026-10-02, extended 2026-10-16; a publish needs the owner's passkey)
+## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — 2026-10-16 (on npm; tags `client-v0.5.0`, `mcp-v0.3.1`; client 0.4.0 and older are deprecated with a security notice)
 
 The SDK and MCP review of 2026-10-16 found eight issues (three high: a contract creation with value signed unchecked, counterparties past the third left unchecked, and Solana lamports checked against a fresh address instead of the account's controller; one medium; four low); all are fixed here, each with a regression test that fails without its fix (`packages/client/test/guard-review.test.ts`, `solana-review.test.ts`, `packages/mcp/test/payer-review.test.ts`, `snap/test/unit/truncation.test.ts`).
 
