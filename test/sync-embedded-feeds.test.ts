@@ -57,4 +57,6 @@ test("deploy.sh checks the embedded snapshot after installing and before deployi
   const check = script.indexOf("scripts/sync-embedded-feeds.ts --check");
   const deploy = script.indexOf('"${wrangler[@]}" deploy');
   assert.ok(install > 0 && check > install && deploy > check, "install, then the check, then wrangler deploy");
+  // An ignored wrangler.json(c) or .wrangler/deploy/config.json redirect never chooses what is deployed.
+  assert.match(script, /"\$\{wrangler\[@\]\}" deploy --config wrangler\.toml /);
 });

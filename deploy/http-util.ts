@@ -48,13 +48,40 @@ export async function allChecked(res: Response): Promise<boolean> {
   }
 }
 
-/** Reads a request body up to `max` bytes while streaming (null when larger: never fully buffered). */
+/** Cloudflare's address for a request from a Worker on another zone: every such client shares it. */
+const WORKER_EGRESS_IP = "2a06:98c0:3600::103";
+
+/** The /64 an IPv6 address belongs to (one subscriber's prefix); an IPv4-mapped address is its IPv4. */
+function ipv6Prefix(ip: string): string {
+  const addr = (ip.split("%")[0] ?? "").toLowerCase();
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(addr);
+  if (mapped) return mapped[1] as string;
+  const [head = "", tail] = addr.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const groups = tail === undefined ? front : [...front, ...Array<string>(Math.max(0, 8 - front.length - back.length)).fill("0"), ...back];
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "") || "0").join(":")}::/64`;
+}
+
+/**
+ * Whom a request is counted against (2026-10-16 review): its client address, an IPv6 address by its
+ * /64 (one subscriber can otherwise spread over a whole prefix), and a request from a Worker on
+ * another zone by that zone, which Cloudflare names in CF-Worker: every such Worker reaches us from
+ * one shared address, so one of them could otherwise use up the limit of all the others.
+ */
+export function rateKey(request: Request): string {
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  if (ip === WORKER_EGRESS_IP) return `worker:${(request.headers.get("CF-Worker") ?? "").toLowerCase().slice(0, 253) || "unknown"}`;
+  return ip.includes(":") ? ipv6Prefix(ip) : ip;
+}
+
 /** The payment stack could not build a challenge or read a payment (a facilitator down): nothing was charged, retry shortly. */
 export function paymentUnavailable(path: string, err: unknown): Response {
   console.error(`payment processing failed on ${path}: ${String(err).slice(0, 200)}`);
   return json(503, { error: "payment_unavailable", detail: "the payment facilitators could not be reached; nothing was charged, retry shortly" }, { "Retry-After": "10" });
 }
 
+/** Reads a request body up to `max` bytes while streaming (null when larger: never fully buffered). */
 export async function readCapped(request: Request, max: number): Promise<Uint8Array | null> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > max) return null;

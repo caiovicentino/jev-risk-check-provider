@@ -13,8 +13,10 @@
 // Only counts are ever printed, never an address.
 //
 // Exit 0: sign. Exit 1: refused, with the reasons; a missing or unreadable published manifest or
-// snapshot is a refusal too. FEEDS_GUARD_OVERRIDE=1 (the workflow's manual `override` input, set
-// by a person who reviewed the reasons) publishes anyway and prints them as warnings.
+// snapshot is a refusal too. Every check runs and every reason is printed, so a person reviews them
+// all at once. FEEDS_GUARD_OVERRIDE=1 (the workflow's manual `override` input, set by a person who
+// reviewed the reasons) publishes anyway and prints them as warnings, except when the build's own
+// output is malformed or is not what its manifest names: no override signs that.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -115,6 +117,14 @@ export function ofacSetGuard(nextManifest, publishedManifest, nextOfac, publishe
   return removed ? [`OFAC: ${removed} address(es) of the published list are missing from the new one (a delisting must be reviewed; publish it with override)`] : [];
 }
 
+/**
+ * Whether the manual override may publish past `reason`. It may not when the new manifest or the
+ * new OFAC snapshot is malformed or is not what the manifest names: signed, every client would
+ * refuse it. A problem on the published side (nothing to compare with) stays overridable, so a
+ * person can recover the branch.
+ */
+export const overridable = (reason) => !/^new (manifest|OFAC snapshot):/.test(reason);
+
 function text(path) {
   try {
     return readFileSync(path, "utf8");
@@ -140,14 +150,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const next = load(nextPath);
   const published = load(publishedPath);
   const reasons = feedsGuard(next, published);
-  if (nextOfacPath && publishedOfacPath && reasons.length === 0) reasons.push(...ofacSetGuard(next, published, text(nextOfacPath), text(publishedOfacPath)));
+  // Always compared: an override given for another reason must never publish an unseen delisting.
+  if (nextOfacPath) reasons.push(...ofacSetGuard(next, published, text(nextOfacPath), text(publishedOfacPath)));
+  const override = process.env.FEEDS_GUARD_OVERRIDE === "1";
   if (reasons.length === 0) {
     console.log(`feeds guard: ok (MetaMask ${next.metamask.as_of}, ${next.metamask.entries} entries; OFAC ${next.ofac.publish_date}, ${next.ofac.addresses} addresses${nextOfacPath ? ", none delisted" : ""})`);
-  } else if (process.env.FEEDS_GUARD_OVERRIDE === "1") {
+  } else if (override && reasons.every(overridable)) {
     for (const r of reasons) console.log(`::warning title=feeds guard (overridden)::${r}`);
   } else {
     for (const r of reasons) console.log(`::error title=feeds guard::${r}`);
-    console.log("Not signed. Review the change; to publish it anyway, run the workflow by hand with `override`.");
+    console.log(override ? "Not signed: the build's output is malformed, and no override signs that. Find what broke the build." : "Not signed. Review the change; to publish it anyway, run the workflow by hand with `override`.");
     process.exit(1);
   }
 }

@@ -96,6 +96,9 @@ function didDocument(host: string, publicJwk: Record<string, unknown>, nextPubli
   };
 }
 
+/** Every path served by GET (here and in the Worker's own routes). */
+const GET_RESOURCES: ReadonlySet<string> = new Set(["/", "/healthz", "/status", "/openapi.json", "/llms.txt", "/sitemap.xml", "/favicon.ico", "/icon.png", "/og.png", "/.well-known/x402", "/.well-known/risk-check.json", "/.well-known/did.json", "/.well-known/jwks.json", "/.well-known/security.txt"]);
+
 export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
@@ -175,6 +178,12 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     }
     if (req.method === "GET" && path === "/healthz") {
       return json(200, { ok: true });
+    }
+    // A resource that exists, asked with another method: 405 with what it allows, not 404.
+    if (GET_RESOURCES.has(path)) {
+      const res = json(405, { error: "method_not_allowed" });
+      res.headers.set("Allow", "GET, HEAD");
+      return res;
     }
     return json(404, { error: "not_found" });
   };

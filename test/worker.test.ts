@@ -176,9 +176,11 @@ test("payment routing: a facilitator every payer can pay through, then the cheap
   // Dexter's floor rises above our Solana price: the route moves to PayAI instead of failing.
   const raised = await by(entries(0.0025));
   assert.deepEqual([raised[SOL]?.facilitator, raised[SOL]?.below_floor], ["payai", false]);
-  // PayAI's fee table unavailable: the route stays payable, the margin is unknown, never guessed.
+  // PayAI's fee table unavailable: its routes are not offered at an unknown cost (since 0.6.15); Base
+  // moves to a route whose cost is known, Sei (PayAI only) leaves the challenge until the table is read.
   const blind = await by(entries(0.0013, async () => Promise.reject(new Error("down"))));
-  assert.deepEqual([blind["eip155:8453"]?.facilitator, blind["eip155:8453"]?.fee_usd, blind["eip155:8453"]?.margin_usd], ["payai", null, null]);
+  assert.deepEqual([blind["eip155:8453"]?.facilitator, blind["eip155:8453"]?.transfer_method, blind["eip155:8453"]?.offered], ["dexter", "permit2", true]);
+  assert.deepEqual([blind["eip155:1329"]?.offered, blind["eip155:1329"]?.reason], [false, "fee_unknown"]);
 
   // The resource server sees each facilitator scoped to its routed networks, first.
   const list = routedFacilitators(entries() as never, await paymentRouting({}, entries()));

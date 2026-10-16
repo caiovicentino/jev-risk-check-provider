@@ -72,7 +72,7 @@ test("the refresh writes the same bytes as the manual build and keeps the code s
   const env: WorkerEnv = { RATE: kv };
   const upstream = fakeFetch();
   const result = await refreshScamSniffer(env, upstream, NOW);
-  assert.deepEqual(result, { status: "updated", domains: 1500, addresses: 2, never_flag_dropped: 0 });
+  assert.deepEqual(result, { status: "updated", domains: 1500, addresses: 2, never_flag_dropped: 0, at_commit: true });
   const hosts = DOMAINS.map(normalizeFeedDomain).filter((h): h is string => h !== null);
   assert.deepEqual(kv.data.get(SCAMSNIFFER_KEYS.domains), buildHashBlob(hosts));
   assert.deepEqual(kv.data.get(SCAMSNIFFER_KEYS.addresses), buildHashBlob(["0x" + "ab".repeat(20), "0x" + "cd".repeat(20)]));
@@ -104,6 +104,7 @@ test("a list that shrank by half is kept as it was; without a usable commit, mai
     const upstream = fakeFetch({ commit });
     const ok = await refreshScamSniffer({ RATE: fresh }, upstream, new Date("2026-09-30T17:37:00Z"));
     assert.equal(ok.status, "updated", String(commit));
+    assert.equal(ok.status === "updated" && ok.at_commit, false, "the cron warns that main was read at an unknown commit");
     assert.deepEqual(upstream.calls.slice(1), [`${LISTS}/main/blacklist/domains.json`, `${LISTS}/main/blacklist/address.json`]);
     const meta = JSON.parse(fresh.data.get(SCAMSNIFFER_KEYS.meta) as string) as Record<string, unknown>;
     assert.deepEqual([meta.as_of, meta.as_of_source], ["2026-09-30", "fetched"]);
@@ -125,7 +126,7 @@ test("a list that grew past either bound in one refresh is kept as it was: +50%,
   const many = memoryKv();
   many.data.set(SCAMSNIFFER_KEYS.meta, JSON.stringify({ as_of: "2026-09-28", domains: 1500, addresses: 5000 }));
   assert.deepEqual(await refreshScamSniffer({ RATE: many }, fakeFetch({ addresses: synthetic(7001) }), NOW), { status: "kept", reason: "addresses grew from 5000 to 7001" });
-  assert.deepEqual(await refreshScamSniffer({ RATE: many }, fakeFetch({ addresses: synthetic(6900) }), NOW), { status: "updated", domains: 1500, addresses: 6900, never_flag_dropped: 0 });
+  assert.deepEqual(await refreshScamSniffer({ RATE: many }, fakeFetch({ addresses: synthetic(6900) }), NOW), { status: "updated", domains: 1500, addresses: 6900, never_flag_dropped: 0, at_commit: true });
 });
 
 test("addresses that must never be flagged are left out: our pay_to, the deployment's PAY_TO_EVM, USDC, Permit2", async () => {
@@ -138,7 +139,7 @@ test("addresses that must never be flagged are left out: our pay_to, the deploym
   ];
   const kv = memoryKv();
   const result = await refreshScamSniffer({ RATE: kv, PAY_TO_EVM: "0x" + "1a".repeat(20) }, fakeFetch({ addresses: [...ADDRESSES, ...neverFlagged] }), NOW);
-  assert.deepEqual(result, { status: "updated", domains: 1500, addresses: 2, never_flag_dropped: neverFlagged.length });
+  assert.deepEqual(result, { status: "updated", domains: 1500, addresses: 2, never_flag_dropped: neverFlagged.length, at_commit: true });
   const set = hashSetFromBytes(kv.data.get(SCAMSNIFFER_KEYS.addresses) as Uint8Array);
   for (const a of neverFlagged) assert.equal(set.has(a.toLowerCase()), false, a);
   assert.equal(set.has("0x" + "ab".repeat(20)), true);

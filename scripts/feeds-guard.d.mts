@@ -5,3 +5,5 @@ export declare const LIMITS: Readonly<{ ofacMaxShrink: number; ofacMaxGrowth: nu
 export declare function feedsGuard(next: unknown, published: unknown, now?: number): string[];
 /** The reasons not to sign given the exact text of the new and published ofac-sdn.json (null: unavailable); [] means sign. */
 export declare function ofacSetGuard(nextManifest: unknown, publishedManifest: unknown, nextOfac: string | null, publishedOfac: string | null): string[];
+/** Whether the manual override may publish past this reason: never for a malformed new manifest or snapshot. */
+export declare function overridable(reason: string): boolean;

@@ -1,4 +1,4 @@
-import { handleProtected, ensureDeps, ensureStack, facilitatorStatus, isProductionHost, jevFor, json, paymentRouting, PROTECTED, usageFor, openApi } from "./protected.js";
+import { handleProtected, ensureDeps, ensureStack, facilitatorStatus, isProductionHost, jevFor, json, paymentRouting, PROTECTED, routingKnown, usageFor, openApi } from "./protected.js";
 import { llmsTxt, wellKnownX402 } from "./discovery.js";
 import { maybeRunModelCanary, MODEL_CANARY_KEY } from "./model-canary.js";
 import { maybeRefreshScamSniffer, SCAMSNIFFER_KEYS } from "./scamsniffer-refresh.js";
@@ -14,6 +14,7 @@ import { PROVIDER_VERSION } from "../src/provider.js";
 import { KW, kitWatchStatus, runKitWatch, type KitWatchStats } from "./kit-watch.js";
 import { creditToken, CREDIT_PRICING, handleCredits, retryPendingCredits } from "./credits.js";
 import { paymentVersion } from "./payment-claims.js";
+import { rateKey } from "./http-util.js";
 import type { ExecutionContext, ScheduledController, WorkerEnv } from "./runtime.js";
 // Bundled as a Wrangler Data module (see [[rules]] in wrangler.toml).
 import metamaskPhishing from "../src/data/metamask-phishing.bin";
@@ -44,11 +45,13 @@ async function status(env: WorkerEnv): Promise<Response> {
   try {
     const raw = env.RATE ? await env.RATE.get(SCAMSNIFFER_KEYS.meta) : null;
     if (raw) {
-      const m = JSON.parse(raw) as { as_of: string; code_as_of?: string; refreshed_at?: string; domains?: number; addresses?: number; code_fingerprints?: number; commit?: string };
+      const m = JSON.parse(raw) as { as_of: string; as_of_source?: string; code_as_of?: string; refreshed_at?: string; domains?: number; addresses?: number; code_fingerprints?: number; commit?: string };
       // Stale when our last refresh (not the list's own date) is more than 3 days old.
       const refreshedDays = ageDays(m.refreshed_at ?? m.as_of);
       scamsniffer = {
         as_of: m.as_of,
+        // "commit": the upstream commit's date, the lists read at it; "fetched": GitHub did not name the commit, so `main` was read and dated by the fetch.
+        ...(m.as_of_source ? { as_of_source: m.as_of_source } : {}),
         age_days: ageDays(m.as_of),
         refreshed_at: m.refreshed_at ?? null,
         stale: typeof refreshedDays === "number" ? refreshedDays > 3 : true,
@@ -189,8 +192,7 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
   if ((paidRoute && (request.method === "POST" || path === "/v1/credits")) || path === "/status") {
     const paid = paidRoute && credentialed(request);
     const limiter = paid ? env.PAID_LIMITER : env.UNPAID_LIMITER;
-    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-    const { success } = limiter ? await limiter.limit({ key: `${path === "/status" ? "status" : paid ? "paid" : "unpaid"}:${ip}` }).catch(() => ({ success: true })) : { success: true };
+    const { success } = limiter ? await limiter.limit({ key: `${path === "/status" ? "status" : paid ? "paid" : "unpaid"}:${rateKey(request)}` }).catch(() => ({ success: true })) : { success: true };
     if (!success) return json(429, { error: "rate_limited", detail: paid ? "too many requests; use /v1/risk-check/batch for volume, or retry in a minute" : "too many unpaid requests; pay or retry in a minute" }, { "Retry-After": "60" });
   }
   let res: Response;
@@ -199,6 +201,8 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
   } else if (request.method === "GET" && path === "/healthz") {
     res = healthz(env);
   } else if (request.method === "GET" && path === "/status") {
+    // It reports what a verdict would use: a cold isolate waits for the current lists as a paid check does.
+    await awaitColdStart();
     res = await status(env);
   } else if (request.method === "GET" && path === "/openapi.json") {
     res = json(200, openApi(env), { "Cache-Control": "public, max-age=300" });
@@ -209,6 +213,8 @@ async function route(incoming: Request, url: URL, env: WorkerEnv, local: boolean
     res = json(200, wellKnownX402(openApi(env)), { "Cache-Control": "public, max-age=3600" });
   } else if (!paidRoute) {
     // Identity documents, the site and discovery never wait for the payment stack (a hung facilitator).
+    // The discovery document that lists networks waits, briefly, for this isolate's first routing table.
+    if (request.method === "GET" && (path === "/.well-known/risk-check.json" || (path === "/" && !(request.headers.get("accept") ?? "").includes("text/html")))) await routingKnown(env);
     res = await createHandler(ensureDeps(env, feedsFor(env)).deps)(request);
   } else {
     const stack = await ensureStack(env, feedsFor(env));

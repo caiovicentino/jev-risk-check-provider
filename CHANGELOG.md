@@ -2,6 +2,24 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.15 — 2026-10-16: the production reviews
+
+Three independent reviews ran overnight: payments, a black-box run against production (nothing paid), and operations with the docs. They found one medium issue in payments, one in the feeds workflow, and several low ones. All are fixed here; `test/review-1016-prod.test.ts`, `test/payments-hardening.test.ts` and `test/feeds-guard.test.ts` keep them fixed.
+
+- **Medium: every Cloudflare Worker shared one rate-limit bucket.** A request from a Worker on another zone reaches us from one Cloudflare address, so one such caller could use up the limit of every other. The limiters now count a client by its address, an IPv6 client by its /64, and another zone's Worker by the zone Cloudflare names in `CF-Worker`.
+- **Medium: the feeds guard could miss a delisting.** It compared the OFAC address sets only when the count and date checks had passed. A day with a large MetaMask change and one OFAC delisting printed only the MetaMask reason, and a person who overrode it signed the delisting unseen. Every check now runs and every reason is printed. The override also never signs a malformed build: a new manifest with a missing field, or a snapshot that is not the one its manifest names, fails even with it.
+- **A client that disconnects before settlement is not charged.** The check is evaluated, and if the client is gone by then, nothing is settled (499) and the same payment can be sent again. Once settlement starts, it runs to completion and is recorded, even if the client leaves (`waitUntil`, and the `enable_request_signal` flag).
+- **Routes and discovery agree.** A facilitator whose per-settlement fee could not be read is no longer offered at an unknown cost (`reason: "fee_unknown"`): a new isolate during a PayAI pricing outage had offered Avalanche at a loss. `/.well-known/risk-check.json` lists only the networks the 402 challenge offers; on a new isolate it waits up to 2 s for the first routing table.
+- **Request bodies mean one thing.** A body that is not valid UTF-8, or one that repeats a key within an object, is refused (422, or the 402's `request_error` when unpaid). Text lengths count code points, as the published JSON Schema `maxLength` does, so an emoji counts once.
+- **Smaller fixes:**
+  - an unpaid challenge reuses a Solana blockhash for 15 s instead of asking the public RPC on every request;
+  - a known resource asked with the wrong method gets 405 with `Allow`, not 404;
+  - `/status` waits for a new isolate's current lists, as a paid check does, so it reports what a verdict would use;
+  - `/status` → `scamsniffer.as_of_source` says whether the lists were read at the upstream commit or, when GitHub's API did not answer, at `main` (also logged);
+  - `scripts/deploy.sh` names its configuration (`--config wrangler.toml`): an ignored `wrangler.json` or `.wrangler/deploy/config.json` redirect can no longer choose what is deployed;
+  - the daily check sends the probe credits' token only to production.
+- **Docs:** twenty statements that had drifted from the code were corrected (limits, logs, queue sizes, counts, prices, latencies); the site's pricing names the simulated price as "$0.005 or the network's price if higher".
+
 ## v0.6.14 — 2026-10-16: the provider core's review
 
 An independent review of the provider core found two high, three medium and three low issues. Each was reproduced in process and is fixed here; `test/review-1016-core.test.ts` keeps them fixed.
@@ -169,7 +187,7 @@ Deployed from commit `c4a5f33` and checked in production (docs/EVIDENCE.md §7):
   - The manual MetaMask and ScamSniffer builds read their lists at the resolved commit too.
   - The feeds workflow refuses to sign a manifest that changed implausibly since the published one (`scripts/feeds-guard.mjs`, plain node, checked out from the run's commit). The bounds: OFAC addresses −5% or +50%, MetaMask entries ±20%, no date going backwards or more than a day ahead, and a published manifest to compare with. A manual run with `override` publishes after review.
 
-## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — 2026-10-02
+## `@x402check/client` 0.5.0 and `@x402check/mcp` 0.3.1 — 2026-10-02 (prepared; not yet on npm: a publish needs the owner's passkey)
 
 - **The guard exempts payments to x402check only in USDC (client, security review F5):** the trusted-payee cap (250000 atomic units, $0.25 of USDC) applied to any asset; for an 8-decimal token it was not $0.25. Only the asset x402check's challenge asks for on each network (`X402CHECK_PAYMENT_ASSETS`) is exempt now.
 - **Chain ids as the provider accepts them (client):** `toCaip2` returns null for a namespace or cluster the provider refuses (`solana:mainnet`, `foo:bar`), so the trust provider leaves such a chain out instead of failing the check.

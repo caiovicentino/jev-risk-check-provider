@@ -11,7 +11,7 @@
 | `GET /.well-known/jwks.json`, `/.well-known/did.json` | attestation keys (the current `kid`, today `jev-attest-v1`, plus the next one during a rotation), `did:web` document |
 | `GET /.well-known/security.txt` | how to report a vulnerability (RFC 9116) |
 | `GET /healthz` | version, deployed commit, and attestation-key health: 503 while the key cannot sign verifiable attestations |
-| `GET /status` | data freshness and payments. It shows the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. It also shows each payment network's facilitator, transfer method, fee, floor and margin, the credit terms, the attestation key (`kid`, thumbprint, self-check) and the last model canary. Edge-cached 60 s |
+| `GET /status` | data freshness and payments. It shows the OFAC, MetaMask, ScamSniffer and Forta list versions verdicts are using now, their age, and the last runtime-refresh attempt. It also shows each payment network's facilitator, transfer method, fee, floor and margin, the credit terms, the attestation key (`kid`, thumbprint, self-check) and the last model canary. Sent with `Cache-Control: public, max-age=60`, but Cloudflare does not cache it: every request reaches the Worker and its 60-a-minute limit. A cold isolate first waits (up to 2.5 s) for the current lists, as a paid check does |
 
 Plain HTTP is never served: a page gets a 301 to HTTPS and an API call a 403, before its body or token is read. Every response carries HSTS, `nosniff` and a `Referrer-Policy`; the site also has a strict CSP.
 
@@ -21,7 +21,9 @@ Plain HTTP is never served: a page gets a 301 to HTTPS and an API call a 403, be
 - `fresh-feeds.ts` — runtime refresh of OFAC and MetaMask from the `feeds` branch (checksums, counts, no large shrink), in the background
 - `protected.ts` — the paid flow: validate → price (per item and network) → verify payment → screen the payer → claim the payment → evaluate → settle → release; facilitator routing by compatibility and cost, `/status` payment routes, and the attestation key's load-time check
 - `payment-claims.ts` — `PaymentClaim` Durable Object: each x402 payment is claimed once (binding `PAYMENT_CLAIMS`, migration `v4`)
-- `http-util.ts` — body cap while streaming, settlement receipts and records, the payer's OFAC screen
+- `http-util.ts` — body cap while streaming, settlement receipts and records, the payer's OFAC screen, the rate-limit key (`rateKey`) and the 503 when the facilitators cannot be reached
+- `kit-watch.ts` — the kit watch's cron run: the per-chain scan of new blocks, the evaluation budget, the retry queue and the coverage stats in KV
+- `svm-ata.ts` — the Solana associated token account of a payer (the payer must pay from its own)
 - `model-canary.ts` — fixed cases through the live model, twice a day (cron), shown in `/status` → `model`
 - `scamsniffer-refresh.ts` — ScamSniffer domain and address sets rebuilt into KV twice a day (cron), parsed as a stream
 - `pricing.ts` — prices by payment network, the simulation price, micro-dollar arithmetic
@@ -139,7 +141,7 @@ npx tsx scripts/update-threat-feeds.ts --scamsniffer --upload   # ScamSniffer do
   - it has not shrunk sharply against the list in use.
 
   Otherwise it keeps the current list. `/status` shows which version is in use.
-- **OFAC on new isolates.** The last verified OFAC release is kept in KV (`feed:ofac:v1`: the signed manifest, its signature and the snapshot, re-verified with the pinned key on every load), written once per release and only forward. A new isolate applies it with one KV read before anything else. A paid request on a cold isolate waits up to 2.5 s for a current list; past that it goes ahead on the list it has (the attestation states its date), logs `a paid check went ahead on the … OFAC list` once, and the isolate stops waiting.
+- **OFAC on new isolates.** The last verified OFAC release is kept in KV (`feed:ofac:v1`: the signed manifest, its signature and the snapshot, re-verified with the pinned key on every load), written once per release and only forward. A new isolate applies it with one KV read before anything else. A paid request (or `/status`, so it reports what a verdict would use) on a cold isolate waits up to 2.5 s for the current lists; past that it goes ahead on the lists it has (the attestation states their dates), logs `a cold isolate went ahead on the … OFAC list` once, and the isolate stops waiting.
 - **MetaMask on new isolates (since v0.6.10).** The last verified MetaMask list is kept the same way (`feed:metamask:v1`: the signed manifest, its signature, the list as base64 and its JSON, re-verified on every load: checksums, entry count, shrink bound), written once per list and only forward. Before it, a new isolate checked domains against the list embedded at deploy until its own refresh finished; on 2026-10-15 that list was 16 days older than the published one. A paid request on a cold isolate waits for this read within the same 2.5 s as OFAC. `/status` → `data.metamask_phishing.origin` says `kv`, `refreshed` or `embedded`.
 - **The embedded snapshot** is what a brand-new isolate holds until then: `npx tsx scripts/sync-embedded-feeds.ts` refreshes `src/data/ofac-sdn.ts` from the published release (verified as the Worker verifies it), and `scripts/deploy.sh` refuses to deploy an older one.
 - **To rotate the publisher key,** generate a new Ed25519 key, store the PKCS#8 PEM with `gh secret set FEEDS_SIGNING_KEY --env feeds` (the environment only main may use), put the raw public key (base64url) in `FEEDS_PUBLIC_KEY`, deploy, then run the workflow (`gh workflow run feeds.yml`) so the branch carries a manifest signed with the new key. Until it does, the Worker keeps its current lists. Last rotated 2026-09-30.
@@ -179,13 +181,13 @@ npx tsx scripts/hunt-kits.ts --chain eip155:1 --upload-all  # watchlist, delegat
 npm test && npm run typecheck
 X402CHECK_BASE=http://localhost:8799 npm run security:v2      # against `wrangler dev --local --port 8799`
 git push origin main                                           # then wait for CI on that commit
-scripts/deploy.sh                                              # refuses unless the tree is clean, HEAD is main on GitHub and CI passed
+scripts/deploy.sh                                              # refuses unless the tree is clean, HEAD is main on GitHub, CI passed and the embedded OFAC snapshot is current
 export PAY_NETWORK=eip155:8453                                 # pay the probes in USDC on Base
 npm run security:v5 && npx tsx eval/replay.ts                  # against production (~$0.11, every evaluation paid)
 PAY=none npx tsx eval/bazaar.ts                                # the Bazaar listing, read-only
 npx wrangler rollback                                          # previous version, if anything regresses
 ```
 
-Then check `/healthz` (version, commit, `attestation_key: "ok"`) and `/status` (routes, facilitators, kit watch lag 0 and gaps 0). `security:v3` and `security:v4` are historical suites: against another version they stop before paying.
+Then check `/healthz` (version, commit, `attestation_key: "ok"`) and `/status` (routes, facilitators, kit watch lag near 0 and no new gaps: `unbroken_since` not moving). `security:v3` and `security:v4` are historical suites: against another version they stop before paying.
 
 Every evaluation is paid, so the production suites need a funded payer. They read the key from `~/.config/paysol/payer-evm.key` (Base USDC; the x402 exact scheme is gasless for the payer), or `payer-sol.b58` for Solana. The `security:v5`, `replay`, `bazaar` and `mcp-pay` reports record the settlement transactions. Without a payer, the probes that need a verdict are reported as SKIP, never as PASS.

@@ -1,3 +1,4 @@
+import { repeatedKey, strictUtf8 } from "../src/validate.js";
 import { formatUsd, priceMicro, SIMULATION_PRICE, simulates, toMicro } from "./pricing.js";
 import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, paymentUnavailable, readCapped, recordSettlement, settlementReceipt, settlementReused, type Admission } from "./http-util.js";
 import { paymentVersion } from "./payment-claims.js";
@@ -145,7 +146,8 @@ export async function retryPendingCredits(env: WorkerEnv): Promise<number> {
 
 /**
  * A pack's price from the request body: $0.10–$100 in whole cents, else null. The amount is always
- * named: a credit pack is not a listed service, so a probe without one gets a 422, not a challenge.
+ * named, so a probe without one gets a 422 naming `amount_usd`, not a challenge for a pack it did not
+ * choose. The discovery documents list the route with its body, and x402scan and AgentCash accept it.
  */
 export function packMicro(body: unknown): number | null {
   const amount = (body as { amount_usd?: unknown } | null)?.amount_usd;
@@ -253,13 +255,15 @@ export async function handleCredits(request: Request, env: WorkerEnv, stack: Sta
   if (request.method !== "POST") return json(405, { error: "method_not_allowed" }, { Allow: "GET, POST" });
   const bytes = await readCapped(request, 1024);
   if (!bytes) return json(413, { error: "body_too_large", max_bytes: 1024 });
-  const text = new TextDecoder().decode(bytes);
+  const text = strictUtf8(bytes);
+  if (text === null) return json(422, { error: "invalid_request", field: "body", detail: "the body is not valid UTF-8" });
   let parsed: unknown;
   try {
     parsed = JSON.parse(text || "{}");
   } catch {
     return json(422, { error: "invalid_request", field: "body" });
   }
+  if (repeatedKey(text)) return json(422, { error: "invalid_request", field: "body", detail: "a key repeats within one object" });
   const micro = packMicro(parsed);
   if (micro === null) return json(422, { error: "invalid_request", field: "amount_usd", detail: `a number of dollars from ${CREDIT_PACK_MIN_USD} to ${CREDIT_PACK_MAX_USD}, in whole cents` });
   if (request.headers.get("authorization") && !token) return json(422, { error: "invalid_request", field: "authorization", detail: "Bearer x402c_… (a token from this endpoint), or none for a new one" });

@@ -25,7 +25,8 @@ import { NETWORK_PRICES } from "../deploy/pricing.js";
 import { RPC_ENDPOINTS } from "../src/rpc.js";
 import { SOLANA_MAINNET } from "../src/chains.js";
 
-const BASE = process.env.X402CHECK_BASE ?? "https://x402check.xyz";
+const PRODUCTION = "https://x402check.xyz";
+const BASE = process.env.X402CHECK_BASE ?? PRODUCTION;
 const REPO = "caiovicentino/jev-risk-check-provider";
 const OUT_DIR = ".cache/maintenance";
 const STATE_FILE = `${OUT_DIR}/state.json`;
@@ -296,9 +297,9 @@ async function main(): Promise<void> {
     const m = parse<{ metamask?: { as_of?: string }; ofac?: { publish_date?: string } }>((await http(`https://raw.githubusercontent.com/${REPO}/feeds/manifest.json`)).text);
     published = { ...(m?.metamask?.as_of ? { metamask: m.metamask.as_of } : {}), ...(m?.ofac?.publish_date ? { ofac: m.ofac.publish_date } : {}) };
   });
-  // /status describes the isolate that answered, and a new isolate's first answer comes before its
-  // feeds load (a paid request waits for them; /status does not). A list behind the published one
-  // is looked at again on up to two more isolates before it counts.
+  // /status describes the isolate that answered. A new isolate waits up to 2.5 s for its feeds
+  // before answering (as a paid request does), and can still answer behind when they take longer.
+  // A list behind the published one is looked at again on up to two more isolates before it counts.
   const behind = (s: Status) => (!!published.metamask && s.data.metamask_phishing.as_of < published.metamask) || (!!published.ofac && s.data.ofac_sdn.as_of < published.ofac);
   if (status && behind(status)) {
     for (let i = 0; i < 2 && behind(status); i++) {
@@ -439,8 +440,10 @@ async function main(): Promise<void> {
     const usdc = raw ? Number(BigInt(raw)) / 1e6 : NaN;
     let credits = "?";
     const tokenFile = `${homedir()}/.config/paysol/x402check-credit-token`;
-    if (existsSync(tokenFile)) {
-      const r = await http("/v1/credits", { headers: { Authorization: `Bearer ${readFileSync(tokenFile, "utf8").trim()}` } });
+    // The token is a bearer secret: it goes to production only, never to another X402CHECK_BASE.
+    if (existsSync(tokenFile) && new URL(BASE).origin !== PRODUCTION) credits = "not read (X402CHECK_BASE is not production)";
+    else if (existsSync(tokenFile)) {
+      const r = await http(`${PRODUCTION}/v1/credits`, { headers: { Authorization: `Bearer ${readFileSync(tokenFile, "utf8").trim()}` } });
       credits = parse<{ balance_usd?: string }>(r.text)?.balance_usd ?? `HTTP ${r.status}`;
     }
     add("probe_budget", "info", `probe payer ${Number.isFinite(usdc) ? `$${usdc.toFixed(4)}` : "?"} USDC on Base, credits ${credits} (the paid suite takes ~$0.10)`);

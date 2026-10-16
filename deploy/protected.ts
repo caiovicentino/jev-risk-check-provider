@@ -4,7 +4,7 @@ import { Provider, PROVIDER_VERSION, type PricingInfo } from "../src/provider.js
 import { GatewayJevClient } from "../src/backends/gateway.js";
 import { JevClient, type JevLike } from "../src/jev.js";
 import type { HandlerDeps } from "../src/handler.js";
-import { validateBatch, validateRequest } from "../src/validate.js";
+import { repeatedKey, strictUtf8, validateBatch, validateRequest } from "../src/validate.js";
 import { createOnchainLookup } from "../src/onchain.js";
 import { createSimulator } from "../src/simulation.js";
 import { createContractIntel } from "../src/contract-intel.js";
@@ -293,14 +293,20 @@ export type PaymentRoute = {
    */
   offered: boolean;
   /** Why the network is not offered; the fields above describe the best route there was. */
-  reason?: "no_facilitator" | "below_floor" | "unprofitable";
+  reason?: "no_facilitator" | "below_floor" | "unprofitable" | "fee_unknown";
 };
 
 type Kind = { x402Version: number; scheme: string; network: string; extra?: Record<string, unknown> };
-type Candidate = { name: string; index: number; method: string; floor: number | null; fee: number | null; margin: number | null; usable: boolean; compatible: boolean };
+/** `unpriced`: a facilitator that bills per settlement from a fee table, whose fee could not be read. */
+type Candidate = { name: string; index: number; method: string; floor: number | null; fee: number | null; margin: number | null; usable: boolean; compatible: boolean; unpriced: boolean };
 
-/** A route known to cost more than the price (settlement fee and one model call): never offered. */
-const losesMoney = (c: Candidate) => c.margin !== null && c.margin <= 0;
+/**
+ * A route known to cost more than the price (settlement fee and one model call), or one whose
+ * per-settlement fee could not be read: never offered. An unread fee table used to count as an
+ * unknown fee and be offered, so a new isolate during a PayAI pricing outage offered Avalanche at a
+ * loss (2026-10-16 review); it now fails closed until the table is read again (within a minute).
+ */
+const losesMoney = (c: Candidate) => c.unpriced || (c.margin !== null && c.margin <= 0);
 
 /**
  * The route for one network: a facilitator that accepts the price and does not cost more than it,
@@ -320,7 +326,7 @@ function candidateFor(entry: FacilitatorEntry, index: number, kinds: Kind[], fee
   const floorRaw = extra.paymentFloorAvailable === true ? Number(extra.minPaymentAmountUsd) : Number.NaN;
   const floor = Number.isFinite(floorRaw) ? floorRaw : null;
   const fee = fees ? (fees.get(network) ?? entry.flatFee ?? null) : null;
-  return { name: entry.name, index, method, floor, fee, margin: fee === null ? null : price - fee - MODEL_COST_USD, usable: floor === null || price >= floor, compatible: method !== "permit2" };
+  return { name: entry.name, index, method, floor, fee, margin: fee === null ? null : price - fee - MODEL_COST_USD, usable: floor === null || price >= floor, compatible: method !== "permit2", unpriced: fee === null && entry.fees !== undefined };
 }
 
 /** Which facilitator settles each mainnet network, at what cost and margin (cached 10 min). */
@@ -363,7 +369,7 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
       const candidates = facilitators.map((f, i) => candidateFor(f, i, supported[i] ?? [], fees[i] ?? null, network, price)).filter((c): c is Candidate => c !== null);
       const route = chooseRoute(candidates);
       const margin = route?.margin ?? null;
-      const reason = !route ? "no_facilitator" : !route.usable ? "below_floor" : losesMoney(route) ? "unprofitable" : undefined;
+      const reason = !route ? "no_facilitator" : !route.usable ? "below_floor" : route.unpriced ? "fee_unknown" : losesMoney(route) ? "unprofitable" : undefined;
       return {
         network,
         price_usd: price,
@@ -447,6 +453,18 @@ function stackKey(env: WorkerEnv): string {
 let depsCache: { key: string; deps: HandlerDeps; keyStatus: AttestationKeyStatus } | null = null;
 
 /**
+ * Discovery lists only the networks the 402 challenge offers, from this isolate's routing table. A
+ * cold isolate has none yet: it waits for the first one, at most `waitMs`, so a hung facilitator
+ * never holds discovery up. Past the wait it lists every mainnet network, as before.
+ */
+export async function routingKnown(env: WorkerEnv, waitMs = 2000): Promise<void> {
+  if (lastRoutes) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([paymentRouting(env).catch(() => null), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), waitMs)))]);
+  clearTimeout(timer);
+}
+
+/**
  * The provider, its identity and pricing, without the payment stack: identity documents, the
  * site and discovery never wait for a facilitator. Cached per configuration and shared with the
  * payment stack (one Provider, one key).
@@ -484,11 +502,18 @@ function buildDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): { d
   const simulator = env.SIMULATION === "off" ? null : createSimulator({ rpc: simRpc, timeoutMs: 2500, contractIntel });
   const accepts = buildAccepts(env);
   const plain = (usd: number) => formatUsd(Math.round(usd * 1_000_000)).slice(1);
+  // The networks the 402 challenge offers, as of this isolate's last routing table: one that would
+  // lose money is not advertised (2026-10-16 review). Before the first table, every mainnet network.
+  const offered = () => accepts.map((a) => String(a.network)).filter((n) => lastRoutes?.find((r) => r.network === n)?.offered !== false);
   const pricing: PricingInfo = {
     unitUsd: plain(networkPrice(BASE_MAINNET)),
     ...(env.SIMULATION !== "off" ? { simulationUsd: plain(SIMULATION_PRICE) } : {}),
-    networks: accepts.map((a) => String(a.network)),
-    byNetwork: Object.fromEntries(accepts.map((a) => [String(a.network), plain(networkPrice(String(a.network)))])),
+    get networks() {
+      return offered();
+    },
+    get byNetwork() {
+      return Object.fromEntries(offered().map((n) => [n, plain(networkPrice(n))]));
+    },
     ...(env.CREDITS ? { credits: CREDIT_PRICING } : {}),
   };
   const kitWatch = kitWatchLookup(env);
@@ -503,16 +528,31 @@ function buildDeps(env: WorkerEnv, feeds?: () => Promise<ThreatIntelFeeds>): { d
  * challenge goes out without it (an x402 client then fetches its own), with the fee payer as before.
  */
 const SVM_BLOCKHASH_WAIT_MS = 800;
+const BLOCKHASH_REUSE_MS = 15_000;
 export class BoundedSvmScheme extends ExactSvmScheme {
+  /**
+   * The last blockhash read, reused for BLOCKHASH_REUSE_MS: a blockhash stays valid for about a minute,
+   * and every unpaid challenge asked the one public Solana RPC that paid checks also use (2026-10-16 review).
+   */
+  private blockhash: { at: number; network: string; recentBlockhash: unknown; lastValidBlockHeight: unknown } | null = null;
+
   override async enhancePaymentRequirements(...args: Parameters<ExactSvmScheme["enhancePaymentRequirements"]>): ReturnType<ExactSvmScheme["enhancePaymentRequirements"]> {
     const [requirements, kind] = args;
     const withoutBlockhash = { ...requirements, extra: { ...requirements.extra, feePayer: (kind as { extra?: { feePayer?: unknown } }).extra?.feePayer } };
+    const network = String((kind as { network?: unknown }).network ?? "");
+    const hit = this.blockhash;
+    if (hit && hit.network === network && Date.now() - hit.at < BLOCKHASH_REUSE_MS) {
+      return { ...withoutBlockhash, extra: { ...withoutBlockhash.extra, recentBlockhash: hit.recentBlockhash, lastValidBlockHeight: hit.lastValidBlockHeight } } as Awaited<ReturnType<ExactSvmScheme["enhancePaymentRequirements"]>>;
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<typeof withoutBlockhash>((resolve) => {
       timer = setTimeout(() => resolve(withoutBlockhash), SVM_BLOCKHASH_WAIT_MS);
     });
     try {
-      return (await Promise.race([super.enhancePaymentRequirements(...args), late])) as Awaited<ReturnType<ExactSvmScheme["enhancePaymentRequirements"]>>;
+      const enhanced = (await Promise.race([super.enhancePaymentRequirements(...args), late])) as Awaited<ReturnType<ExactSvmScheme["enhancePaymentRequirements"]>>;
+      const extra = (enhanced as { extra?: Record<string, unknown> }).extra;
+      if (extra?.recentBlockhash) this.blockhash = { at: Date.now(), network, recentBlockhash: extra.recentBlockhash, lastValidBlockHeight: extra.lastValidBlockHeight };
+      return enhanced;
     } finally {
       clearTimeout(timer);
     }
@@ -679,13 +719,19 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   //    fully buffered.
   const bytes = await readCapped(request, MAX_BODY_BYTES);
   if (!bytes) return json(413, { error: "body_too_large", max_bytes: MAX_BODY_BYTES });
-  const text = new TextDecoder().decode(bytes);
   let parsed: unknown;
   let invalid: { status: number; body: Record<string, unknown> } | null = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    invalid = { status: 422, body: { error: "invalid_request", field: "body" } };
+  // Strict UTF-8 and no repeated key: the bytes hashed into request_hash are exactly what was
+  // evaluated, and a parser that keeps the first of two keys sees the same request we do.
+  const text = strictUtf8(bytes);
+  if (text === null) invalid = { status: 422, body: { error: "invalid_request", field: "body", detail: "the body is not valid UTF-8" } };
+  else {
+    try {
+      parsed = JSON.parse(text);
+      if (repeatedKey(text)) invalid = { status: 422, body: { error: "invalid_request", field: "body", detail: "a key repeats within one object" } };
+    } catch {
+      invalid = { status: 422, body: { error: "invalid_request", field: "body" } };
+    }
   }
   if (!invalid && path.endsWith("/batch")) {
     const v = validateBatch(parsed);
@@ -702,13 +748,13 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
     // body would be refused. Nothing unpaid is evaluated, and nothing invalid is ever charged.
     try {
       const probe = await stack.http.processHTTPRequest({ adapter: fetchAdapter(request, {}), path, method: request.method });
-      if (probe.type === "payment-error") return withRequestError(instructionsToResponse(probe.response), text.trim() === "" ? null : { status: invalid.status, ...invalid.body });
+      if (probe.type === "payment-error") return withRequestError(instructionsToResponse(probe.response), (text ?? "x").trim() === "" ? null : { status: invalid.status, ...invalid.body });
     } catch (err) {
       return paymentUnavailable(path, err);
     }
     return json(402, { error: "payment_required" });
   }
-  const replay = () => new Request(request.url, { method: "POST", headers: request.headers, body: text });
+  const replay = () => new Request(request.url, { method: "POST", headers: request.headers, body: text ?? "" });
 
   // Prepaid credits: `Authorization: Bearer x402c_…` debits the balance instead of paying per call.
   const token = creditToken(request);
@@ -744,47 +790,59 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   // (or however re-encoded) it is sent.
   const admission = await admitPayment(_env, result.paymentPayload);
   if (!admission.ok) return admission.response;
-  let res: Response;
-  try {
-    res = await serve(replay());
-  } catch (err) {
-    await admission.finish("unused");
-    throw err;
-  }
-  if (res.status !== 200) {
-    await admission.finish("unused");
-    return res;
-  }
-  // Never charge for a verdict that was not produced: every result must be checked.
-  if (!(await allChecked(res.clone()))) {
-    await admission.finish("unused");
-    return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5" });
-  }
-  // Settle before releasing the result: a payload that verifies but cannot settle
-  // (replayed authorization, funds moved between verify and settle) must not
-  // receive a signed attestation.
-  let reason = "settlement_failed";
-  let refused = false;
-  try {
-    const settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
-    if (settle.success) {
-      await admission.finish("settled");
-      const receipt = settlementReceipt(settle.headers);
-      // One on-chain transaction pays for one verdict, even if a facilitator confirms it twice.
-      if (await settlementReused(_env, receipt, String((result.paymentRequirements as { network?: unknown }).network ?? ""))) {
-        console.error(`settlement transaction reused on ${path}`);
-        return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already paid for another request; sign a new payment" });
-      }
-      for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
-      if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction });
+  // From admission on, the work runs to completion even if the client disconnects (2026-10-16
+  // review): a settlement that went through is recorded and its claim released; one that has not
+  // started is not started for a client that is gone.
+  const work = (async (): Promise<Response> => {
+    let res: Response;
+    try {
+      res = await serve(replay());
+    } catch (err) {
+      await admission.finish("unused");
+      throw err;
+    }
+    if (res.status !== 200) {
+      await admission.finish("unused");
       return res;
     }
-    reason = settle.errorReason ?? reason;
-    refused = payerRefusal(settle.errorReason);
-  } catch (err) {
-    console.error(`settlement failed on ${path}: ${String(err).slice(0, 200)}`);
-  }
-  await admission.finish(refused ? "refused" : "unused");
-  console.warn(`settlement refused on ${path}: ${reason}`);
-  return json(402, { error: "payment_settlement_failed" }, { "X-Payment-Error": reason });
+    // Never charge for a verdict that was not produced: every result must be checked.
+    if (!(await allChecked(res.clone()))) {
+      await admission.finish("unused");
+      return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5" });
+    }
+    // The client is gone: nothing is settled, and the same payment can be sent again.
+    if (request.signal?.aborted) {
+      await admission.finish("unused");
+      return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before settlement" });
+    }
+    // Settle before releasing the result: a payload that verifies but cannot settle
+    // (replayed authorization, funds moved between verify and settle) must not
+    // receive a signed attestation.
+    let reason = "settlement_failed";
+    let refused = false;
+    try {
+      const settle = await stack.http.processSettlement(result.paymentPayload, result.paymentRequirements);
+      if (settle.success) {
+        await admission.finish("settled");
+        const receipt = settlementReceipt(settle.headers);
+        // One on-chain transaction pays for one verdict, even if a facilitator confirms it twice.
+        if (await settlementReused(_env, receipt, String((result.paymentRequirements as { network?: unknown }).network ?? ""))) {
+          console.error(`settlement transaction reused on ${path}`);
+          return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already paid for another request; sign a new payment" });
+        }
+        for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
+        if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction });
+        return res;
+      }
+      reason = settle.errorReason ?? reason;
+      refused = payerRefusal(settle.errorReason);
+    } catch (err) {
+      console.error(`settlement failed on ${path}: ${String(err).slice(0, 200)}`);
+    }
+    await admission.finish(refused ? "refused" : "unused");
+    console.warn(`settlement refused on ${path}: ${reason}`);
+    return json(402, { error: "payment_settlement_failed" }, { "X-Payment-Error": reason });
+  })();
+  ctx?.waitUntil(work.catch(() => undefined));
+  return await work;
 }

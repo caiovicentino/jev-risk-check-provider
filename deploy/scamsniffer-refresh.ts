@@ -111,7 +111,8 @@ class HashBlobBuilder {
 type Meta = { as_of?: string; code_as_of?: string; commit?: string; domains?: number; addresses?: number; code_fingerprints?: number; [k: string]: unknown };
 
 /** `never_flag_dropped`: listed addresses that must never be flagged (src/never-flag.ts), left out. */
-export type RefreshResult = { status: "updated"; domains: number; addresses: number; never_flag_dropped: number } | { status: "kept"; reason: string };
+/** `at_commit`: false when GitHub did not name the head commit, so the lists were read from `main` and dated by the fetch. */
+export type RefreshResult = { status: "updated"; domains: number; addresses: number; never_flag_dropped: number; at_commit: boolean } | { status: "kept"; reason: string };
 
 /** The list repository's head commit, or null when GitHub does not answer (unauthenticated lookups can be rate-limited). */
 async function headCommit(fetchImpl: typeof fetch): Promise<{ sha: string; date: string } | null> {
@@ -186,7 +187,7 @@ export async function refreshScamSniffer(env: WorkerEnv, fetchImpl: typeof fetch
   if (commit) meta.commit = commit.sha;
   else delete meta.commit;
   await kv.put(SCAMSNIFFER_KEYS.meta, JSON.stringify(meta));
-  return { status: "updated", ...counts, never_flag_dropped: dropped };
+  return { status: "updated", ...counts, never_flag_dropped: dropped, at_commit: commit !== null };
 }
 
 /** The cron's hook: at 05:37 and 17:37 UTC. */
@@ -199,5 +200,6 @@ export async function maybeRefreshScamSniffer(env: WorkerEnv, scheduledTime: num
     return;
   }
   console.log(`scamsniffer refreshed: ${result.domains} domains, ${result.addresses} addresses`);
+  if (!result.at_commit) console.warn("scamsniffer refresh read main at an unknown commit: GitHub did not name the head commit; the lists are dated by the fetch");
   if (result.never_flag_dropped > 0) console.error(`scamsniffer lists ${result.never_flag_dropped} never-flag address(es): left out`);
 }

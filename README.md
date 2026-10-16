@@ -25,8 +25,8 @@ Every verdict is an **ES256 attestation**. It states which checks the provider a
 
 | Check | Source | Effect on the verdict |
 |---|---|---|
-| Sanctioned address | Official OFAC SDN XML: 1,056 digital-currency addresses, dated snapshot | score **0 / critical**, deterministic, no model call |
-| Known phishing domain | MetaMask eth-phishing-detect (~100k hosts, embedded) | capped at **20** (critical) |
+| Sanctioned address | Official OFAC SDN XML: 1,063 digital-currency addresses (2026-10-14 release), refreshed daily, dated snapshot | score **0 / critical**, deterministic, no model call |
+| Known phishing domain | MetaMask eth-phishing-detect (~106k hosts, refreshed daily; an embedded copy as fallback) | capped at **20** (critical) |
 | Known drainer / scam address | ScamSniffer (EVM, runtime KV, 7-day publication lag) | capped at **20** |
 | Community-flagged domain | ScamSniffer domain list | capped at **40** only when our own domain analysis corroborates it |
 | Look-alike domain | public-suffix aware: leet, IDN homoglyphs, typosquats, brand + lure word, official domain reused as a subdomain | "strong" impersonation → capped at **40** |
@@ -205,7 +205,7 @@ Every evaluation is paid; there is no free tier.
 - **Price by payment network** (the 402 lists every network it offers): Base **$0.0035**, Solana $0.002, Sei $0.002, Avalanche $0.001, Monad $0.001, Polygon $0.007, Arbitrum $0.009.
 - A request whose `transaction` is simulated costs **$0.005**, or the network's price if that is higher. The simulated price covers the simulation, the classification of every recipient and spender, and code fingerprints through delegations and proxies. It is charged only on chains where simulation runs.
 - A batch is billed per item.
-- **Why the prices differ:** every x402 payment is an on-chain settlement, and its cost is ours. PayAI settles EVM payments with EIP-3009, which any wallet can pay gaslessly, and bills us the network's gas + 30% per settlement (about $0.0023 on Base). Dexter bills nothing, but on EVM networks it settles only through Permit2, which most payers' wallets cannot use without an on-chain approval. Coinbase CDP settles with EIP-3009 too, at $0.001 per settlement after 1,000 free a month, so it takes the EVM networks where it is cheapest.
+- **Why the prices differ:** every x402 payment is an on-chain settlement, and its cost is ours. PayAI settles EVM payments with EIP-3009, which any wallet can pay gaslessly, and bills us the network's gas + 30% per settlement (about $0.002 on Base on 2026-10-15). Dexter bills nothing, but on EVM networks it settles only through Permit2, which most payers' wallets cannot use without an on-chain approval. Coinbase CDP settles with EIP-3009 too, at $0.001 per settlement after 1,000 free a month, so it takes the EVM networks where it is cheapest.
 - **Routing:** each network settles through a facilitator that does not cost more than the price; among those, one any payer can pay through, then the cheapest to us:
   - Coinbase CDP for Base, Polygon and Arbitrum ($0.001 per settlement after 1,000 free a month);
   - PayAI for Sei, and as the fallback for every EVM network;
@@ -292,7 +292,7 @@ Source layout:
 | Risky cases with an **attacker-written** context | 20/100 (only look-alike domains) |
 | Injected instructions passed as raw agent content | 40/40 |
 | **Signing guard (v0.6.0):** real drainer transactions that still move the victim's assets, refused before the key signs (ScamSniffer feed off) | **22/25** (88%; by contract 10/11): 18 by simulation, 4 by drainer code; the 3 misses are one contract · legitimate: **0/49** that move assets and **0/84** that execute refused; 1/228 in all (a reverting transaction too large to simulate) |
-| **Payments in production:** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7–4.7 s end to end (single samples: PayAI, Coinbase CDP, CDP on v0.6.0) · **$0.001, 0.5–0.8 s**, with no settlement per check |
+| **Payments in production:** a check paid per call on Base, and one paid from prepaid credits | $0.0035, 2.7–5.7 s end to end (single samples: PayAI, Coinbase CDP, CDP on v0.6.0 and v0.6.3) · **$0.001, 0.5–1.4 s**, with no settlement per check |
 | **Production, every evaluation paid** (settled in USDC on Base, or from credits bought that way) | 53/53 correct and 53/53 attestations verified · `security:v2` 12/12 (re-run on v0.5) · `security:v3` 8/8 · `security:v4` 7/7 · `security:v5` 9/9, 11/11 through Coinbase CDP (v0.5.1), and 11/11 on v0.6.0 |
 
 Full methodology, confidence intervals and what each number does *not* show: [docs/EVIDENCE.md](docs/EVIDENCE.md). How each verdict is formed, with every cap: [docs/METHODOLOGY.md](docs/METHODOLOGY.md). Earlier evidence documents are kept as historical records with correction notes.
@@ -370,7 +370,7 @@ What a check sends where, so you can decide what to put in a request:
 
 - **The model vendor.** TypeSafe's Jev model, reached through the Vercel AI Gateway, receives the request's fields (including `context`) and the provider's own findings. Before that, the server redacts private keys, seed phrases and x402check credit tokens from `context`. Nothing else is redacted. We have not yet confirmed the vendor's retention terms, so leave secrets and personal data out of `context`.
 - **Public RPC operators and Blockscout** receive the addresses and, for a simulation, the transaction.
-- **Cloudflare** runs the Worker. Workers Logs keep the Worker's own log lines, which by design carry no request bodies or tokens, and Cloudflare's invocation log of each request (method, URL and request metadata).
+- **Cloudflare** runs the Worker. Workers Logs keep only the Worker's own log lines, which by design carry no request bodies or tokens; invocation logs are off (`invocation_logs = false`), so no request metadata or header is stored there. Cloudflare's zone analytics still count requests by path, status, user agent and country.
 - **x402check's KV** keeps a record of each settlement (network, transaction, route) for 400 days, for reconciliation. Credit tokens are stored only as their SHA-256.
 - **Attestations** carry what the verdict covers (`sub`, `payment`, `interaction`, `aud`) and hashes of the request (`input_hash`, `request_hash`), not the `context` itself.
 

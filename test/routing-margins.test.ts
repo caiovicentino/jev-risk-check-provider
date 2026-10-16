@@ -46,10 +46,11 @@ test("the network comes back on its own once a route clears its cost again", asy
   assert.deepEqual([r["eip155:43114"]?.facilitator, r["eip155:43114"]?.transfer_method, r["eip155:43114"]?.offered, r["eip155:43114"]?.reason], ["payai", "eip3009", true, undefined]);
 });
 
-test("an unknown fee is still offered, ranked after known ones; a price below every floor is not", async () => {
+test("an unread per-settlement fee is not offered (fail closed, since 0.6.15); a price below every floor is not either", async () => {
   const blind: FacilitatorEntry[] = entries().map((e) => (e.name === "payai" ? { ...e, fees: async () => Promise.reject(new Error("pricing down")) } : e));
   const r = byNetwork(await paymentRouting({}, blind));
-  assert.deepEqual([r["eip155:1329"]?.facilitator, r["eip155:1329"]?.margin_usd, r["eip155:1329"]?.offered], ["payai", null, true], "Sei: PayAI only, margin unknown");
+  assert.deepEqual([r["eip155:1329"]?.facilitator, r["eip155:1329"]?.margin_usd, r["eip155:1329"]?.offered, r["eip155:1329"]?.reason], ["payai", null, false, "fee_unknown"], "Sei: PayAI only, its fee unread");
+  assert.equal(r["eip155:43114"]?.offered, false, "Avalanche never comes back at an unknown cost");
   assert.equal(r["eip155:8453"]?.facilitator, "cdp", "a known fee wins over an unknown one");
 
   const onlyDexter: FacilitatorEntry[] = entries().filter((e) => e.name === "dexter");

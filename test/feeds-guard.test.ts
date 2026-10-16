@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { feedsGuard, LIMITS, ofacSetGuard } from "../scripts/feeds-guard.mjs";
+import { feedsGuard, LIMITS, ofacSetGuard, overridable } from "../scripts/feeds-guard.mjs";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const PUBLISHED = {
@@ -147,6 +147,39 @@ test("the CLI with both OFAC snapshots refuses a delisting and passes an additio
   const refused = run(dropped);
   assert.equal(refused.status, 1);
   assert.match(refused.stdout, /^::error title=feeds guard::OFAC: 1 address\(es\) of the published list are missing/m);
+});
+
+test("every check runs: a MetaMask move and a delisting are both reported, so an override is given seeing both; a malformed build is never overridden", () => {
+  const dir = mkdtempSync(join(tmpdir(), "feeds-guard-both-"));
+  const write = (name: string, value: string) => {
+    writeFileSync(join(dir, name), value);
+    return join(dir, name);
+  };
+  const before = ofac([A, B]);
+  const dropped = ofac([A, C]);
+  const published = write("published.json", JSON.stringify({ ...PUBLISHED, ofac: { ...PUBLISHED.ofac, ...before.manifest.ofac } }));
+  const run = (manifest: unknown, snapshot: string, env: Record<string, string> = {}) =>
+    spawnSync(process.execPath, ["scripts/feeds-guard.mjs", write("next.json", JSON.stringify(manifest)), published, write("next-ofac.json", snapshot), write("published-ofac.json", before.text)], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", ...env } });
+  const both = next({ metamask: { entries: 130_000 }, ofac: { ...dropped.manifest.ofac } });
+  const refused = run(both, dropped.text);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stdout, /^::error title=feeds guard::MetaMask entries moved by 30\.0%/m);
+  assert.match(refused.stdout, /^::error title=feeds guard::OFAC: 1 address\(es\) of the published list are missing/m, "the delisting is reported next to the MetaMask move");
+  const overridden = run(both, dropped.text, { FEEDS_GUARD_OVERRIDE: "1" });
+  assert.equal(overridden.status, 0, overridden.stdout);
+  assert.match(overridden.stdout, /^::warning title=feeds guard \(overridden\)::OFAC: 1 address/m);
+  // The snapshot is not the one the manifest names: no override signs it.
+  const mismatched = run(next({ ofac: { ...before.manifest.ofac } }), dropped.text, { FEEDS_GUARD_OVERRIDE: "1" });
+  assert.equal(mismatched.status, 1);
+  assert.match(mismatched.stdout, /^::error title=feeds guard::new OFAC snapshot: missing, or not the one the manifest names/m);
+  assert.match(mismatched.stdout, /no override signs that/);
+  const broken = run({ ...next(), generated_at: "yesterday" }, before.text, { FEEDS_GUARD_OVERRIDE: "1" });
+  assert.equal(broken.status, 1, "a malformed new manifest");
+  // The published side stays overridable, so a person can recover the branch.
+  assert.ok(overridable("no published manifest to compare with"));
+  assert.ok(overridable("published OFAC snapshot: not the one the published manifest names"));
+  assert.ok(!overridable("new OFAC snapshot: malformed rows"));
+  assert.ok(!overridable("new manifest: ofac.addresses missing or invalid"));
 });
 
 test("the publish job's staging step takes exactly the expected regular files: a planted .git, a symlink or an extra file is refused", () => {

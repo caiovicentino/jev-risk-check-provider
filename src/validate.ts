@@ -17,11 +17,62 @@ const invalid = (field: string): Invalid => ({ ok: false, field });
 function optionalString(obj: Record<string, unknown>, key: string, max: number): string | undefined | Invalid {
   const v = obj[key];
   if (v === undefined) return undefined;
-  if (typeof v !== "string" || v.length > max) return invalid(key);
+  // In code points, as JSON Schema's maxLength (the published schemas) counts them: an emoji is one.
+  if (typeof v !== "string" || codePoints(v) > max) return invalid(key);
   return v;
 }
 
+function codePoints(s: string): number {
+  let n = 0;
+  for (const _ of s) n++;
+  return n;
+}
+
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** The bytes as UTF-8 text, or null when they are not valid UTF-8 (never silently replaced with U+FFFD). */
+export function strictUtf8(bytes: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a JSON text repeats a key within one object (keys compared after unescaping, so
+ * "w\u0061llet" repeats "wallet"). JSON.parse keeps the last; another parser in front of us may
+ * keep the first and read a different request. Call it on text that parses.
+ */
+export function repeatedKey(text: string): boolean {
+  const scopes: Array<Set<string> | null> = [];
+  let keyNext = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      const scope = scopes[scopes.length - 1];
+      if (scope && keyNext) {
+        const key = JSON.parse(text.slice(i, j + 1)) as string;
+        if (scope.has(key)) return true;
+        scope.add(key);
+        keyNext = false;
+      }
+      i = j;
+    } else if (c === "{") {
+      scopes.push(new Set());
+      keyNext = true;
+    } else if (c === "[") {
+      scopes.push(null);
+      keyNext = false;
+    } else if (c === "}" || c === "]") {
+      scopes.pop();
+      keyNext = false;
+    } else if (c === ",") keyNext = scopes[scopes.length - 1] instanceof Set;
+  }
+  return false;
+}
 
 /** Whether every string in a JSON value is well-formed Unicode (no lone surrogate). */
 function wellFormed(v: unknown, depth = 0): boolean {

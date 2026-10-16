@@ -12,7 +12,9 @@
 #      skips this, for an emergency only.
 # Then it installs the locked dependencies (npm ci without install scripts, as the feeds workflow does) and runs `wrangler deploy`
 # from deploy/ with GIT_COMMIT=<short SHA> (for /healthz), tagging the Cloudflare Worker
-# version with the same commit.
+# version with the same commit. The configuration is named (`--config wrangler.toml`): wrangler
+# would otherwise prefer a wrangler.json(c), or follow a `.wrangler/deploy/config.json` redirect,
+# and git status does not show ignored files.
 #
 # Needs git, gh (logged in), npm, and wrangler logged in to the Cloudflare account. It runs
 # the wrangler pinned in package.json when there is one, otherwise the one installed on this
@@ -69,5 +71,5 @@ wrangler=(npx --no -- wrangler)
 version=$("${wrangler[@]}" --version | tail -n 1) \
   || die "wrangler is not installed (pin it in package.json, or install it); nothing was deployed"
 echo "deploy: wrangler $version, GIT_COMMIT=$short"
-"${wrangler[@]}" deploy --var "GIT_COMMIT:$short" --tag "$short" --message "git $head"
+"${wrangler[@]}" deploy --config wrangler.toml --var "GIT_COMMIT:$short" --tag "$short" --message "git $head"
 echo "deploy: done. Check https://x402check.xyz/healthz and /status (AGENTS.md §3.2)."

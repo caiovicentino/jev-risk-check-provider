@@ -345,7 +345,7 @@ export function maybeRefreshFeeds(env: WorkerEnv, ctx: ExecutionContext | undefi
 }
 
 /**
- * A paid request on a cold isolate waits up to COLD_START_WAIT_MS for a current OFAC list and for
+ * A paid request (or /status) on a cold isolate waits up to COLD_START_WAIT_MS for a current OFAC list and for
  * the MetaMask list KV holds; a warm isolate never waits. Past the wait it proceeds on the lists
  * it has (the attestation states their dates), says so once, and the isolate stops waiting.
  */
@@ -357,6 +357,6 @@ export async function awaitColdStart(): Promise<void> {
   clearTimeout(timer);
   if (timedOut && !coldWaitOver) {
     coldWaitOver = true;
-    console.warn(`feeds: a paid check went ahead on the ${sanctionsListMeta().publish_date} OFAC list after waiting ${COLD_START_WAIT_MS} ms for a current one`);
+    console.warn(`feeds: a cold isolate went ahead on the ${sanctionsListMeta().publish_date} OFAC list after waiting ${COLD_START_WAIT_MS} ms for a current one`);
   }
 }

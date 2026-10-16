@@ -538,3 +538,53 @@ test("a challenge never waits on a slow Solana RPC, and never echoes the query s
   const adapter = fetchAdapter(new Request("https://x402check.xyz/v1/risk-check?utm=1&x=%3Cscript%3E", { method: "POST" }), {});
   assert.equal(adapter.getUrl(), "https://x402check.xyz/v1/risk-check");
 });
+
+test("an unpaid challenge reuses a recent Solana blockhash for 15 s instead of asking the RPC every time", async () => {
+  const { BoundedSvmScheme } = await import("../deploy/protected.js");
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.includes("counting-solana.example")) return realFetch(input, init);
+    calls++;
+    const { id } = JSON.parse(String(init?.body)) as { id: unknown };
+    return Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: { blockhash: `Hash${calls}111111111111111111111111111111111111`, lastValidBlockHeight: 1000 + calls } } });
+  }) as typeof fetch;
+  try {
+    const scheme = new BoundedSvmScheme({ rpcUrl: "https://counting-solana.example" });
+    const ask = () =>
+      scheme.enhancePaymentRequirements(
+        { scheme: "exact", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", amount: "2000", asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", payTo: "Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X", maxTimeoutSeconds: 300, extra: {} } as never,
+        { x402Version: 2, scheme: "exact", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", extra: { feePayer: "DeXterR2kQmVeQ5RZt9HjdWZNcJRRBjZD5YWFYxB64JU" } } as never,
+        [],
+      );
+    const first = await ask();
+    const second = await ask();
+    assert.equal(calls, 1, "one RPC call for two challenges");
+    assert.equal((first.extra as { recentBlockhash?: string }).recentBlockhash, (second.extra as { recentBlockhash?: string }).recentBlockhash);
+    assert.equal((second.extra as { feePayer?: string }).feePayer, "DeXterR2kQmVeQ5RZt9HjdWZNcJRRBjZD5YWFYxB64JU");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a client gone before settlement is not charged (499), the work is handed to waitUntil, and the payment can be sent again", async () => {
+  const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((s) => new PaymentClaim(s)) };
+  const settle = { ok: true, tx: "0xeee", settled: 0 };
+  const s = stack(USER, settle);
+  const header = payment(USER, "0x14");
+  const controller = new AbortController();
+  const gone = new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": header }, body: JSON.stringify({ wallet: WALLET }), signal: controller.signal });
+  const handed: Promise<unknown>[] = [];
+  // The client disconnects while its check is being evaluated.
+  const res = await handleProtected(gone, env, s, async (r) => {
+    controller.abort();
+    return createHandler(s.deps)(r);
+  }, { waitUntil: (p) => void handed.push(p) });
+  assert.equal(res.status, 499);
+  assert.equal(settle.settled, 0, "nothing settled");
+  assert.equal(handed.length, 1, "the work runs to completion even if the isolate would cancel the request");
+  const again = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header }), env, s, (r) => createHandler(s.deps)(r));
+  assert.equal(again.status, 200, "the claim was released");
+  assert.equal(settle.settled, 1);
+});
