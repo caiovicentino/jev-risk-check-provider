@@ -2,6 +2,14 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.16 — 2026-10-16: a client that leaves never strands its payment
+
+A paid production probe of v0.6.15 (`eval/disconnect.ts`) abandoned a paid request 1.5 s after it left. The resend of the same payment got `409 payment_already_used`, and nothing had been charged. The runtime cancels whatever a request has not handed to `waitUntil`. Admission ran before the hand-off, so a client gone during it left its payment claimed for a day: no money moved, but the signed payment could not be used. Abandoned after 300 ms, during the payment's verification, the same probe passed.
+
+- **Per call:** admission (the payer's slot and the payment's claim) now runs inside the work handed to `waitUntil`, so a claim taken is always released or marked settled.
+- **Credits:** the debit runs inside it too, and a caller gone before the verdict is ready gets the debit back (499), as a per-call payment is not settled.
+- **Buying credits:** a buyer gone before settlement is not charged (499) and can send the same payment again. Before, the pack settled and its new token reached nobody. A buyer who leaves during the settlement itself still loses the new token, since the money has moved by then. The settlement record marks it `undelivered`, and the daily check lists it for the owner.
+
 ## v0.6.15 — 2026-10-16: the production reviews
 
 Three independent reviews ran overnight: payments, a black-box run against production (nothing paid), and operations with the docs. They found one medium issue in payments, one in the feeds workflow, and several low ones. All are fixed here; `test/review-1016-prod.test.ts`, `test/payments-hardening.test.ts` and `test/feeds-guard.test.ts` keep them fixed.

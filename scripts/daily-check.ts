@@ -75,7 +75,7 @@ export type Status = {
   attestation: { ok: boolean; kid: string; thumbprint: string | null; reason?: string };
   model: { canary: { ok: boolean; stale: boolean; at: string } | null };
 };
-export type OutsidePayment = { key: string; at: string; network: string; path: string; payer: string; micro: number; ua?: string; country?: string };
+export type OutsidePayment = { key: string; at: string; network: string; path: string; payer: string; micro: number; ua?: string; country?: string; undelivered?: boolean };
 export type State = {
   at: string;
   kit_watch?: Record<string, { gaps: number; unbroken_since?: number }>;
@@ -473,7 +473,7 @@ async function main(): Promise<void> {
       for (const key of fresh) {
         const [, network, tx] = /^st:(.+):([^:]+)$/.exec(key) ?? [];
         if (!network || !tx) continue;
-        const rec = parse<{ at?: string; path?: string; micro?: number }>(await (await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) })).text()) ?? {};
+        const rec = parse<{ at?: string; path?: string; micro?: number; undelivered?: boolean }>(await (await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) })).text()) ?? {};
         const who = await payerOf(network, tx);
         if (!who) {
           // Read again next run (an RPC that failed today must not hide a payment for good).
@@ -484,7 +484,7 @@ async function main(): Promise<void> {
           ours++;
           continue;
         }
-        const pay: OutsidePayment = { key, at: rec.at ?? "", network, path: rec.path ?? "", payer: who.payer, micro: rec.micro ?? who.micro };
+        const pay: OutsidePayment = { key, at: rec.at ?? "", network, path: rec.path ?? "", payer: who.payer, micro: rec.micro ?? who.micro, ...(rec.undelivered ? { undelivered: true } : {}) };
         // Who called: the analytics rows of that path, around the settlement record's time.
         if (zone && pay.at) {
           const t = Date.parse(pay.at);
@@ -500,7 +500,10 @@ async function main(): Promise<void> {
       next.settlements_seen = keys.filter((k) => !unresolvedKeys.has(k));
       const unresolved = unresolvedKeys.size;
       const total = outside.reduce((s, p) => s + p.micro, 0) / 1e6;
-      const fmt = (p: OutsidePayment) => `$${(p.micro / 1e6).toFixed(4)} ${short(p.network)} ${p.path} ${p.at.slice(0, 16)} from ${p.payer.slice(0, 10)}… ${p.ua ?? "(no user agent found)"}${p.country ? ` [${p.country}]` : ""}`;
+      const fmt = (p: OutsidePayment) => `$${(p.micro / 1e6).toFixed(4)} ${short(p.network)} ${p.path} ${p.at.slice(0, 16)} from ${p.payer.slice(0, 10)}… ${p.ua ?? "(no user agent found)"}${p.country ? ` [${p.country}]` : ""}${p.undelivered ? " UNDELIVERED" : ""}`;
+      // A credit pack that settled for a buyer who had left: paid, and its token reached nobody.
+      const undelivered = found.filter((p) => p.undelivered);
+      if (undelivered.length) add("revenue.undelivered", "warn", `${undelivered.length} credit pack(s) settled for a buyer who left, so the new token reached nobody: ${undelivered.map(fmt).join("; ")} (the owner decides how to make it right)`);
       if (baseline) add("revenue", "info", `baseline: ${keys.length} settlements, ${outside.length} from outside payers ($${total.toFixed(4)}), ${ours} probes, ${unresolved} unresolved`);
       else add("revenue", found.length ? "info" : "ok", `${found.length} new outside payment(s)${found.length ? `: ${found.map(fmt).join("; ")}` : ""}; ${ours} probe settlement(s); ${unresolved} unresolved; outside total $${total.toFixed(4)}`);
     });

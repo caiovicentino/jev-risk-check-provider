@@ -758,7 +758,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
 
   // Prepaid credits: `Authorization: Bearer x402c_…` debits the balance instead of paying per call.
   const token = creditToken(request);
-  if (token) return spendCredits(_env, token, path, parsed, () => serve(replay()), ctx);
+  if (token) return spendCredits(_env, token, path, parsed, () => serve(replay()), ctx, request.signal);
   if (/^bearer\s/i.test(request.headers.get("authorization") ?? "")) return json(401, { error: "invalid_credit_token" });
 
   // 2. Every evaluation is paid (x402 v2, PAYMENT-SIGNATURE), priced per item and per
@@ -785,15 +785,16 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
   // 3. Evaluate, then settle; the result is released only after settlement succeeds.
   if (result.type === "payment-error") return instructionsToResponse(result.response);
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
-  // Admission: the payer is screened like any counterparty, the authorization must be settleable,
-  // the payer may have only a few payments in flight, and the payment is used once, however often
-  // (or however re-encoded) it is sent.
-  const admission = await admitPayment(_env, result.paymentPayload);
-  if (!admission.ok) return admission.response;
-  // From admission on, the work runs to completion even if the client disconnects (2026-10-16
-  // review): a settlement that went through is recorded and its claim released; one that has not
-  // started is not started for a client that is gone.
+  // From admission on, the work runs to completion even if the client disconnects: the runtime
+  // cancels whatever is not handed to waitUntil, and a payment claimed by a cancelled request stayed
+  // held for a day (the production probe of 2026-10-16). A claim taken is always released or marked
+  // settled, and a settlement that has not started is not started for a client that is gone.
   const work = (async (): Promise<Response> => {
+    // Admission: the payer is screened like any counterparty, the authorization must be settleable,
+    // the payer may have only a few payments in flight, and the payment is used once, however often
+    // (or however re-encoded) it is sent.
+    const admission = await admitPayment(_env, result.paymentPayload);
+    if (!admission.ok) return admission.response;
     let res: Response;
     try {
       res = await serve(replay());

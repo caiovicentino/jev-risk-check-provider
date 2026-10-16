@@ -588,3 +588,53 @@ test("a client gone before settlement is not charged (499), the work is handed t
   assert.equal(again.status, 200, "the claim was released");
   assert.equal(settle.settled, 1);
 });
+
+test("the work handed to waitUntil starts before any state changes: a claim, a debit or a pack is never left half done by a cancelled request", async () => {
+  // A cancelled request runs only what was handed to waitUntil. Admission refusing (a listed payer)
+  // shows the hand-off already covers it: before 0.6.15 admission ran first, and a client gone
+  // during it left its payment claimed for a day (the production probe of 2026-10-16).
+  const listed = OFAC_SDN_ADDRESSES.find(([a]) => /^0x[0-9a-fA-F]{40}$/.test(a))?.[0] as string;
+  const handed: Promise<unknown>[] = [];
+  const ctx = { waitUntil: (p: Promise<unknown>) => void handed.push(p) };
+  const s = stack(listed, { ok: true, tx: "0xa1", settled: 0 });
+  const refused = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(listed, "0x40") }), {}, s, (r) => createHandler(s.deps)(r), ctx);
+  assert.deepEqual([refused.status, handed.length], [403, 1]);
+
+  // Credits: the debit is inside the work too (an empty balance is refused from within it).
+  const env: WorkerEnv = { CREDITS: namespace((st) => new CreditLedger(st)) };
+  const bought = await handleCredits(req("/v1/credits", { amount_usd: 0.1 }, { "PAYMENT-SIGNATURE": payment(USER, "0x41") }), env, stack(USER, { ok: true, tx: "0xa2", settled: 0 }));
+  const { token } = (await bought.json()) as { token: string };
+  handed.length = 0;
+  const spender = stack(USER, { ok: true, tx: "0x0", settled: 0 });
+  const controller = new AbortController();
+  const gone = new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ wallet: WALLET }), signal: controller.signal });
+  const left = await handleProtected(gone, env, spender, async (r) => {
+    controller.abort();
+    return createHandler(spender.deps)(r);
+  }, ctx);
+  assert.deepEqual([left.status, handed.length], [499, 1], "a caller gone before the result is ready is not charged");
+  const balance = await handleCredits(new Request("https://x402check.xyz/v1/credits", { headers: { Authorization: `Bearer ${token}` } }), env, spender);
+  assert.equal(((await balance.json()) as { balance_usd: string }).balance_usd, "$0.10", "the debit was refunded");
+
+  // A buyer gone before settlement: nothing settles, and the same payment can buy the pack later.
+  const settle = { ok: true, tx: "0xa3", settled: 0 };
+  const claims: WorkerEnv = { CREDITS: namespace((st) => new CreditLedger(st)), PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)) };
+  const header = payment(USER, "0x42");
+  const buyer = new AbortController();
+  buyer.abort();
+  const abandoned = await handleCredits(new Request("https://x402check.xyz/v1/credits", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": header }, body: JSON.stringify({ amount_usd: 1 }), signal: buyer.signal }), claims, stack(USER, settle), ctx);
+  assert.deepEqual([abandoned.status, settle.settled], [499, 0]);
+  const later = await handleCredits(req("/v1/credits", { amount_usd: 1 }, { "PAYMENT-SIGNATURE": header }), claims, stack(USER, settle));
+  assert.deepEqual([later.status, settle.settled], [200, 1]);
+
+  // A buyer who leaves during the settlement: the money has moved, so the record says the new token reached nobody.
+  const kv = memoryKv();
+  const leaving = new AbortController();
+  const base = stack(USER, { ok: true, tx: "0xa4", settled: 0 });
+  const settling = { ...base, http: { ...base.http, processSettlement: async (...a: Parameters<Stack["http"]["processSettlement"]>) => {
+    leaving.abort();
+    return base.http.processSettlement(...a);
+  } } } as Stack;
+  await handleCredits(new Request("https://x402check.xyz/v1/credits", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": payment(USER, "0x43") }, body: JSON.stringify({ amount_usd: 1 }), signal: leaving.signal }), { ...claims, RATE: kv }, settling, ctx);
+  assert.equal((JSON.parse(kv.data.get("st:eip155:8453:0xa4") ?? "{}") as { undelivered?: boolean }).undelivered, true);
+});

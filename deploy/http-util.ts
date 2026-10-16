@@ -189,9 +189,14 @@ function payerSubject(payer: string): ReturnType<typeof parseSubject> {
  * Keeps a record of a settlement, for reconciliation against the pay_to transfers on-chain:
  * one KV entry per transaction (no token, no request data) and one log line.
  */
-export async function recordSettlement(env: { RATE?: { put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void> } }, entry: { path: string; network: string; transaction: string; micro?: number }): Promise<void> {
+/**
+ * A settlement, logged and kept 400 days for reconciling against the chain. `undelivered`: the
+ * client left while it settled, so what it paid for (a new credit token) reached nobody; the
+ * daily check lists these for the owner.
+ */
+export async function recordSettlement(env: { RATE?: { put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void> } }, entry: { path: string; network: string; transaction: string; micro?: number; undelivered?: boolean }): Promise<void> {
   console.log(JSON.stringify({ event: "settlement", ...entry }));
-  await env.RATE?.put(`st:${entry.network}:${entry.transaction}`, JSON.stringify({ at: new Date().toISOString(), path: entry.path, ...(entry.micro !== undefined ? { micro: entry.micro } : {}) }), { expirationTtl: 400 * 86400 }).catch((err: unknown) => console.error(`settlement record failed: ${String(err).slice(0, 120)}`));
+  await env.RATE?.put(`st:${entry.network}:${entry.transaction}`, JSON.stringify({ at: new Date().toISOString(), path: entry.path, ...(entry.micro !== undefined ? { micro: entry.micro } : {}), ...(entry.undelivered ? { undelivered: true } : {}) }), { expirationTtl: 400 * 86400 }).catch((err: unknown) => console.error(`settlement record failed: ${String(err).slice(0, 120)}`));
 }
 
 /** Seconds an authorization must still be valid when it arrives: a settlement must be possible after the evaluation. */

@@ -163,28 +163,29 @@ export function creditCostMicro(path: string, body: unknown, simulation: boolean
 
 /**
  * An evaluation paid from credits: debit first (atomic; an overdraw is refused), evaluate,
- * and refund when no verdict was produced (the same rule as a paid call: never charge for
- * a verdict that does not exist).
+ * and refund when no verdict was produced or the caller left before it was ready (the same
+ * rule as a paid call: never charge for a verdict nobody receives).
  */
-export async function spendCredits(env: WorkerEnv, token: string, path: string, parsed: unknown, serve: () => Promise<Response>, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
+export async function spendCredits(env: WorkerEnv, token: string, path: string, parsed: unknown, serve: () => Promise<Response>, ctx?: { waitUntil(promise: Promise<unknown>): void }, signal?: AbortSignal): Promise<Response> {
   if (!env.CREDITS) return json(503, { error: "credits_unavailable" });
   const cost = creditCostMicro(path, parsed, env.SIMULATION !== "off");
-  let debit: Awaited<ReturnType<typeof ledgerCall>>;
-  try {
-    debit = await ledgerCall(env, token, "debit", { micro: cost });
-  } catch {
-    return json(503, { error: "credits_unavailable" }, { "Retry-After": "5" });
-  }
-  if (debit.insufficient) {
-    return json(402, { error: "insufficient_credits", balance_usd: formatUsd(debit.micro), cost_usd: formatUsd(cost), top_up: "POST /v1/credits {\"amount_usd\": 1} with this token" });
-  }
   const refund = (micro = cost) =>
     ledgerCall(env, token, "credit", { micro, ref: `refund:${crypto.randomUUID()}` }).catch((err: unknown) => {
       console.error(`credit refund failed: ${String(err).slice(0, 120)}`);
       return null;
     });
-  // The refund decision runs to completion even if the caller disconnects mid-evaluation (waitUntil).
+  // From the debit on, the work runs to completion even if the caller disconnects (waitUntil): the
+  // runtime cancels anything else, and a debit without its refund decision would charge for nothing.
   const work = (async (): Promise<Response> => {
+    let debit: Awaited<ReturnType<typeof ledgerCall>>;
+    try {
+      debit = await ledgerCall(env, token, "debit", { micro: cost });
+    } catch {
+      return json(503, { error: "credits_unavailable" }, { "Retry-After": "5" });
+    }
+    if (debit.insufficient) {
+      return json(402, { error: "insufficient_credits", balance_usd: formatUsd(debit.micro), cost_usd: formatUsd(cost), top_up: "POST /v1/credits {\"amount_usd\": 1} with this token" });
+    }
     let res: Response;
     try {
       res = await serve();
@@ -201,6 +202,11 @@ export async function spendCredits(env: WorkerEnv, token: string, path: string, 
         return res;
       }
       return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5", ...headers });
+    }
+    // The caller is gone: the verdict reaches nobody, so it is not charged.
+    if (signal?.aborted) {
+      await refund();
+      return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before the result was ready" });
     }
     // The simulation surcharge is charged only for simulations that ran.
     const surcharge = env.SIMULATION !== "off" ? await unsimulatedSurcharge(path, parsed, res.clone()) : 0;
@@ -283,15 +289,24 @@ export async function handleCredits(request: Request, env: WorkerEnv, stack: Sta
   }
   if (result.type === "payment-error") return new Response(typeof result.response.body === "string" ? result.response.body : JSON.stringify(result.response.body), { status: result.response.status, headers: result.response.headers });
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
-  const admission = await admitPayment(env, result.paymentPayload);
-  if (!admission.ok) return admission.response;
-  // Settle and credit run to completion even if the buyer disconnects: a settled pack is always credited.
-  const work = buyPack(env, stack, result, admission, token, micro);
+  // Admission, settlement and credit run to completion even if the buyer disconnects (waitUntil):
+  // a claim taken is always finished, and a settled pack is always credited.
+  const verified = result;
+  const work = (async (): Promise<Response> => {
+    const admission = await admitPayment(env, verified.paymentPayload);
+    if (!admission.ok) return admission.response;
+    return buyPack(env, stack, verified, admission, token, micro, request.signal);
+  })();
   ctx?.waitUntil(work.catch(() => undefined));
   return work;
 }
 
-async function buyPack(env: WorkerEnv, stack: Stack, result: Extract<HTTPProcessResult, { type: "payment-verified" }>, admission: Extract<Admission, { ok: true }>, token: string | null, micro: number): Promise<Response> {
+async function buyPack(env: WorkerEnv, stack: Stack, result: Extract<HTTPProcessResult, { type: "payment-verified" }>, admission: Extract<Admission, { ok: true }>, token: string | null, micro: number, signal?: AbortSignal): Promise<Response> {
+  // The buyer is gone: nothing is settled (a new token would reach nobody), and the payment can be sent again.
+  if (signal?.aborted) {
+    await admission.finish("unused");
+    return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before settlement" });
+  }
   let reason = "settlement_failed";
   let refused = false;
   let settle: Awaited<ReturnType<Stack["http"]["processSettlement"]>> | null = null;
@@ -317,7 +332,10 @@ async function buyPack(env: WorkerEnv, stack: Stack, result: Extract<HTTPProcess
     console.error("settlement transaction reused on /v1/credits");
     return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already bought a pack; sign a new payment" });
   }
-  if (receipt) await recordSettlement(env, { path: "/v1/credits", network: receipt.network, transaction: receipt.transaction, micro });
+  // A buyer who left while it settled never sees a new token: the record says so, for the owner to make it right.
+  const undelivered = !token && signal?.aborted === true;
+  if (undelivered) console.error(`credit pack settled for a buyer who left: ${receipt ? `${receipt.network}:${receipt.transaction}` : "no receipt"}`);
+  if (receipt) await recordSettlement(env, { path: "/v1/credits", network: receipt.network, transaction: receipt.transaction, micro, ...(undelivered ? { undelivered } : {}) });
   const owner = token ?? newCreditToken();
   const ref = receipt ? `${receipt.network}:${receipt.transaction}` : `payment:${admission.id}`;
   const credited = await creditSettled(env, owner, micro, ref);
