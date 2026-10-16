@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-10-16T02:19:59.591Z",
+  "chain": "eip155:1",
+  "rpc": "ethereum-rpc.publicnode.com",
+  "blocks": {
+    "from": 26199040,
+    "to": 26202039,
+    "count": 3000,
+    "from_time": "2026-10-15T16:13:47.000Z",
+    "to_time": "2026-10-16T02:15:47.000Z"
+  },
+  "method": "every EIP-7702 authorization in the blocks, classified by the kit watch's delegate verdicts at the time of the run; segments of 10 blocks, as the cron scans them; aggregates only",
+  "authorizations": 21747,
+  "type4_transactions": 11372,
+  "by_verdict": {
+    "poisoner": {
+      "count": 8512,
+      "pct": 39.1
+    },
+    "not_forwarding": {
+      "count": 7860,
+      "pct": 36.1
+    },
+    "forwarder": {
+      "count": 4832,
+      "pct": 22.2
+    },
+    "revocation": {
+      "count": 525,
+      "pct": 2.4
+    },
+    "unprobed": {
+      "count": 10,
+      "pct": 0
+    },
+    "sweeper": {
+      "count": 8,
+      "pct": 0
+    }
+  },
+  "settled_pct": 38.6,
+  "threat_pct": 61.4,
+  "top_delegate_pct": 39.1,
+  "top5_delegates_pct": 59,
+  "segments": {
+    "count": 300,
+    "median": 65,
+    "max": 232,
+    "over_500": 0,
+    "over_1000": 0,
+    "over_5000": 0
+  },
+  "largest_list_in_one_transaction": 72
+}

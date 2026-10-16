@@ -151,6 +151,27 @@ Reading:
 - **The poisoning executor is a single public template.** Wintermute exposed and verified it ("Poisoner": `executeBatch` gated on `tx.origin`). One operator delegated 6,232 fresh look-alike wallets to it in a day.
 - 22 forwarder families were learned from behaviour alone. Two of them are known by their delegate's address, because their code is too small to fingerprint.
 
+### What delegations need work (v0.6.6)
+
+`eval/kit-watch-floods.ts` reads the most recent Ethereum blocks with full transactions, in the cron's 10-block segments. It classifies every EIP-7702 authorization by the watch's own delegate verdicts at the time of the run (KV, read in memory). The report, `kit-watch-floods-report.json`, carries aggregates only.
+
+On 2026-10-16 it covered 3,000 blocks (01:15–02:15 UTC): **21,747 authorizations in 11,372 type-4 transactions**.
+
+| Delegate's verdict | Authorizations | Share |
+|---|---|---|
+| The poisoning executor (a threat: every authority is evaluated) | 8,512 | 39.1% |
+| Judged not a threat, no re-probe due (settled: counted, never evaluated) | 7,860 | 36.1% |
+| Forwarders (a threat) | 4,832 | 22.2% |
+| Revocations (the zero address; settled) | 525 | 2.4% |
+| Sweepers, and delegates not probed yet | 18 | 0.1% |
+
+Reading:
+
+- **38.6% of the authorizations need no work at all.** Before v0.6.6 they took room under the per-segment bound of 1,000 like the rest. Since v0.6.6 they are counted (`settled_authorizations` in `/status`) and never kept.
+- **The other 61.4% go to threats, so every one is evaluated.** The largest share goes to one delegate, the poisoning executor (39.1%), with 59.0% across the top five delegates.
+- **No segment of this sample came near the old bound.** The median was 65 authorizations per segment, the largest 232, and the longest list in one transaction 72. The holes v0.6.6 stopped (about 153,000 from 2026-10-03 to 2026-10-15) came from bursts beyond 1,000 per segment. The watch counted them in `gaps`; no sample here caught one.
+- **A correction.** The v0.6.6 notes quote a 2026-10-15 sample from an earlier run of the same method: 20,653 authorizations, 48% to delegates judged not a threat, 43% to the poisoning executor. That run's output was not saved. This report is the reproducible measurement, and the mix moves from day to day (forwarders were 8% of the 2026-10-15 sample and 22% of this one).
+
 ### Precision
 
 **Poisoner family.** The delegate's verified source obeys only its operator (a `tx.origin` check). So a wallet that delegates to it is controlled by the operator while it stays delegated, whether or not it is a look-alike.
@@ -514,6 +535,7 @@ npx tsx scripts/kit-catalog.ts && npx tsx scripts/legit-corpus.ts && npx tsx scr
 npx tsx scripts/hunt-kits.ts --chain eip155:1 --hours 24 && npx tsx scripts/hunt-kits.ts --chain eip155:8453 --hours 6
 npm run eval:kit-watch -- --sample 40 && npm run eval:kit-watch -- --second-holdout
 npx tsx scripts/payai-shadow.ts --days 7
+npx tsx eval/kit-watch-floods.ts --blocks 3000  # how Ethereum's 7702 authorizations split by the watch's verdicts (aggregates only; reads KV with wrangler)
 npx tsx eval/guard.ts                        # the signing guard on the simulation run's real transactions (in process, no money)
 npx tsx scripts/redact-evidence.ts --check   # no ScamSniffer-only entry in the committed reports
 # ↓ against production: every evaluation is paid (funded payer key and credit token in ~/.config/paysol)
