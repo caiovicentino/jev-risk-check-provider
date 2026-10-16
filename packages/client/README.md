@@ -115,7 +115,8 @@ await wallet.sendTransaction(tx); // throws X402CheckBlockedError before signing
 **Every signature, decoded first.** The guard intercepts `signTransaction`, `signTypedData`, `signMessage` and `signAuthorization`, and finds the real counterparty with the same decoders as the x402check MetaMask Snap:
 
 - **A transaction:** the recipient of a transfer, the spender of an approval, or the operator of an NFT approval, including inside multicall, Safe and Universal Router wrappers. The transaction itself is sent for **simulation** at the latest block.
-- **Typed data:** the spender of an EIP-2612 permit or a Permit2 signature, and the recipients of a Seaport order.
+- **Typed data:** the spender of an EIP-2612 permit or a Permit2 signature, and the recipients of a Seaport order. A struct the decoders do not know that grants a `spender`, `delegatee` or `operator` a `value`, `amount` or `allowance` (e.g. Aave's credit delegation, `DelegationWithSig`) is checked as a permit, unlimited from 2^255.
+- **Every counterparty a request names is checked**, in batches of 25, up to 50. A request that names more is refused (`too_many_counterparties`): none is left unchecked.
 - **An x402 payment on EVM** (an EIP-3009 `TransferWithAuthorization`): the payee, bound as `payment` together with the amount and the asset.
 - **An EIP-7702 delegation:** the delegate contract, which would gain full control of the account.
 - **A message:** the addresses and hosts it names, or else the signer itself.
@@ -129,16 +130,17 @@ await wallet.sendTransaction(tx); // throws X402CheckBlockedError before signing
 | `block` | Refused: `X402CheckBlockedError`, with `verdict.reasons`. |
 | Anything else: no credits (402), network error, timeout, `checked: false`, a signature that does not verify, an attestation signed by a key that is not pinned (`key_not_pinned`), or one bound to another request (`request_hash`) | Refused (`not_verified`). **A missing check never means yes.** |
 | Danger the decoder proves locally: a `delegatecall`, a control change of the signer's own account (a new owner, module or implementation), an order that sells for nothing or pays someone else | Refused before any call (`local_danger`). |
-| Content the guard cannot read: a hash or calldata carrier it cannot decode (e.g. a Safe message), a 1inch order with an extension | Refused (`opaque_signature`). |
+| Content the guard cannot read: a hash or calldata carrier it cannot decode (e.g. a Safe message), a 1inch order with an extension, a batch it does not read in full (a MultiSend, multicall or smart-account batch of more than 32 calls or with bytes left over, a Seaport bulk listing of more than 64 orders) | Refused (`opaque_signature`). |
 | `sign({ hash })` or a message of opaque bytes | Refused (`raw_hash_signing`) unless `allowRawHashSigning: true`. Some smart-account flows need it, and with it those signatures go unchecked. |
-| A transaction whose effects cannot be simulated (calldata too large, a deployment that carries value), or a call to the signer's own account with calldata it cannot read | Refused (`not_simulated`, `unreadable_self_call`): not signed on an address check alone. |
+| A transaction whose effects cannot be simulated (calldata too large, a deployment that carries value), one the provider did not simulate (its attestation must say `simulation.status: "ok"`: a chain without simulation, i.e. anything but Ethereum, Base, Polygon, Arbitrum, Optimism and BSC, or a simulation that failed), or a call to the signer's own account with calldata it cannot read | Refused (`not_simulated`, `unreadable_self_call`): not signed on an address check alone. A transaction that reverts in the simulation is blocked (`simulation_reverted`). |
+| A transaction viem would read differently from the guard, or refuse: a `to` that is not absent, `""`, `"0x"` or 0x and 40 hex digits; calldata that is not 0x-prefixed hex; an amount that is not an unsigned integer (an unsafe JavaScript number included); a `type` viem does not serialize | Refused (`invalid_transaction`). |
 | An EIP-7702 authorization valid on every chain (chainId 0) | Refused (`every_chain_authorization`) unless `allowEveryChainAuthorization: true`; then the delegate is checked on each chain the kit watch covers. |
 | A request with no chain; a fee above `maxFeeWei`; a signing method the guard does not intercept | Refused (`no_chain`, `fee_cap`, `unguarded_method`). Methods listed in `passthrough` are passed through **unchecked**. |
 
 - **Payments to x402check's own `pay_to` are not checked, up to $0.25** (`trustedPayees`, `trustedPayeeMaxAmount`), so paying for a check never recurses. A larger payment to it, such as a credit pack, is checked like any other.
 - **Requests with nothing to check** (no counterparty and nothing to simulate, e.g. a zero-value deployment) are signed as inert.
 - **Pinned key:** by default only x402check's own attestation key is accepted (`X402CHECK_KEY_THUMBPRINTS`). `pinnedKeys` lists others; `false` disables pinning (for tests against a local issuer).
-- **What it checks is a copy,** and the copy is what gets signed: an object changed after the check is not what the key signs.
+- **What it checks is a copy,** and the copy is what gets signed: an object changed after the check is not what the key signs. A transaction is normalized first, exactly as viem serializes it: `to` absent, `""` or `"0x"` is a contract creation, amounts are read with BigInt semantics (`" 0x10"`, `"0X10"`) and signed as bigints, calldata is `data` (or `input` when `data` is absent), and a transaction without `chainId` gets `options.chainId`, so it is never signed as a legacy transaction valid on every chain. The fee cap (`maxFeeWei`) applies to that normalized copy, blob gas included.
 - **Pay for the checks from prepaid credits.** Do not use a per-call payer that signs with the guarded account.
 
 **x402 buyers that do not wrap the account** can use the client hook instead. It checks the payee before the payment is created, and aborts it otherwise:
@@ -167,7 +169,7 @@ await signTransactionMessageWithSigners(message); // throws X402CheckBlockedErro
 
 **Each transaction of a batch is decoded before anything is signed.** The guard reads the legacy or v0 message, resolving its address lookup tables over RPC, and then what the signer authorizes:
 
-- **SOL leaving the signer:** a System transfer, the funding of a new account, a nonce withdrawal, or the closing of a token account. The recipient is checked.
+- **SOL leaving the signer:** a System transfer, the funding of a new account, a nonce withdrawal, or the closing of a token account. The recipient is checked, or, when the transaction creates or assigns the receiving account, whoever controls it: the withdraw authority its Stake `Initialize` sets, the owner its `InitializeAccount` sets, its nonce authority, a seed-derived account's base, or else its owner program (checked as a contract call).
 - **SPL Token and Token-2022 transfers:** the owner of the receiving token account is checked, not the token account. The owner comes from an Associated Token Account instruction in the same transaction (the ATA program enforces it), or else from the chain. The amount and the mint are bound as `payment`.
 - **Approvals:** the delegate is checked, flagged `unlimited` at `u64::MAX`.
 - **Any other program the signer's account is passed to:** checked as a contract call, because it acts with the signer's authority.
@@ -175,12 +177,14 @@ await signTransactionMessageWithSigners(message); // throws X402CheckBlockedErro
 **The Solana decision:**
 
 - **Refused without a check** (`local_danger`):
-  - a System `Assign` of the signer's own account (its owner program would control everything it holds);
+  - a System `Assign` of the signer's own account (its owner program would control everything it holds), or an `AssignWithSeed` or `AllocateWithSeed` of an account derived from it;
+  - a new stake account locked up under a custodian other than the signer;
   - an SPL `SetAuthority` handing a token account's owner, close, mint or freeze authority to someone else;
   - a nonce account's authority handed over;
   - a "message" whose bytes are a transaction, because its signature would authorize that transaction.
 - **`not_verified`, never a guess:**
   - an instruction the signer authorizes that the guard cannot read, such as an unknown token instruction;
+  - SOL sent to a new stake or token account the transaction does not initialize (anyone could then set its authority), a new mint or multisig funded beyond its rent-exempt minimum, or an account of a native program with its own authorities (Vote, the loaders, lookup tables);
   - a lookup table or a receiving token account's owner that cannot be established;
   - more than 5 counterparties in one transaction.
 - **Nothing to check:**
