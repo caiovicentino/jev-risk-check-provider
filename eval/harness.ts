@@ -9,7 +9,8 @@ import type { RiskCheckResult } from "../src/types.js";
 import { CASES, type ShadowCase } from "./cases.js";
 
 export const DECISION_THRESHOLD = 60;
-export const EVAL_EVIDENCE_DIR = "eval/evidence";
+/** Committed reports. EVAL_OUT_DIR sends a run's reports elsewhere (the daily maintenance writes under .cache/). */
+export const EVAL_EVIDENCE_DIR = process.env.EVAL_OUT_DIR ?? "eval/evidence";
 export const LIVE_LOG = `${EVAL_EVIDENCE_DIR}/shadow-log.jsonl`;
 export const SYNTHETIC_LOG = `${EVAL_EVIDENCE_DIR}/synthetic-log.jsonl`;
 

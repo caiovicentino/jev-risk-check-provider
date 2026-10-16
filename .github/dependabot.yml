@@ -54,6 +54,12 @@ updates:
       # Even their minor releases now pull in snaps-sdk 12 (PR #16's lockfile could not install):
       # the Snap's test packages wait for the same migration.
       - dependency-name: "@metamask/snaps-*"
+      # @solana/web3.js is a development dependency of the root scripts (Solana probes, shadows).
+      # Its 3.x major breaks the provider build and the Worker bundle. The only reason offered for it
+      # (stream-json, reached through jayson's server code, which web3.js 1.x never loads) was
+      # dismissed as unused (alerts #9 and #10; PR #20 closed on 2026-10-16).
+      - dependency-name: "@solana/web3.js"
+        update-types: ["version-update:semver-major"]
     groups:
       runtime:
         applies-to: version-updates

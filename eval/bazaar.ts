@@ -4,9 +4,10 @@
 // ignores a payTo filter, so the whole catalog (~19k resources) is read.
 //
 //   X402CHECK_BASE=https://x402check.xyz PAY_NETWORK=eip155:8453 npx tsx eval/bazaar.ts
-//   PAY=none npx tsx eval/bazaar.ts     # only report the listing
+//   PAY=none npx tsx eval/bazaar.ts     # only report the listing (.cache/bazaar-listing.json)
 //
-// Budget: $0.007 (two $0.0035 items). Report: eval/evidence/bazaar-report.json.
+// Budget: $0.007 (two $0.0035 items). Report: eval/evidence/bazaar-report.json. A listing-only run
+// never overwrites it: the committed report holds the paid transactions EVIDENCE.md cites.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { EVAL_EVIDENCE_DIR } from "./harness.js";
 import { buildPayFetch, settlementReceipt } from "./paid-fetch.js";
@@ -101,8 +102,9 @@ async function main(): Promise<void> {
     })),
     all_listed: WANT.every((w) => after.some((i) => i.resource === w)),
   };
-  mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
-  writeFileSync(`${EVAL_EVIDENCE_DIR}/bazaar-report.json`, JSON.stringify(report, null, 2));
+  const out = process.env.PAY === "none" && !process.env.EVAL_OUT_DIR ? ".cache/bazaar-listing.json" : `${EVAL_EVIDENCE_DIR}/bazaar-report.json`;
+  mkdirSync(out.slice(0, out.lastIndexOf("/")), { recursive: true });
+  writeFileSync(out, JSON.stringify(report, null, 2));
   if (!report.all_listed) process.exitCode = 1;
 }
 
