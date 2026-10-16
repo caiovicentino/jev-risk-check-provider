@@ -2,6 +2,20 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.13 — 2026-10-16: fixes from the overnight review
+
+An independent review of v0.6.5–v0.6.12 found one medium issue and five low ones; all are fixed here.
+
+- **The MetaMask list from KV could be taken back (medium).** A new isolate's network refresh copied the feeds state before its downloads and wrote that copy back afterwards. When the KV read applied the list in between, the copy erased it, and the isolate fell back to the list embedded at deploy for up to an hour. A stale CDN manifest could do the same to a newer list from KV. The refresh now builds its result from the state as it is when it writes, and a list only moves forward (`test/fresh-feeds-metamask-race.test.ts`).
+- **PayAI's fee table survives a failed lookup.** Routing builds its facilitator list anew on every refresh, so v0.6.5's "last table read" fallback never had a table to fall back on. The cache now lives at module scope, per facilitator URL. A failed lookup also makes the routing table retry within a minute instead of ten.
+- **More room under the KV limit.** The cron's one invocation also retries queued credits and refreshes ScamSniffer, so the watch's per-run caps are now 450 writes and 400 evaluations on Ethereum, 250 and 200 on Base. The worst case for the invocation is about 870 operations of the 1,000 allowed.
+- **A delegate that had no code is classified again.** Its "not a threat" verdict now expires after a day instead of 30, since code can still be deployed at its address with CREATE2. A drainer family deployed at an address that had another verdict replaces that verdict.
+- **The Ethereum scan uses more endpoints.** It rotates over BlastAPI, Tenderly, MEV Blocker, 1RPC, Flashbots and MeowRPC. publicnode, which serves evaluations, comes last, and the head is read from the same rotation. The Ethereum endpoints had also been answering the cron with HTTP 429 now and then.
+- **The daily check:**
+  - re-reads a settlement whose payer could not be read, so an RPC that fails today cannot hide a payment for good;
+  - blanks control and bidi characters in text it quotes from others;
+  - samples other isolates before calling OFAC stale, not only MetaMask.
+
 ## v0.6.12 — 2026-10-16: a facilitator outage no longer breaks the 402 challenge
 
 Two monitors (CarbonMonitor and lumiere's prober) got a 500 from `POST /v1/risk-check/batch` on 2026-10-15. Cloudflare's analytics show both. The cause, reproduced locally: when a facilitator's `/supported` hung, the routing table came late (the stack waits 4 s, each facilitator had 5 s), so the stack was built with every network. x402 then refused to build a challenge that offers a network no reachable facilitator supports. Every unpaid probe and paid request on that isolate got a 500 until the facilitator answered again.

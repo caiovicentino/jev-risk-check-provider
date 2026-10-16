@@ -226,9 +226,9 @@ export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: 
     opts.onOfac?.();
     throw err;
   }
-  const next: FreshState = { ...state, checked_at: new Date().toISOString(), generated_at: manifest.generated_at };
-  delete next.error;
+  const checkedAt = new Date().toISOString();
   const errors: string[] = [];
+  let fromNetwork: FreshMetamask | undefined;
 
   // OFAC first: it is small, and it is what a paid request on a cold isolate waits for.
   const of = manifest.ofac;
@@ -260,7 +260,7 @@ export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: 
   if (mm && saneDate(mm.as_of) && mm.as_of > current.as_of) {
     try {
       const [bin, json] = await Promise.all([get(base, "metamask-phishing.bin", fetchImpl), get(base, "metamask.json", fetchImpl)]);
-      next.metamask = { ...(await verifiedMetamask(mm, bin, json, current)), origin: "network" };
+      fromNetwork = { ...(await verifiedMetamask(mm, bin, json, current)), origin: "network" };
       // KV keeps it for new isolates: written once per list, and only forward. A failed write
       // costs new isolates the network round trip, never the refresh itself.
       const held = opts.kv ? await (opts.metamaskKvDate?.() ?? Promise.resolve(null)) : null;
@@ -275,6 +275,13 @@ export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: 
     }
   } else if (mm && !saneDate(mm.as_of)) errors.push("metamask: implausible date");
 
+  // Built from the state as it is now, not as it was before the downloads: a new isolate's KV read
+  // may have applied a list meanwhile, and a list only ever moves forward (a stale CDN manifest
+  // never takes back a newer list from KV).
+  const live = state;
+  const metamask = fromNetwork && fromNetwork.as_of > (live.metamask?.as_of ?? embedded.metamaskAsOf) ? fromNetwork : live.metamask;
+  const next: FreshState = { ...live, checked_at: checkedAt, generated_at: manifest.generated_at, ...(metamask ? { metamask } : {}) };
+  delete next.error;
   state = errors.length ? { ...next, error: errors.join("; ").slice(0, 300) } : next;
   if (errors.length) throw new Error(state.error);
   return state;

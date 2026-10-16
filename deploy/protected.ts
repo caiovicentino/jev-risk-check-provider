@@ -226,28 +226,38 @@ function facilitatorClient(url: string, key = url, auth?: ConstructorParameters<
  * floors), and Coinbase CDP when its API key is configured ($0.001 a settlement after 1,000
  * free a month; the key authenticates every call).
  */
+/**
+ * PayAI's fee table per facilitator URL, cached 10 minutes. It lives at module scope: routing
+ * builds its facilitator list anew on every refresh, so a cache inside that list would never hold
+ * a last good table. A failed lookup is asked again on the next call and, meanwhile, answered with
+ * the last table this isolate read (PayAI publishes new rates once a day): a hiccup must not hide a
+ * known fee.
+ */
+const feeTables = new Map<string, { at: number; value: Promise<Map<string, number>> }>();
+const lastFeeTables = new Map<string, Map<string, number>>();
+function payaiFeeTable(url: string): Promise<Map<string, number>> {
+  const hit = feeTables.get(url);
+  if (hit && Date.now() - hit.at <= TEN_MINUTES) return hit.value;
+  const value = payaiFees(url).then(
+    (table) => {
+      lastFeeTables.set(url, table);
+      return table;
+    },
+    (err: unknown) => {
+      if (feeTables.get(url)?.value === value) feeTables.delete(url);
+      const last = lastFeeTables.get(url);
+      if (last) return last;
+      throw err;
+    },
+  );
+  feeTables.set(url, { at: Date.now(), value });
+  return value;
+}
+
 export function mainnetFacilitators(env: WorkerEnv): FacilitatorEntry[] {
   const payaiUrl = env.X402_FACILITATOR_URL_PAYAI ?? DEFAULT_PAYAI_FACILITATOR;
-  let feeCache: { at: number; value: Promise<Map<string, number>> } | null = null;
-  let lastFees: Map<string, number> | null = null;
-  const fees = () => {
-    if (!feeCache || Date.now() - feeCache.at > TEN_MINUTES) {
-      // A failed lookup is retried on the next call and, meanwhile, answered with the last table this
-      // isolate read (PayAI publishes new rates once a day): a hiccup must not hide a known fee.
-      const value = payaiFees(payaiUrl).then(
-        (table) => (lastFees = table),
-        (err: unknown) => {
-          feeCache = null;
-          if (lastFees) return lastFees;
-          throw err;
-        },
-      );
-      feeCache = { at: Date.now(), value };
-    }
-    return feeCache.value;
-  };
   const entries: FacilitatorEntry[] = [
-    { name: "payai", client: facilitatorClient(payaiUrl), fees },
+    { name: "payai", client: facilitatorClient(payaiUrl), fees: () => payaiFeeTable(payaiUrl) },
     { name: "dexter", client: facilitatorClient(env.X402_FACILITATOR_URL_MAINNET ?? DEFAULT_MAINNET_FACILITATOR), flatFee: 0 },
   ];
   const cdp = cdpClient(env);
@@ -335,7 +345,18 @@ export function paymentRouting(env: WorkerEnv, injected?: FacilitatorEntry[]): P
             }),
         ),
       ),
-      Promise.all(facilitators.map((f) => (f.fees ? f.fees().catch(() => null) : Promise.resolve(new Map<string, number>())))),
+      Promise.all(
+        facilitators.map((f) =>
+          f.fees
+            ? f.fees().catch((err: unknown) => {
+                // An unknown fee is offered (with a null margin) but retried within a minute, not ten.
+                degraded = true;
+                console.error(`facilitator ${f.name} fees failed: ${String(err).slice(0, 160)}`);
+                return null;
+              })
+            : Promise.resolve(new Map<string, number>()),
+        ),
+      ),
     ]);
     return MAINNET_NETWORKS.map((network): PaymentRoute => {
       const price = networkPrice(network);

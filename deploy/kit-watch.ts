@@ -19,11 +19,13 @@ export const KW = {
 };
 export const WATCH_TTL_S = 365 * 86400;
 const DELEGATE_BENIGN_TTL_S = 30 * 86400;
+const NO_CODE_TTL_S = 86400;
 /**
- * A Worker invocation may make at most 1,000 KV operations. Current watch entries are read in bulk
- * (one operation per 100 keys, at most MAX_ENTRIES_READ entries per chain per run), and each chain
- * writes at most `PLAN[chain].writes` entries per run, the most severe first; with the run's other
- * reads and writes, both chains together stay under ~860 operations whatever a crafted transaction
+ * A Worker invocation may make at most 1,000 KV operations, and the cron's one invocation also
+ * retries queued credits (up to ~100) and refreshes ScamSniffer. Current watch entries are read in
+ * bulk (one operation per 100 keys, at most MAX_ENTRIES_READ entries per chain per run), and each
+ * chain writes at most `PLAN[chain].writes` entries per run, the most severe first: the watch
+ * stays under ~760 operations, and the whole invocation under ~870, whatever a crafted transaction
  * flags. What the caps leave out is counted as a hole.
  */
 const BULK_READ = 100;
@@ -86,9 +88,9 @@ export const LEGACY_DROPPED_READS: Record<WatchChain, number> = { "eip155:1": 9_
 type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag: number; writes: number; evaluations: number };
 const PLAN: Record<WatchChain, ChainPlan> = {
   // ~5 blocks a minute; a run catches up to 15.
-  "eip155:1": { confirmations: 2, perRun: 15, start: 5, maxLag: 1800, writes: 500, evaluations: 450 },
+  "eip155:1": { confirmations: 2, perRun: 15, start: 5, maxLag: 1800, writes: 450, evaluations: 400 },
   // ~30 blocks a minute; a run catches up to 90, in segments of 10.
-  "eip155:8453": { confirmations: 10, perRun: 90, start: 30, maxLag: 10800, writes: 300, evaluations: 250 },
+  "eip155:8453": { confirmations: 10, perRun: 90, start: 30, maxLag: 10800, writes: 250, evaluations: 200 },
 };
 const SEGMENT = 10;
 
@@ -309,9 +311,11 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     }
     await Promise.all(puts);
   }
-  // Benign verdicts expire (a delegate seen again is simply re-probed); malicious ones never do.
+  // Benign verdicts expire (a delegate seen again is simply re-probed); malicious ones never do. A
+  // delegate that had no code expires after a day: code can still be deployed at its address
+  // (CREATE2), and its authorizations would then run it.
   const cutoff = nowS - DELEGATE_BENIGN_TTL_S;
-  for (const [d, v] of delegates) if ((v.class === "not_forwarding" || v.class === "unprobed") && v.at < cutoff) delegates.delete(d);
+  for (const [d, v] of delegates) if (((v.class === "not_forwarding" || v.class === "unprobed") && v.at < cutoff) || (v.code_kind === "none" && v.at < nowS - NO_CODE_TTL_S)) delegates.delete(d);
   const queueAfter = JSON.stringify(queue);
   await Promise.all([
     JSON.stringify([...delegates]) !== delegatesBefore ? kv.put(KW.delegates(chain), JSON.stringify(Object.fromEntries(delegates))) : undefined,

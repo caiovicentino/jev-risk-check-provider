@@ -63,3 +63,30 @@ test("every facilitator down: every network is offered except one known to lose 
   const routes = [route("eip155:8453", "no_facilitator"), route("eip155:43114", "unprofitable"), route("eip155:143", "below_floor"), route(SOL, "no_facilitator")];
   assert.deepEqual(buildAccepts({}, undefined, routes).map((a) => a.network), ["eip155:8453", "eip155:137", "eip155:42161", "eip155:1329", SOL]);
 });
+
+test("PayAI's fee table survives a failed lookup across routing refreshes (a table read once is reused, not lost)", async () => {
+  const { mainnetFacilitators } = await import("../deploy/protected.js");
+  const env = { X402_FACILITATOR_URL_PAYAI: "https://payai-fees.test" };
+  let pricing: "up" | "down" = "up";
+  const realFetch = globalThis.fetch;
+  const realNow = Date.now;
+  let offset = 0;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith("https://payai-fees.test/pricing")) return pricing === "up" ? new Response(JSON.stringify({ rates: [{ network: "eip155:43114", scheme: "exact", transferMethod: "eip3009", usd: "0.00574" }] })) : new Response("down", { status: 503 });
+    return realFetch(input, init);
+  }) as typeof fetch;
+  Date.now = () => realNow() + offset;
+  try {
+    // Routing builds its facilitator list anew on every refresh: each call here is a new list.
+    const first = await mainnetFacilitators(env)[0]?.fees?.();
+    assert.equal(first?.get("eip155:43114"), 0.00574);
+    offset = 11 * 60_000;
+    pricing = "down";
+    const later = await mainnetFacilitators(env)[0]?.fees?.();
+    assert.equal(later?.get("eip155:43114"), 0.00574, "the last table, not an unknown fee that would put Avalanche back at a loss");
+  } finally {
+    globalThis.fetch = realFetch;
+    Date.now = realNow;
+  }
+});

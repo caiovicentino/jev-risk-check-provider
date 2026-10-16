@@ -69,3 +69,9 @@ test("the 402 challenge must list exactly the offered networks, at the table's p
   assert.equal(challengeCheck([{ network: "eip155:8453", amount: "3000" }, good[1] as { network: string; amount: string }], routes).level, "fail", "a wrong price");
   assert.equal(challengeCheck([good[0] as { network: string; amount: string }, { network: "eip155:143", amount: "1000" }], routes).level, "fail", "Permit2 not declared");
 });
+
+test("text from others reaches the report without control or bidi characters", async () => {
+  const { clean } = await import("../scripts/daily-check.js");
+  assert.equal(clean("ok\u001b[2K\u001b[1A FAIL — fixed‮!evil⁦ x\r\ny"), "ok [2K [1A FAIL — fixed !evil x y");
+  assert.equal(clean("a".repeat(500)).length, 240);
+});

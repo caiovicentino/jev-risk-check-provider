@@ -135,7 +135,7 @@ export function statusChecks(status: Status, prev: State | null, published?: { m
     if (c.lag_blocks > lag.warn || c.error || c.pending_reads >= 50 || newGaps > 0 || moved) level = "warn";
     if (c.lag_blocks > lag.fail || newGaps > 1000) level = "fail";
     const parts = [`lag ${c.lag_blocks}`, `gaps ${c.gaps}${was ? ` (${newGaps >= 0 ? "+" : ""}${newGaps} since last run)` : ""}`, `unbroken_since ${c.unbroken_since ?? "?"}${moved ? ` (moved from ${was?.unbroken_since})` : ""}`, `pending ${c.pending_reads}`];
-    if (c.error) parts.push(`error: ${c.error.slice(0, 160)}`);
+    if (c.error) parts.push(`error: ${clean(c.error, 160)}`);
     add(`kit_watch.${short(chain)}`, level, parts.join(", "));
   }
   return out;
@@ -159,6 +159,11 @@ export function challengeCheck(accepts: Accept[], routes: Route[]): Check {
     if (route && permit2 !== (route.transfer_method === "permit2")) problems.push(`${short(a.network)} transfer method ≠ route`);
   }
   return { id: "blackbox.challenge", level: problems.length ? "fail" : "ok", detail: problems.length ? problems.join("; ") : `${accepts.length} options, prices and transfer methods match` };
+}
+
+/** Text from others (comments, titles, errors) for a terminal and a file: control and bidi characters are blanked. */
+export function clean(text: string, max = 240): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
 function short(network: string): string {
@@ -294,11 +299,13 @@ async function main(): Promise<void> {
   // /status describes the isolate that answered, and a new isolate's first answer comes before its
   // feeds load (a paid request waits for them; /status does not). A list behind the published one
   // is looked at again on up to two more isolates before it counts.
-  if (status && published.metamask && status.data.metamask_phishing.as_of < published.metamask) {
-    for (let i = 0; i < 2 && status.data.metamask_phishing.as_of < published.metamask; i++) {
+  const behind = (s: Status) => (!!published.metamask && s.data.metamask_phishing.as_of < published.metamask) || (!!published.ofac && s.data.ofac_sdn.as_of < published.ofac);
+  if (status && behind(status)) {
+    for (let i = 0; i < 2 && behind(status); i++) {
       await new Promise((r) => setTimeout(r, 3000));
       const again = parse<Status>((await http("/status")).text);
       if (again && again.data.metamask_phishing.as_of > status.data.metamask_phishing.as_of) status.data.metamask_phishing = again.data.metamask_phishing;
+      if (again && again.data.ofac_sdn.as_of > status.data.ofac_sdn.as_of) status.data.ofac_sdn = again.data.ofac_sdn;
     }
   }
   if (!status) add("status", "fail", `HTTP ${statusRes.status}: not JSON`);
@@ -369,16 +376,16 @@ async function main(): Promise<void> {
     });
     await guard("github.codeql", async () => {
       const alerts = gh<Array<{ rule?: { severity?: string; description?: string } }>>(["api", `repos/${REPO}/code-scanning/alerts?state=open&per_page=100`]);
-      add("github.codeql", alerts.length ? "warn" : "ok", alerts.length ? `${alerts.length} open: ${alerts.slice(0, 3).map((a) => a.rule?.description).join("; ")}` : "0 open");
+      add("github.codeql", alerts.length ? "warn" : "ok", alerts.length ? `${alerts.length} open: ${alerts.slice(0, 3).map((a) => clean(a.rule?.description ?? "", 120)).join("; ")}` : "0 open");
     });
     await guard("github.dependabot", async () => {
       const alerts = gh<Array<{ number: number; security_advisory: { severity: string; summary: string }; dependency: { package: { name: string }; scope?: string; manifest_path: string } }>>(["api", `repos/${REPO}/dependabot/alerts?state=open&per_page=100`]);
       const runtime = alerts.filter((a) => a.dependency.scope === "runtime" && ["high", "critical"].includes(a.security_advisory.severity));
-      add("github.dependabot", runtime.length ? "fail" : alerts.length ? "warn" : "ok", alerts.length ? alerts.map((a) => `#${a.number} ${a.security_advisory.severity} ${a.dependency.package.name} (${a.dependency.scope ?? "?"}, ${a.dependency.manifest_path})`).join("; ") : "0 open");
+      add("github.dependabot", runtime.length ? "fail" : alerts.length ? "warn" : "ok", alerts.length ? alerts.map((a) => `#${a.number} ${a.security_advisory.severity} ${clean(a.dependency.package.name, 80)} (${a.dependency.scope ?? "?"}, ${clean(a.dependency.manifest_path, 80)})`).join("; ") : "0 open");
     });
     await guard("github.prs", async () => {
       const prs = gh<Array<{ number: number; title: string; author: { login: string } }>>(["pr", "list", "--repo", REPO, "--state", "open", "--json", "number,title,author"]);
-      add("github.prs", prs.length ? "info" : "ok", prs.length ? prs.map((p) => `#${p.number} ${p.title} (${p.author.login})`).join("; ") : "none open");
+      add("github.prs", prs.length ? "info" : "ok", prs.length ? prs.map((p) => `#${p.number} ${clean(p.title, 120)} (${clean(p.author.login, 40)})`).join("; ") : "none open");
     });
     await guard("github.release", async () => {
       const [r] = gh<Array<{ tagName: string }>>(["release", "list", "--repo", REPO, "--limit", "1", "--json", "tagName"]);
@@ -395,7 +402,7 @@ async function main(): Promise<void> {
           const fresh = comments.filter((c) => c.user.login !== OWN_LOGIN && c.created_at > was.updated_at);
           if (fresh.length) {
             // Untrusted text from other people: quoted for the reader, never followed.
-            add(`threads.${t.repo}#${t.number}`, "info", `${t.label}: ${fresh.length} new comment(s), ${issue.state}. ${fresh.map((c) => `[${c.user.login} ${c.created_at.slice(0, 16)} ${c.html_url}] «${c.body.replace(/\s+/g, " ").slice(0, 240)}»`).join(" ")}`);
+            add(`threads.${t.repo}#${t.number}`, "info", `${t.label}: ${fresh.length} new comment(s), ${issue.state}. ${fresh.map((c) => `[${clean(c.user.login, 40)} ${c.created_at.slice(0, 16)} ${clean(c.html_url, 120)}] «${clean(c.body)}»`).join(" ")}`);
           }
         }
         seen[key] = { comments: issue.comments, updated_at: issue.updated_at };
@@ -458,7 +465,7 @@ async function main(): Promise<void> {
       const zone = (await cf<{ result: Array<{ id: string }> }>(token, `/zones?name=${new URL(BASE).hostname}`)).result[0]?.id;
       const outside: OutsidePayment[] = [...(prev?.outside ?? [])];
       let ours = 0;
-      let unresolved = 0;
+      const unresolvedKeys = new Set<string>();
       const found: OutsidePayment[] = [];
       for (const key of fresh) {
         const [, network, tx] = /^st:(.+):([^:]+)$/.exec(key) ?? [];
@@ -466,7 +473,8 @@ async function main(): Promise<void> {
         const rec = parse<{ at?: string; path?: string; micro?: number }>(await (await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) })).text()) ?? {};
         const who = await payerOf(network, tx);
         if (!who) {
-          unresolved++;
+          // Read again next run (an RPC that failed today must not hide a payment for good).
+          unresolvedKeys.add(key);
           continue;
         }
         if (PROBE_PAYERS.has(who.payer)) {
@@ -486,7 +494,8 @@ async function main(): Promise<void> {
       }
       outside.push(...found);
       next.outside = outside.sort((a, b) => a.at.localeCompare(b.at));
-      next.settlements_seen = keys;
+      next.settlements_seen = keys.filter((k) => !unresolvedKeys.has(k));
+      const unresolved = unresolvedKeys.size;
       const total = outside.reduce((s, p) => s + p.micro, 0) / 1e6;
       const fmt = (p: OutsidePayment) => `$${(p.micro / 1e6).toFixed(4)} ${short(p.network)} ${p.path} ${p.at.slice(0, 16)} from ${p.payer.slice(0, 10)}… ${p.ua ?? "(no user agent found)"}${p.country ? ` [${p.country}]` : ""}`;
       if (baseline) add("revenue", "info", `baseline: ${keys.length} settlements, ${outside.length} from outside payers ($${total.toFixed(4)}), ${ours} probes, ${unresolved} unresolved`);

@@ -517,8 +517,8 @@ test("cron: a flood of delegations to a threat is worked off at the chain's budg
 
   const first = (await runKitWatch({ RATE: kv }, { fetchImpl: stub, now: T })) as KitWatchStats;
   const eth = first.chains["eip155:1"] as ChainStats;
-  // Ethereum's budget is 450 evaluations: 100 already flagged + 350 new; 250 wait in the queue.
-  assert.deepEqual([flaggedNow(), eth.writes_today, eth.pending, eth.gaps_total ?? 0], [450, 350, 250, 0]);
+  // Ethereum's budget is 400 evaluations: 100 already flagged + 300 new; 300 wait in the queue.
+  assert.deepEqual([flaggedNow(), eth.writes_today, eth.pending, eth.gaps_total ?? 0], [400, 300, 300, 0]);
   assert.ok(kv.reads + kv.puts.length < 600, `KV operations in the run: ${kv.reads + kv.puts.length}`);
 
   const second = (await runKitWatch({ RATE: kv }, { fetchImpl: stub, now: T + 60_000 })) as KitWatchStats;
@@ -612,4 +612,23 @@ test("scan endpoints: those that serve paid evaluations come last, after every o
     assert.ok(list.slice(firstEvaluation).every((u) => evaluation.has(u)), `${chain}: nothing after the evaluation endpoints`);
     assert.equal(new Set(list).size, list.length, `${chain}: no duplicates`);
   }
+});
+
+test("a delegate that had no code is classified again: its verdict expires after a day, and a family deployed at its address replaces it", async () => {
+  const kv = seeded();
+  const nowS = T / 1000;
+  const dEmpty = addr(0xe0e);
+  const dOld = addr(0xe0f);
+  // KIT_ADDRESS is DEPLOYER's CREATE at nonce 0 (kitCreation, block 100): judged "not a threat" while it had no code.
+  kv.data.set(KW.delegates("eip155:1"), JSON.stringify({
+    [dEmpty]: { class: "not_forwarding", at: nowS - 90_000, code_kind: "none", probes: 3 },
+    [dOld]: { class: "not_forwarding", at: nowS - 90_000, code_kind: "logic", bytes: 400, probes: 3 },
+    [KIT_ADDRESS]: { class: "not_forwarding", at: nowS - 60, code_kind: "none", probes: 3 },
+  }));
+  kv.data.set(KW.registry, JSON.stringify({ updated_at: "2026-10-16", families: [KIT, fam("sweeper-k", "sweeper", DRAINER)] }));
+  await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ blocks: kitCreation, code: (a) => (a === KIT_ADDRESS ? DRAINER : "0x") }), now: T });
+  const after = JSON.parse(kv.data.get(KW.delegates("eip155:1")) as string) as Record<string, DelegateVerdict>;
+  assert.equal(after[dEmpty], undefined, "a day-old no-code verdict expires: the delegate is read again when seen");
+  assert.equal(after[dOld]?.class, "not_forwarding", "a delegate with code keeps its verdict for 30 days");
+  assert.deepEqual([after[KIT_ADDRESS]?.class, after[KIT_ADDRESS]?.family], ["sweeper", "sweeper-k"], "a sweeper deployed at the address replaces the old verdict");
 });

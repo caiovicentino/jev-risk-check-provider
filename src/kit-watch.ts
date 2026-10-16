@@ -416,8 +416,10 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
     const family = familyOf(deps.families, f) ?? familyOf(deps.families, f.implementation_fingerprint ? { fingerprint: f.implementation_fingerprint, ...(f.implementation_skeleton ? { skeleton: f.implementation_skeleton } : {}) } : undefined);
     if (!family) continue;
     const t = seenAt(c.block);
-    // A new poisoner or sweeper deployment is known before anyone delegates to it.
-    if (family.class !== "drainer_kit" && !deps.delegates.has(c.address)) deps.delegates.set(c.address, { class: family.class, family: family.id, at: t, bytes: f.bytes });
+    // A new poisoner or sweeper deployment is known before anyone delegates to it, and replaces a
+    // verdict of "not a threat" given while the address had other code, or none.
+    const prior = deps.delegates.get(c.address)?.class;
+    if (family.class !== "drainer_kit" && (prior === undefined || prior === "not_forwarding" || prior === "unprobed")) deps.delegates.set(c.address, { class: family.class, family: family.id, at: t, bytes: f.bytes });
     // Behaviour-only families describe what a delegate does, not who deployed it.
     if (family.class === "forwarder") continue;
     stats.kit_contracts++;
