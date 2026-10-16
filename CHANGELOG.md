@@ -2,6 +2,15 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.11 — 2026-10-16: dependency updates
+
+Dependabot's monthly PRs #22–#24 could not pass CI: their regenerated root lockfile left out `utf-8-validate`, so `npm ci` refused it. The same updates are applied here with a consistent lockfile, at the versions Dependabot proposed (each public for at least 7 days; newer patches published in the last days are not taken).
+
+- Runtime: `@x402/core`, `@x402/evm`, `@x402/fetch` and `@x402/svm` 2.28.0; `viem` 2.57.4; `ai` 7.0.136; `tldts` 7.4.18. The MCP server's pins move with them (`@x402/evm`, `@x402/fetch` 2.28.0, `viem` 2.57.4).
+- `@noble/curves` 2.4.0 (it was 1.9.1). The Solana associated-token-account check (`deploy/svm-ata.ts`) now decodes points with `ed25519.Point.fromBytes`. It matched `@solana/spl-token` on 400 random owners and mints across both token programs, and `test/svm-ata.test.ts` pins four of them. curves 2 uses `@noble/hashes` 2.4.0, the version the Worker already pins (viem and `@x402/svm` still bring their own 1.x copies).
+- Development: `@types/node` 22.20.5 in the root, the packages and the Snap. CI actions: `actions/setup-node` 7.1.0 and `actions/upload-artifact` 7.0.2 (#21).
+- The signing-guard evaluation (`eval/guard.ts`, free) gives the same verdicts as the committed report: 22 of 33 drainer transactions refused, 0 of 84 legitimate ones.
+
 ## v0.6.10 — 2026-10-16: current phishing lists on new isolates, and a daily maintenance routine
 
 - **The MetaMask phishing list on new isolates.** The Worker refreshes the published feeds in the background, per isolate. A new isolate checked domains against the list embedded at deploy until its own refresh finished, and with little traffic most checks run on new isolates. On 2026-10-15 that embedded list was 16 days older than the published one (100,604 entries against 106,105). The last verified list is now kept in KV (`feed:metamask:v1`), like OFAC since v0.6.4: a new isolate applies it with one read, re-verified (signature with the pinned key, checksums, entry count, shrink bound), and a paid request on a cold isolate waits for it within the same 2.5 s. `/status` → `data.metamask_phishing.origin` says `kv`, `refreshed` or `embedded`.

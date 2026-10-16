@@ -2,16 +2,17 @@
 // associated token account (ATA): a program-derived address of (owner, token program, mint). A
 // transfer whose authority is a delegate of someone else's account would screen the delegate, not
 // the owner of the funds, so the paid flow accepts only a source that is the authority's own ATA.
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58Decode } from "../src/address-codec.js";
 
 const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 
+/** Whether 32 bytes decode to a point on the curve (RFC 8032 decoding, as Solana's PDA check does). */
 function onCurve(bytes: Uint8Array): boolean {
   try {
-    ed25519.ExtendedPoint.fromHex(bytes);
+    ed25519.Point.fromBytes(bytes);
     return true;
   } catch {
     return false;

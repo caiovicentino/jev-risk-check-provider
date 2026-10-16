@@ -1,6 +1,6 @@
 {
   "name": "x402check",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "private": true,
   "type": "module",
   "engines": {
@@ -42,22 +42,22 @@
   "devDependencies": {
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.20.5",
     "tsx": "^4.19.0",
     "tweetnacl": "^1.0.3",
     "typescript": "^5.7.0",
     "wrangler": "4.151.0"
   },
   "dependencies": {
-    "@noble/curves": "1.9.1",
+    "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
-    "@x402/core": "^2.27.0",
-    "@x402/evm": "^2.27.0",
-    "@x402/fetch": "^2.27.0",
-    "@x402/svm": "^2.27.0",
-    "ai": "^7.0.118",
-    "tldts": "^7.4.16",
-    "viem": "^2.56.9"
+    "@x402/core": "^2.28.0",
+    "@x402/evm": "^2.28.0",
+    "@x402/fetch": "^2.28.0",
+    "@x402/svm": "^2.28.0",
+    "ai": "^7.0.136",
+    "tldts": "^7.4.18",
+    "viem": "^2.57.4"
   },
   "overrides": {
     "jayson": {
