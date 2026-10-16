@@ -82,7 +82,7 @@ async function status(env: WorkerEnv): Promise<Response> {
     time: new Date().toISOString(),
     data: {
       ofac_sdn: { as_of: ofac.publish_date, age_days: ageDays(ofac.publish_date), addresses: ofac.addresses, origin: ofac.origin, scope: "direct listing only" },
-      metamask_phishing: { as_of: mm?.as_of ?? METAMASK_FEED_META.as_of, age_days: ageDays(mm?.as_of ?? METAMASK_FEED_META.as_of), entries: mm?.entries ?? METAMASK_FEED_META.entries, origin: mm ? "refreshed" : "embedded" },
+      metamask_phishing: { as_of: mm?.as_of ?? METAMASK_FEED_META.as_of, age_days: ageDays(mm?.as_of ?? METAMASK_FEED_META.as_of), entries: mm?.entries ?? METAMASK_FEED_META.entries, origin: mm ? (mm.origin === "kv" ? "kv" : "refreshed") : "embedded" },
       scamsniffer,
       forta_drainer_code: { as_of: FORTA_CODE_META.as_of, fingerprints: FORTA_CODE_META.fingerprints, origin: "embedded", note: "static 2023 dataset" },
       kit_watch: kitWatch,

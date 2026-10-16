@@ -12,9 +12,12 @@
 // signed manifest, its signature and the snapshot, re-verified on every load, so KV is never
 // trusted on its own), written once per release by whichever isolate verifies it first. A new
 // isolate loads it with one KV read before anything else, and the network refresh fetches
-// OFAC before the larger MetaMask list. A paid request on a cold isolate waits up to 2.5 s for
-// a current OFAC list (warm isolates never wait); past that it proceeds on the list it has, and
-// every attestation states the list date it used.
+// OFAC before the larger MetaMask list. The MetaMask list is kept the same way
+// (`feed:metamask:v1`, since 0.6.10): before it, a new isolate checked domains against the list
+// embedded at deploy until its own refresh finished, and with little traffic most checks ran on
+// such isolates (on 2026-10-15 the embedded list was 16 days older than the published one). A
+// paid request on a cold isolate waits up to 2.5 s for both (warm isolates never wait); past that
+// it proceeds on the lists it has, and every attestation states the list dates it used.
 import { hashSetFromBytes, feedHost, type LoadedFeed } from "../src/threat-intel.js";
 import { artifactDigest, sanctionsListMeta, setSanctionsList, type SanctionsRow } from "../src/sanctions.js";
 import type { ExecutionContext, WorkerEnv } from "./runtime.js";
@@ -31,6 +34,8 @@ const RETRY_INTERVAL_MS = 10 * 60 * 1000;
 const COLD_START_WAIT_MS = 2500;
 /** The last verified OFAC release, for new isolates: { manifest, sig, ofac } as published. */
 export const OFAC_KV_KEY = "feed:ofac:v1";
+/** The last verified MetaMask list, for new isolates: { manifest, sig, bin (base64), json } as published. */
+export const METAMASK_KV_KEY = "feed:metamask:v1";
 const MIN_METAMASK_RATIO = 0.9;
 const MIN_OFAC_RATIO = 0.8;
 const MAX_ALLOWLIST = 500;
@@ -43,12 +48,14 @@ type Manifest = {
   ofac?: { publish_date: string; addresses: number; json_sha256: string; xml_sha256?: string };
 };
 
-export type FreshMetamask = LoadedFeed & { allow: ReadonlySet<string>; entries: number };
+/** `origin`: where this isolate got the list (KV, or the published feeds). */
+export type FreshMetamask = LoadedFeed & { allow: ReadonlySet<string>; entries: number; origin: "kv" | "network" };
 export type FreshState = { metamask?: FreshMetamask; checked_at?: string; generated_at?: string; error?: string };
 export type Baseline = { metamaskAsOf: string; metamaskEntries: number; ofacRows: number };
 
 export type FeedsKv = { get(key: string): Promise<string | null>; put(key: string, value: string): Promise<void> };
 type OfacBundle = { manifest: string; sig: string; ofac: string };
+type MetamaskBundle = { manifest: string; sig: string; bin: string; json: string };
 
 let state: FreshState = {};
 let lastAttempt = 0;
@@ -59,11 +66,27 @@ let ofacCurrent = false;
 let markOfacReady: (() => void) | null = null;
 /** The release KV holds, once read (null: none). */
 let kvRead: Promise<string | null> | null = null;
+/** The MetaMask list KV holds, once read and applied (null: none), and whether that read is over. */
+let metamaskKvRead: Promise<string | null> | null = null;
+let metamaskSettled = false;
 /** Set once a cold wait ran out: this isolate then stops waiting (a down network must not slow every check). */
 let coldWaitOver = false;
 
 export function freshFeeds(): FreshState {
   return state;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  // In chunks: one String.fromCharCode call over ~850 KB would overflow the stack.
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 async function sha256Hex(data: ArrayBuffer | Uint8Array): Promise<string> {
@@ -142,6 +165,40 @@ export async function loadOfacFromKv(kv: FeedsKv, embedded: Baseline, publicKey 
   return of.publish_date;
 }
 
+/** A published MetaMask list checked against its signed manifest entry and the list in use. */
+async function verifiedMetamask(mm: NonNullable<Manifest["metamask"]>, bin: ArrayBuffer, json: ArrayBuffer, current: { entries: number }): Promise<Omit<FreshMetamask, "origin">> {
+  if ((await sha256Hex(bin)) !== mm.bin_sha256 || (await sha256Hex(json)) !== mm.json_sha256) throw new Error("metamask: checksum mismatch");
+  if (bin.byteLength % 8 !== 0 || bin.byteLength / 8 !== mm.entries) throw new Error("metamask: entry count mismatch");
+  if (mm.entries < current.entries * MIN_METAMASK_RATIO) throw new Error(`metamask: ${mm.entries} entries is a large shrink`);
+  const parsed = JSON.parse(new TextDecoder().decode(json)) as { allowlist?: unknown };
+  const allow = Array.isArray(parsed.allowlist) ? parsed.allowlist.filter((h): h is string => typeof h === "string" && h === feedHost(h) && /^[a-z0-9.-]{3,253}$/.test(h)) : [];
+  if (allow.length > MAX_ALLOWLIST) throw new Error(`metamask: ${allow.length} allowlisted hosts is implausible`);
+  return { set: hashSetFromBytes(bin), as_of: mm.as_of, allow: new Set(allow), entries: mm.entries };
+}
+
+/**
+ * The last verified MetaMask list kept in KV, verified again (signature with the pinned key,
+ * checksums, entry count, shrink bound) and applied when newer than the list in use. Returns the
+ * list date KV holds, or null when it holds none. Exported for tests.
+ */
+export async function loadMetamaskFromKv(kv: FeedsKv, embedded: Baseline, publicKey = FEEDS_PUBLIC_KEY): Promise<string | null> {
+  const raw = await kv.get(METAMASK_KV_KEY);
+  if (!raw) return null;
+  const bundle = JSON.parse(raw) as Partial<MetamaskBundle>;
+  if (typeof bundle.manifest !== "string" || typeof bundle.sig !== "string" || typeof bundle.bin !== "string" || typeof bundle.json !== "string") throw new Error("kv metamask: malformed bundle");
+  if (!(await verifyManifest(new TextEncoder().encode(bundle.manifest).buffer, bundle.sig, publicKey))) throw new Error("kv metamask: signature invalid");
+  const manifest = JSON.parse(bundle.manifest) as Manifest;
+  const mm = manifest.metamask;
+  if (manifest.format !== 1 || !mm || !saneDate(mm.as_of)) throw new Error("kv metamask: no plausible list");
+  const inUse = () => state.metamask ?? { as_of: embedded.metamaskAsOf, entries: embedded.metamaskEntries };
+  if (mm.as_of > inUse().as_of) {
+    const verified = await verifiedMetamask(mm, base64ToBytes(bundle.bin).buffer, new TextEncoder().encode(bundle.json).buffer, inUse());
+    // The network refresh may have applied a newer list meanwhile: never step back.
+    if (mm.as_of > inUse().as_of) state = { ...state, metamask: { ...verified, origin: "kv" } };
+  }
+  return mm.as_of;
+}
+
 export type RefreshOptions = {
   /** Where the last verified OFAC release is kept for new isolates. */
   kv?: FeedsKv | undefined;
@@ -149,6 +206,8 @@ export type RefreshOptions = {
   kvDate?: (() => Promise<string | null>) | undefined;
   /** Called once the OFAC step is over, whatever its outcome. */
   onOfac?: (() => void) | undefined;
+  /** The MetaMask list KV holds (null: none), once this isolate has read it. */
+  metamaskKvDate?: (() => Promise<string | null>) | undefined;
 };
 
 /** Fetches, verifies and applies newer feeds, OFAC first. Exported for tests (inject fetch, key, baselines and KV). */
@@ -201,13 +260,16 @@ export async function refreshFeeds(base: string, embedded: Baseline, fetchImpl: 
   if (mm && saneDate(mm.as_of) && mm.as_of > current.as_of) {
     try {
       const [bin, json] = await Promise.all([get(base, "metamask-phishing.bin", fetchImpl), get(base, "metamask.json", fetchImpl)]);
-      if ((await sha256Hex(bin)) !== mm.bin_sha256 || (await sha256Hex(json)) !== mm.json_sha256) throw new Error("metamask: checksum mismatch");
-      if (bin.byteLength % 8 !== 0 || bin.byteLength / 8 !== mm.entries) throw new Error("metamask: entry count mismatch");
-      if (mm.entries < current.entries * MIN_METAMASK_RATIO) throw new Error(`metamask: ${mm.entries} entries is a large shrink`);
-      const parsed = JSON.parse(new TextDecoder().decode(json)) as { allowlist?: unknown };
-      const allow = Array.isArray(parsed.allowlist) ? parsed.allowlist.filter((h): h is string => typeof h === "string" && h === feedHost(h) && /^[a-z0-9.-]{3,253}$/.test(h)) : [];
-      if (allow.length > MAX_ALLOWLIST) throw new Error(`metamask: ${allow.length} allowlisted hosts is implausible`);
-      next.metamask = { set: hashSetFromBytes(bin), as_of: mm.as_of, allow: new Set(allow), entries: mm.entries };
+      next.metamask = { ...(await verifiedMetamask(mm, bin, json, current)), origin: "network" };
+      // KV keeps it for new isolates: written once per list, and only forward. A failed write
+      // costs new isolates the network round trip, never the refresh itself.
+      const held = opts.kv ? await (opts.metamaskKvDate?.() ?? Promise.resolve(null)) : null;
+      if (opts.kv && (held === null || mm.as_of > held)) {
+        await opts.kv.put(METAMASK_KV_KEY, JSON.stringify({ manifest: manifestText, sig: sigText, bin: bytesToBase64(new Uint8Array(bin)), json: new TextDecoder().decode(json) } satisfies MetamaskBundle)).then(
+          () => void (metamaskKvRead = Promise.resolve(mm.as_of)),
+          (err: unknown) => console.error(`feeds: the MetaMask list was not kept in KV (${String(err instanceof Error ? err.message : err).slice(0, 120)})`),
+        );
+      }
     } catch (err) {
       errors.push(String(err instanceof Error ? err.message : err));
     }
@@ -246,11 +308,23 @@ export function maybeRefreshFeeds(env: WorkerEnv, ctx: ExecutionContext | undefi
         )
       : Promise.resolve(null);
     ctx.waitUntil(kvRead);
+    metamaskKvRead = (kv ? loadMetamaskFromKv(kv, embedded, inject.publicKey) : Promise.resolve(null)).then(
+      (date) => {
+        metamaskSettled = true;
+        return date;
+      },
+      (err: unknown) => {
+        metamaskSettled = true;
+        console.error(`feeds: the MetaMask list in KV was not used (${String(err instanceof Error ? err.message : err).slice(0, 120)})`);
+        return null;
+      },
+    );
+    ctx.waitUntil(metamaskKvRead);
   }
   const now = Date.now();
   if (now - lastAttempt < (lastOk ? OK_INTERVAL_MS : RETRY_INTERVAL_MS)) return Promise.resolve();
   lastAttempt = now;
-  const run = refreshFeeds(base, embedded, inject.fetchImpl, inject.publicKey, { kv, kvDate: () => kvRead ?? Promise.resolve(null), onOfac: () => markOfacReady?.() }).then(
+  const run = refreshFeeds(base, embedded, inject.fetchImpl, inject.publicKey, { kv, kvDate: () => kvRead ?? Promise.resolve(null), onOfac: () => markOfacReady?.(), metamaskKvDate: () => metamaskKvRead ?? Promise.resolve(null) }).then(
     () => {
       lastOk = true;
     },
@@ -264,14 +338,15 @@ export function maybeRefreshFeeds(env: WorkerEnv, ctx: ExecutionContext | undefi
 }
 
 /**
- * A paid request on a cold isolate waits up to COLD_START_WAIT_MS for a current OFAC list;
- * a warm isolate never waits. Past the wait it proceeds on the list it has (the attestation
- * states its date), says so once, and the isolate stops waiting.
+ * A paid request on a cold isolate waits up to COLD_START_WAIT_MS for a current OFAC list and for
+ * the MetaMask list KV holds; a warm isolate never waits. Past the wait it proceeds on the lists
+ * it has (the attestation states their dates), says so once, and the isolate stops waiting.
  */
 export async function awaitColdStart(): Promise<void> {
-  if (!ofacReady || ofacCurrent || coldWaitOver) return;
+  if (!ofacReady || (ofacCurrent && metamaskSettled) || coldWaitOver) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = await Promise.race([ofacReady.then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), COLD_START_WAIT_MS)))]);
+  const ready = Promise.all([ofacReady, metamaskKvRead ?? Promise.resolve(null)]).then(() => false);
+  const timedOut = await Promise.race([ready, new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), COLD_START_WAIT_MS)))]);
   clearTimeout(timer);
   if (timedOut && !coldWaitOver) {
     coldWaitOver = true;

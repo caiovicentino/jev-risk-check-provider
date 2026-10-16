@@ -12,15 +12,15 @@ export const OFAC_NEXT = new Date(Date.parse(`${OFAC_SDN_META.publish_date}T00:0
 export const EMBEDDED = { metamaskAsOf: "2026-01-01", metamaskEntries: 150, ofacRows: OFAC_SDN_META.addresses };
 const sha = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
 
-export function release(ofacDate = OFAC_NEXT) {
+export function release(ofacDate = OFAC_NEXT, metamaskDate = "2026-01-02") {
   const bin = buildHashBlob(Array.from({ length: 200 }, (_, i) => `phish-${i}.example`));
-  const mmJson = JSON.stringify({ meta: { as_of: "2026-01-02" }, allowlist: [] });
+  const mmJson = JSON.stringify({ meta: { as_of: metamaskDate }, allowlist: [] });
   const rows = [...OFAC_SDN_ADDRESSES, [NEW_SANCTIONED, "ETH", 1, "TEST ENTITY"] as const];
   const ofacJson = JSON.stringify({ meta: { source: "test" }, rows });
   const manifest = JSON.stringify({
     format: 1,
     generated_at: "2026-10-03T11:00:00Z",
-    metamask: { as_of: "2026-01-02", entries: bin.byteLength / 8, bin_sha256: sha(bin), json_sha256: sha(mmJson) },
+    metamask: { as_of: metamaskDate, entries: bin.byteLength / 8, bin_sha256: sha(bin), json_sha256: sha(mmJson) },
     ofac: { publish_date: ofacDate, addresses: rows.length, json_sha256: sha(ofacJson) },
   });
   const sig = sign(null, Buffer.from(manifest), privateKey).toString("base64url");
@@ -32,7 +32,7 @@ export function release(ofacDate = OFAC_NEXT) {
     const body = files[name];
     return body === undefined ? new Response("nope", { status: 404 }) : new Response(typeof body === "string" ? body : new Uint8Array(body));
   }) as unknown as typeof fetch;
-  return { manifest, sig, ofacJson, fetchImpl, fetched };
+  return { manifest, sig, ofacJson, bin, mmJson, fetchImpl, fetched };
 }
 
 export function memoryKv() {

@@ -3,7 +3,7 @@
 // wait for the network (deploy/fresh-feeds.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { awaitColdStart, loadOfacFromKv, maybeRefreshFeeds, OFAC_KV_KEY, refreshFeeds } from "../deploy/fresh-feeds.js";
+import { awaitColdStart, loadOfacFromKv, maybeRefreshFeeds, METAMASK_KV_KEY, OFAC_KV_KEY, refreshFeeds } from "../deploy/fresh-feeds.js";
 import { sanctionsListMeta, screenSubject } from "../src/sanctions.js";
 import { parseSubject } from "../src/address.js";
 import { EMBEDDED, hangingFetch, memoryKv, NEW_SANCTIONED, OFAC_NEXT, release, TEST_PUBLIC_KEY } from "./fixtures/feeds-release.js";
@@ -43,7 +43,8 @@ test("the network refresh writes a release to KV once, and never over a newer on
   const kv = memoryKv();
   let ofacSteps = 0;
   await refreshFeeds("https://feeds.example/", EMBEDDED, r.fetchImpl, TEST_PUBLIC_KEY, { kv, kvDate: async () => OFAC_NEXT, onOfac: () => ofacSteps++ });
-  assert.deepEqual(kv.puts, [OFAC_KV_KEY]);
+  // The newer MetaMask list is kept too (v0.6.10, test/fresh-feeds-metamask-kv.test.ts).
+  assert.deepEqual(kv.puts, [OFAC_KV_KEY, METAMASK_KV_KEY]);
   assert.equal(ofacSteps, 1);
   assert.equal(sanctionsListMeta().publish_date, later);
   assert.ok(r.fetched.indexOf("ofac-sdn.json") < r.fetched.indexOf("metamask-phishing.bin"), "OFAC is fetched before MetaMask");
@@ -51,7 +52,7 @@ test("the network refresh writes a release to KV once, and never over a newer on
   for (const held of [later, "2099-01-01"]) {
     const again = release(later);
     await refreshFeeds("https://feeds.example/", EMBEDDED, again.fetchImpl, TEST_PUBLIC_KEY, { kv, kvDate: async () => held });
-    assert.deepEqual(kv.puts, [OFAC_KV_KEY], `held ${held}`);
+    assert.deepEqual(kv.puts, [OFAC_KV_KEY, METAMASK_KV_KEY], `held ${held}`);
     assert.ok(!again.fetched.includes("ofac-sdn.json"));
   }
 });

@@ -2,6 +2,18 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.10 — 2026-10-16: current phishing lists on new isolates, and a daily maintenance routine
+
+- **The MetaMask phishing list on new isolates.** The Worker refreshes the published feeds in the background, per isolate. A new isolate checked domains against the list embedded at deploy until its own refresh finished, and with little traffic most checks run on new isolates. On 2026-10-15 that embedded list was 16 days older than the published one (100,604 entries against 106,105). The last verified list is now kept in KV (`feed:metamask:v1`), like OFAC since v0.6.4: a new isolate applies it with one read, re-verified (signature with the pinned key, checksums, entry count, shrink bound), and a paid request on a cold isolate waits for it within the same 2.5 s. `/status` → `data.metamask_phishing.origin` says `kv`, `refreshed` or `embedded`.
+- **Daily maintenance** (`docs/MAINTENANCE.md`, `scripts/daily-check.ts`). The lead agent runs a daily routine from a Claude Code session cron:
+  - a read-only check of production (against the last run), the unpaid black box, GitHub, the deployed commit, the feeds, money and npm;
+  - the four suites, and a review of new code;
+  - free evaluations weekly, and the paid suite when the probe payer is funded;
+  - fixes within the runbooks.
+
+  The check found the stale MetaMask list on its first run.
+- Maintenance runs keep their evaluation reports out of `eval/evidence` (`EVAL_OUT_DIR`). A listing-only Bazaar run (`PAY=none`) no longer overwrites the committed report.
+
 ## v0.6.9 — 2026-10-15: no retries into a rate limit
 
 While Base caught up after v0.6.8, every Base endpoint answered some requests with HTTP 429. Each batch still asked every endpoint in turn, including ones that had just refused, which only prolonged their limits.
