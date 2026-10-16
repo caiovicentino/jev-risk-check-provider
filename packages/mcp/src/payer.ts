@@ -6,12 +6,12 @@
 // from there: never from the text of an error, which can carry the 402's own (third-party) fields.
 //
 // x402check's own checks are paid only to x402check's pay_to, and never more than a check costs:
-// a hijacked API origin cannot collect more. A resource that answered with anything but success
-// to a signed authorization gets no new one for the same payee until that one expires: it may
-// still settle it.
+// a hijacked API origin cannot collect more. A payee that may still settle an authorization this
+// server signed for a site (not accepted yet, or awaiting its answer) gets no new one there, on
+// any network and for any path, until that one is accepted or expires.
 import { findDefaultAsset } from "@x402/evm";
 import { ExactEvmScheme } from "@x402/evm/exact/client";
-import { wrapFetchWithPayment, x402Client, x402HTTPClient, type PaymentRequirements } from "@x402/fetch";
+import { decodePaymentResponseHeader, wrapFetchWithPayment, x402Client, x402HTTPClient, type PaymentRequirements } from "@x402/fetch";
 import type { FetchLike } from "@x402check/client";
 import { X402CHECK_PAY_TO } from "@x402check/client/guard";
 import { privateKeyToAccount } from "viem/accounts";
@@ -59,7 +59,10 @@ export type PaymentRefusalKind =
   | "untrusted_check_payee"
   /** A check's 402 asks for more than a check costs (MAX_CHECK_PAYMENT_USD). */
   | "over_check_price"
-  /** An earlier authorization to the same payee for the same resource was not accepted and has not expired. */
+  /**
+   * An earlier authorization to the same payee on the same site (any network, any path) was not
+   * accepted, or still awaits its answer, and has not expired.
+   */
   | "authorization_outstanding";
 
 /** A payment this server refused or could not make. The message never contains secrets. */
@@ -109,7 +112,8 @@ export interface Payer {
   /**
    * Fetches a third-party x402 resource. When it asks for payment, `authorize` decides right
    * before the payment is signed, on exactly what would be signed: nothing is signed unless it
-   * returns undefined. At most one payment per call, within the cap and the budget.
+   * returns undefined. At most one payment per call, within the cap and the budget, and none to a
+   * payee that may still settle an earlier one from this server on that site (`authorization_outstanding`).
    */
   payResource(url: string, init: RequestInit, options: ResourcePaymentOptions): Promise<Response>;
   /** Removes the private key from text (defense in depth for every output). */
@@ -251,14 +255,55 @@ function signedInfo(paymentPayload: unknown): SignedPayment {
   };
 }
 
-/** A resource as payments are remembered: origin and path (the query and fragment may vary per call). */
-function resourceOf(url: string): string {
+/**
+ * The site a resource is on, as authorizations are remembered: its origin as the URL parser
+ * normalizes it (lowercase, punycode, no default port), without a trailing dot. Not the path: every
+ * spelling of it (`/x/`, `%66`, `//`, `./`), and every other resource there, is the same site.
+ */
+function siteOf(url: string): string {
   try {
     const u = new URL(url);
-    return `${u.origin}${u.pathname}`;
+    return `${u.protocol}//${u.hostname.replace(/\.$/, "")}${u.port ? `:${u.port}` : ""}`;
   } catch {
     return url;
   }
+}
+
+/**
+ * The settlement receipt a response carries (PAYMENT-RESPONSE, else X-PAYMENT-RESPONSE, read as
+ * @x402/fetch reads them): undefined when there is none, null when it does not decode to an object.
+ */
+export function settlementReceipt(res: unknown): Record<string, unknown> | null | undefined {
+  const headers = (res as { headers?: unknown } | null)?.headers as { get?: unknown } | null | undefined;
+  if (!headers || typeof headers.get !== "function") return undefined;
+  const get = (name: string): string | undefined => {
+    try {
+      const value: unknown = (headers as { get(name: string): unknown }).get(name);
+      return typeof value === "string" && value !== "" ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const header = get("PAYMENT-RESPONSE") ?? get("X-PAYMENT-RESPONSE");
+  if (header === undefined) return undefined;
+  try {
+    const receipt: unknown = decodePaymentResponseHeader(header);
+    return isRecord(receipt) ? receipt : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the resource accepted the signed authorization it was sent: a 2xx whose settlement
+ * receipt, when it has one, decodes and does not say `success: false`. Anything else (a 402, an
+ * error, a redirect, a receipt that says the payment failed or cannot be read) leaves it to be
+ * settled until it expires. x402check_pay reports "paid" on exactly this.
+ */
+export function paymentAccepted(res: { status: number }): boolean {
+  if (!(res.status >= 200 && res.status < 300)) return false;
+  const receipt = settlementReceipt(res);
+  return receipt === undefined || (receipt !== null && receipt.success !== false);
 }
 
 /** Whether `err`, or an error in its `cause` chain, is an instance of `type` (identity, never text). */
@@ -332,12 +377,22 @@ interface CallState {
   signed: boolean;
   /** The request carrying the signed authorization was handed to the network. */
   sent: boolean;
-  /** A resource payment: the resource (origin and path) it pays for. */
-  resource?: string | undefined;
-  /** The (network, payee, resource) of the authorization signed in this call. */
+  /** A resource payment: the site it pays on (siteOf). */
+  site?: string | undefined;
+  /** The key (payee and site) of the record this call made in `outstanding`, before signing. */
   paid?: string | undefined;
   /** Until when that authorization can be settled (unix seconds). */
   validUntil?: number | undefined;
+}
+
+/** An authorization this server signed, or is about to sign, for a payee on a site. */
+interface Held {
+  /** The call it belongs to: only that call updates or clears it. */
+  owner: CallState;
+  /** Until when it can be settled (unix seconds): its validBefore once signed. */
+  until: number;
+  /** The request carrying it has not been answered yet. */
+  inFlight: boolean;
 }
 
 function refuse(state: CallState, kind: PaymentRefusalKind, message: string): PaymentRefused {
@@ -447,9 +502,34 @@ export function createPayer(options: PayerOptions): Payer {
   const checkPayees = (options.checkPayees ?? X402CHECK_PAY_TO).map((p) => p.toLowerCase());
   let spentMicro = 0n;
   const secret = key.slice(2).toLowerCase();
-  /** (network, payee, resource) → until when an authorization the resource did not accept can be settled (unix seconds). */
-  const outstanding = new Map<string, number>();
+  /**
+   * Payee (lowercase) and site → the latest authorization this server signed there that can still
+   * be settled: not accepted, or awaiting its answer. A call signs only when its key holds none
+   * (checked before the payee's check, and again after it in the same step that records the new
+   * one, before signing), so one key never holds two settleable authorizations from this process,
+   * and a success clears only the record of the call that made it.
+   */
+  const outstanding = new Map<string, Held>();
   const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+  /** The live record for `key` (an expired one is dropped: it can no longer be settled). */
+  const holding = (key: string): Held | undefined => {
+    const held = outstanding.get(key);
+    if (held !== undefined && held.until <= nowSeconds()) {
+      outstanding.delete(key);
+      return undefined;
+    }
+    return held;
+  };
+  const heldText = (held: Held): string => {
+    const until = new Date(held.until * 1000).toISOString();
+    return held.inFlight
+      ? `an authorization this server signed for this payee and resource is still awaiting the resource's answer (another call), and it can be settled until ${until}: nothing new is signed until it is accepted or expires`
+      : `an authorization this server signed for this payee and resource was not accepted, and it can still be settled until ${until}: nothing new is signed until then`;
+  };
+  /** Drops the record `state` made, when it is still that call's. */
+  const release = (state: CallState): void => {
+    if (state.paid !== undefined && outstanding.get(state.paid)?.owner === state) outstanding.delete(state.paid);
+  };
 
   // Among the options the x402 client kept, the one this payer pays: within the cap, with an
   // acceptable lifetime, Base first.
@@ -484,19 +564,11 @@ export function createPayer(options: PayerOptions): Payer {
         if (cost > maxMicro) return stopWith("over_max_payment", TEXT.overCap);
         if (!lifetimeOk(r)) return stopWith("authorization_too_long", tooLong(r));
         if (spentMicro + cost > budgetMicro) return stopWith("budget_exhausted", TEXT.budget);
-        if (gate && state.resource !== undefined) {
-          // The resource did not accept an earlier authorization to this payee that can still be settled.
-          const paid = `${r.network}|${String(r.payTo).toLowerCase()}|${state.resource}`;
-          const until = outstanding.get(paid);
-          if (until !== undefined && until > nowSeconds()) {
-            return stopWith(
-              "authorization_outstanding",
-              `an authorization this server signed for this payee and resource was not accepted, and it can still be settled until ${new Date(until * 1000).toISOString()}: nothing new is signed until then`,
-            );
-          }
-          if (until !== undefined) outstanding.delete(paid);
-          state.paid = paid;
-        }
+        // A resource payment: none while this payee may still settle another one from this server
+        // on this site, whatever the network (the check is not bought for it).
+        const paid = gate && state.site !== undefined ? `${String(r.payTo).toLowerCase()}|${state.site}` : undefined;
+        const held = paid === undefined ? undefined : holding(paid);
+        if (held) return stopWith("authorization_outstanding", heldText(held));
         if (gate) {
           // Decided on exactly what would be signed, right before signing. A failure refuses.
           const description = paymentRequired.resource?.description;
@@ -517,6 +589,15 @@ export function createPayer(options: PayerOptions): Payer {
           // A paid check inside the authorization may itself have spent from the budget.
           if (spentMicro + cost > budgetMicro) return stopWith("budget_exhausted", TEXT.budget);
         }
+        if (paid !== undefined) {
+          // Again, after the check: another call may have signed for this payee meanwhile. Recorded
+          // in the same step, before signing, so concurrent calls see this one from now on.
+          const heldNow = holding(paid);
+          if (heldNow) return stopWith("authorization_outstanding", heldText(heldNow));
+          for (const [k, h] of outstanding) if (h.until <= nowSeconds()) outstanding.delete(k);
+          outstanding.set(paid, { owner: state, until: nowSeconds() + r.maxTimeoutSeconds, inFlight: true });
+          state.paid = paid;
+        }
         // Committed before signing: a signed authorization can be settled even if the response is lost.
         spentMicro += cost;
         state.reservedMicro = cost;
@@ -526,6 +607,9 @@ export function createPayer(options: PayerOptions): Payer {
         state.signed = true;
         const info = signedInfo(paymentPayload);
         state.validUntil = info.validUntil;
+        // The record now holds the signed authorization's own expiry.
+        const record = state.paid === undefined ? undefined : outstanding.get(state.paid);
+        if (record?.owner === state) record.until = info.validUntil ?? nowSeconds() + MAX_AUTHORIZATION_SECONDS;
         try {
           onSigned?.(info);
         } catch {
@@ -533,11 +617,12 @@ export function createPayer(options: PayerOptions): Payer {
         }
       })
       .onPaymentCreationFailure(async () => {
-        // Nothing was signed: give the reservation back.
+        // Nothing was signed (or it is discarded): give the reservation and the record back.
         if (state.reservedMicro !== undefined) {
           spentMicro -= state.reservedMicro;
           state.reservedMicro = undefined;
         }
+        release(state);
       });
     // Before anything is created, on the parsed challenge: refusals are recorded, not inferred.
     return new x402HTTPClient(client).onPaymentRequired(async ({ paymentRequired }) => {
@@ -587,16 +672,19 @@ export function createPayer(options: PayerOptions): Payer {
         return authorize(payment);
       };
       const fetchResource = boundedFetch(resourceFetch, state, { timeoutMs, signal, onSent, refuseRedirects: true });
-      state.resource = resourceOf(url);
-      // A sent authorization the resource did not answer with success can still be settled: no new one to that payee until it expires.
-      const settle = (status: number | undefined): void => {
-        if (!state.sent || state.paid === undefined) return;
-        if (status !== undefined && status >= 200 && status < 300) outstanding.delete(state.paid);
-        else outstanding.set(state.paid, state.validUntil ?? nowSeconds() + MAX_AUTHORIZATION_SECONDS);
+      state.site = siteOf(url);
+      // This call's record: cleared when the resource accepts the payment, or when nothing was sent
+      // (it cannot be settled); otherwise kept, no longer in flight, until the authorization expires.
+      // A record that is another call's by now (this one's expired meanwhile) is left alone.
+      const settle = (res: Response | undefined): void => {
+        const record = state.paid === undefined ? undefined : outstanding.get(state.paid);
+        if (record?.owner !== state) return;
+        if (!state.sent || (res !== undefined && paymentAccepted(res))) release(state);
+        else record.inFlight = false;
       };
       try {
         const res = await wrapFetchWithPayment(fetchResource, makeClient(state, gate, signal, onSigned))(url, init);
-        settle(res.status);
+        settle(res);
         return res;
       } catch (err) {
         settle(undefined);

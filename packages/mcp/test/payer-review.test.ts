@@ -90,7 +90,7 @@ describe("finding 7: no second authorization while an unaccepted one can still b
     }
   });
 
-  test("after a successful payment the next call pays again; another resource is not held back", async () => {
+  test("after a successful payment the next call pays again; another site is not held back", async () => {
     let rejectNext = false;
     const w = world(issuer, {
       merchant: (c) => {
@@ -105,8 +105,10 @@ describe("finding 7: no second authorization while an unaccepted one can still b
       assert.equal((await call(s.client, "x402check_pay", { url: RESOURCE })).structuredContent?.outcome, "paid");
       rejectNext = true;
       assert.equal((await call(s.client, "x402check_pay", { url: `${ORIGIN}/v1/other` })).structuredContent?.outcome, "payment_rejected");
-      // The same payee for another resource is not held back.
-      assert.equal((await call(s.client, "x402check_pay", { url: RESOURCE })).structuredContent?.outcome, "paid");
+      // The same payee elsewhere on that site waits (the key is payee and site since the second
+      // review's finding M3: test/outstanding.test.ts); on another site it is not held back.
+      assert.equal(errorCode(await call(s.client, "x402check_pay", { url: RESOURCE })), "authorization_outstanding");
+      assert.equal((await call(s.client, "x402check_pay", { url: "https://api.other.example/v1/forecast" })).structuredContent?.outcome, "paid");
       assert.equal(w.payments().length, 4);
       assert.ok(w.payments().every((p) => (p.payload?.accepted as { payTo: string }).payTo === MERCHANT));
     } finally {
