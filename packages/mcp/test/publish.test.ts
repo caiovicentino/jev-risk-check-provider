@@ -34,14 +34,17 @@ test("a publish carries an npm-shrinkwrap.json that pins every installed package
   assert.match(tarballProblems(good, undefined, { shrinkwrap: true }).join("\n"), /missing from the tarball: npm-shrinkwrap\.json/);
   assert.deepEqual(tarballProblems([...good, "npm-shrinkwrap.json"], undefined, { shrinkwrap: true }), []);
   const pkg = { name: "@x402check/mcp", version: "0.3.1", dependencies: { "@x402check/client": "^0.5.0", viem: "2.0.0" } };
+  // As `npm shrinkwrap` writes it (test/publish-tarball.test.ts has the stricter rules of 2026-10-16).
+  const sri = (c: string) => `sha512-${c.repeat(86)}==`;
   const pinned = (over: Record<string, unknown> = {}) => ({
     name: "@x402check/mcp",
     version: "0.3.1",
+    lockfileVersion: 3,
     packages: {
       "": { version: "0.3.1", dependencies: { "@x402check/client": "^0.5.0", viem: "2.0.0" } },
-      "node_modules/@x402check/client": { version: "0.5.0", resolved: "https://registry.npmjs.org/@x402check/client/-/client-0.5.0.tgz", integrity: "sha512-x" },
-      "node_modules/viem": { version: "2.0.0", resolved: "https://registry.npmjs.org/viem/-/viem-2.0.0.tgz", integrity: "sha512-y" },
-      "node_modules/typescript": { version: "6.0.0", dev: true },
+      "node_modules/@x402check/client": { version: "0.5.0", resolved: "https://registry.npmjs.org/@x402check/client/-/client-0.5.0.tgz", integrity: sri("x") },
+      "node_modules/viem": { version: "2.0.0", resolved: "https://registry.npmjs.org/viem/-/viem-2.0.0.tgz", integrity: sri("y") },
+      "node_modules/typescript": { version: "6.0.0", resolved: "https://registry.npmjs.org/typescript/-/typescript-6.0.0.tgz", integrity: sri("z"), dev: true },
       ...over,
     },
   });
