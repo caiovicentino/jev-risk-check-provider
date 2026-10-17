@@ -21,9 +21,18 @@ import {
 import { guardSolanaSigner, X402CheckBlockedError, type GuardVerdict } from "../src/guard.js";
 import { boundProvider } from "./helpers.js";
 
+// @solana/web3.js builds the legitimate instructions (an encoder independent of this guard). It is a
+// dependency of the repository root, not of this package: where it is not installed (the package's CI
+// job), these tests are skipped; the root's npm ci makes it available.
 const require = createRequire(import.meta.url);
-const web3 = require("/Volumes/SSD Major/paysol/node_modules/@solana/web3.js/lib/index.cjs.js");
-const { PublicKey, StakeProgram, Authorized, Lockup, StakeAuthorizationLayout } = web3;
+const web3 = (() => {
+  try {
+    return require("@solana/web3.js");
+  } catch {
+    return undefined;
+  }
+})();
+const { PublicKey, StakeProgram, Authorized, Lockup, StakeAuthorizationLayout } = web3 ?? {};
 const CLOCK = "SysvarC1ock11111111111111111111111111111111";
 const RENT = "SysvarRent111111111111111111111111111111111";
 const HISTORY = "SysvarStakeHistory1111111111111111111111111";
@@ -77,7 +86,8 @@ const pk = (a: string) => new PublicKey(a);
 const VOTE = "Vote111111111111111111111111111111111111111";
 const someVote = "CertusDeBmqN8ZawdkxK5kFGMwBXdudvWHYwtNgNhvLu";
 
-for (const v5 of [false, true]) {
+if (!web3) test("legitimate stake flows built by @solana/web3.js (installed at the repository root)", { skip: "@solana/web3.js is not installed here" }, () => undefined);
+for (const v5 of web3 ? [false, true] : []) {
   const L = v5 ? "v5" : "old";
   test(`${L}: create + initialize (signer = staker & withdrawer) + delegate`, async () => {
     const r = await run((signer, stake) => {
