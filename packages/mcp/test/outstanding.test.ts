@@ -83,7 +83,8 @@ describe("finding M3: one settleable authorization per payee and site", () => {
     }
   });
 
-  test("concurrent calls: one signs, the others wait for its answer", async () => {
+  test("calls made while one call's payment awaits its answer are refused, without a check, until it is answered", async () => {
+    // Calls made together, while the first one's check runs, are in test/concurrent-pay.test.ts.
     const answer = latch();
     const w = world(issuer, {
       merchant: async (c) => {
@@ -94,30 +95,31 @@ describe("finding M3: one settleable authorization per payee and site", () => {
     });
     const s = await session({ payerKey: generatePrivateKey(), fetch: w.fetch });
     try {
-      const done: ToolResult[] = [];
-      const calls = [0, 1, 2].map(() => call(s.client, "x402check_pay", { url: RESOURCE }).then((r) => (done.push(r), r)));
+      const first = call(s.client, "x402check_pay", { url: RESOURCE });
+      let others: ToolResult[] = [];
       try {
-        // The signed one is held by the merchant; the two others must return without signing.
-        await waitFor(() => done.length >= 2, "two calls refused while the first awaits its answer", 5000);
+        // The signed one is held by the merchant; two calls made meanwhile must return without signing.
+        await waitFor(() => w.payments().length === 1, "the first call's payment to reach the merchant", 5000);
+        others = await Promise.all([0, 1].map(() => call(s.client, "x402check_pay", { url: RESOURCE })));
       } finally {
         answer.open();
       }
-      await Promise.all(calls);
-      for (const r of done.slice(0, 2)) {
+      for (const r of others) {
         assert.equal(outcome(r), "refused/authorization_outstanding");
         assert.match(message(r), IN_FLIGHT);
       }
-      assert.equal(outcome(done[2] as ToolResult), "payment_rejected");
+      assert.equal(outcome(await first), "payment_rejected");
       const later = await call(s.client, "x402check_pay", { url: RESOURCE });
       assert.equal(outcome(later), "refused/authorization_outstanding");
       assert.match(message(later), NOT_ACCEPTED);
       assert.equal(w.payments().length, 1);
+      assert.equal(w.checks.length, 1, "only the first call bought a check");
     } finally {
       await s.close();
     }
   });
 
-  test("a concurrent call that would succeed signs nothing while one is in flight; after its success, the next call pays", async () => {
+  test("a call made while one is in flight signs nothing; after that one's success, the next call pays", async () => {
     const answer = latch();
     const w = world(issuer, {
       merchant: async (c) => {
@@ -128,16 +130,17 @@ describe("finding M3: one settleable authorization per payee and site", () => {
     });
     const s = await session({ payerKey: generatePrivateKey(), fetch: w.fetch });
     try {
-      const done: ToolResult[] = [];
-      const calls = [0, 1].map(() => call(s.client, "x402check_pay", { url: RESOURCE }).then((r) => (done.push(r), r)));
+      const first = call(s.client, "x402check_pay", { url: RESOURCE });
+      let during: ToolResult;
       try {
-        await waitFor(() => done.length >= 1, "the second call to return", 5000);
+        await waitFor(() => w.payments().length === 1, "the first call's payment to reach the merchant", 5000);
+        during = await call(s.client, "x402check_pay", { url: RESOURCE });
       } finally {
         answer.open();
       }
-      await Promise.all(calls);
-      assert.deepEqual(done.map(outcome), ["refused/authorization_outstanding", "paid"]);
-      assert.match(message(done[0] as ToolResult), IN_FLIGHT);
+      assert.equal(outcome(during), "refused/authorization_outstanding");
+      assert.match(message(during), IN_FLIGHT);
+      assert.equal(outcome(await first), "paid");
       assert.equal(outcome(await call(s.client, "x402check_pay", { url: RESOURCE })), "paid", "accepted: the record is gone");
       assert.equal(w.payments().length, 2);
     } finally {

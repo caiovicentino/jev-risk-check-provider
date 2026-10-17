@@ -8,7 +8,9 @@
 // x402check's own checks are paid only to x402check's pay_to, and never more than a check costs:
 // a hijacked API origin cannot collect more. A payee that may still settle an authorization this
 // server signed for a site (not accepted yet, or awaiting its answer) gets no new one there, on
-// any network and for any path, until that one is accepted or expires.
+// any network and for any path, until that one is accepted or expires; while one call checks a
+// payee for a site (or asks the user), another call to that payee there is refused before it
+// buys a check of its own.
 import { findDefaultAsset } from "@x402/evm";
 import { ExactEvmScheme } from "@x402/evm/exact/client";
 import { decodePaymentResponseHeader, wrapFetchWithPayment, x402Client, x402HTTPClient, type PaymentRequirements } from "@x402/fetch";
@@ -61,7 +63,8 @@ export type PaymentRefusalKind =
   | "over_check_price"
   /**
    * An earlier authorization to the same payee on the same site (any network, any path) was not
-   * accepted, or still awaits its answer, and has not expired.
+   * accepted, or still awaits its answer, and has not expired; or another call is about to sign
+   * one there (its check of the payee, or the user's decision, is under way).
    */
   | "authorization_outstanding";
 
@@ -113,7 +116,8 @@ export interface Payer {
    * Fetches a third-party x402 resource. When it asks for payment, `authorize` decides right
    * before the payment is signed, on exactly what would be signed: nothing is signed unless it
    * returns undefined. At most one payment per call, within the cap and the budget, and none to a
-   * payee that may still settle an earlier one from this server on that site (`authorization_outstanding`).
+   * payee that may still settle an earlier one from this server on that site, or that another call
+   * is about to pay there (`authorization_outstanding`, decided before `authorize` runs).
    */
   payResource(url: string, init: RequestInit, options: ResourcePaymentOptions): Promise<Response>;
   /** Removes the private key from text (defense in depth for every output). */
@@ -378,18 +382,23 @@ interface CallState {
   sent: boolean;
   /** A resource payment: the site it pays on (siteOf). */
   site?: string | undefined;
-  /** The key (payee and site) of the record this call made in `outstanding`, before signing. */
+  /** The key (payee and site) of the record this call made in `outstanding`, before the payee's check. */
   paid?: string | undefined;
   /** Until when that authorization can be settled (unix seconds). */
   validUntil?: number | undefined;
 }
 
-/** An authorization this server signed, or is about to sign, for a payee on a site. */
+/** An authorization this server signed, or is deciding whether to sign, for a payee on a site. */
 interface Held {
   /** The call it belongs to: only that call updates or clears it. */
   owner: CallState;
-  /** Until when it can be settled (unix seconds): its validBefore once signed. */
+  /**
+   * Until when it can be settled (unix seconds): its validBefore once signed. While the call is
+   * still checking, the longest the record may hold the key should the call never end.
+   */
   until: number;
+  /** Nothing is signed yet: the payee's check, or the user's decision, is under way. */
+  checking: boolean;
   /** The request carrying it has not been answered yet. */
   inFlight: boolean;
 }
@@ -502,11 +511,13 @@ export function createPayer(options: PayerOptions): Payer {
   let spentMicro = 0n;
   const secret = key.slice(2).toLowerCase();
   /**
-   * Payee (lowercase) and site → the latest authorization this server signed there that can still
-   * be settled: not accepted, or awaiting its answer. A call signs only when its key holds none
-   * (checked before the payee's check, and again after it in the same step that records the new
-   * one, before signing), so one key never holds two settleable authorizations from this process,
-   * and a success clears only the record of the call that made it.
+   * Payee (lowercase) and site → the call deciding whether to sign there, or the latest
+   * authorization this server signed there that can still be settled: not accepted, or awaiting
+   * its answer. A call takes its key's record in the same step that finds it free (no await
+   * between them), before the payee's check: a concurrent call is refused before it buys a check.
+   * The record is given back when the call signs nothing, and the call signs only while the record
+   * is still its own (checked again right before signing), so one key never holds two settleable
+   * authorizations from this process, and a success clears only the record of the call that made it.
    */
   const outstanding = new Map<string, Held>();
   const nowSeconds = (): number => Math.floor(Date.now() / 1000);
@@ -519,7 +530,16 @@ export function createPayer(options: PayerOptions): Payer {
     }
     return held;
   };
+  /** Records `state`'s authorization for `key` (expired records are dropped first). */
+  const hold = (key: string, state: CallState, record: Omit<Held, "owner">): void => {
+    for (const [k, h] of outstanding) if (h.until <= nowSeconds()) outstanding.delete(k);
+    outstanding.set(key, { owner: state, ...record });
+    state.paid = key;
+  };
   const heldText = (held: Held): string => {
+    if (held.checking) {
+      return "another call is about to sign an authorization for this payee and resource (its check of the payee, or the user's decision, is under way): nothing new is signed until that call signs nothing, or its authorization is accepted or expires";
+    }
     const until = new Date(held.until * 1000).toISOString();
     return held.inFlight
       ? `an authorization this server signed for this payee and resource is still awaiting the resource's answer (another call), and it can be settled until ${until}: nothing new is signed until it is accepted or expires`
@@ -548,8 +568,13 @@ export function createPayer(options: PayerOptions): Payer {
       .register("eip155:*", new ExactEvmScheme(account))
       .setSpendControls({ maxAmountPerPayment: `$${maxPaymentUsd.toFixed(6)}` })
       .onBeforePaymentCreation(async ({ selectedRequirements: r, paymentRequired }) => {
+        // Whether this run took its key's record (below). A refusal gives back only that one: the
+        // x402 wrapper's retry runs this hook again in the same call, whose record from the first
+        // run (an authorization that was sent) must stay. An abort runs no failure hook.
+        let took = false;
         const stopWith = (kind: PaymentRefusalKind, message: string) => {
           refuse(state, kind, message);
+          if (took) release(state);
           return { abort: true as const, reason: kind };
         };
         if (signal?.aborted) return stopWith("cancelled", TEXT.cancelled);
@@ -564,10 +589,18 @@ export function createPayer(options: PayerOptions): Payer {
         if (!lifetimeOk(r)) return stopWith("authorization_too_long", tooLong(r));
         if (spentMicro + cost > budgetMicro) return stopWith("budget_exhausted", TEXT.budget);
         // A resource payment: none while this payee may still settle another one from this server
-        // on this site, whatever the network (the check is not bought for it).
+        // on this site, whatever the network, or while another call is deciding whether to sign one
+        // there. The key's record is taken in the same step that finds it free (no await between
+        // them), before the payee's check: a concurrent call is refused before it buys a check. It
+        // holds the key for at most MAX_AUTHORIZATION_SECONDS should this call never end (the check
+        // and the user's decision are bounded well below that).
         const paid = gate && state.site !== undefined ? `${String(r.payTo).toLowerCase()}|${state.site}` : undefined;
-        const held = paid === undefined ? undefined : holding(paid);
-        if (held) return stopWith("authorization_outstanding", heldText(held));
+        if (paid !== undefined) {
+          const held = holding(paid);
+          if (held) return stopWith("authorization_outstanding", heldText(held));
+          hold(paid, state, { until: nowSeconds() + MAX_AUTHORIZATION_SECONDS, checking: true, inFlight: false });
+          took = true;
+        }
         if (gate) {
           // Decided on exactly what would be signed, right before signing. A failure refuses.
           const description = paymentRequired.resource?.description;
@@ -589,13 +622,13 @@ export function createPayer(options: PayerOptions): Payer {
           if (spentMicro + cost > budgetMicro) return stopWith("budget_exhausted", TEXT.budget);
         }
         if (paid !== undefined) {
-          // Again, after the check: another call may have signed for this payee meanwhile. Recorded
-          // in the same step, before signing, so concurrent calls see this one from now on.
+          // Signing now, while the record is still this call's. It is another call's only if this
+          // one's lapsed during the check (or the user's decision) and that call took the key:
+          // then nothing is signed. Otherwise (this call's, or dropped as lapsed with the key still
+          // free) it is recorded again, in the same step, for the authorization about to be signed.
           const heldNow = holding(paid);
-          if (heldNow) return stopWith("authorization_outstanding", heldText(heldNow));
-          for (const [k, h] of outstanding) if (h.until <= nowSeconds()) outstanding.delete(k);
-          outstanding.set(paid, { owner: state, until: nowSeconds() + r.maxTimeoutSeconds, inFlight: true });
-          state.paid = paid;
+          if (heldNow && heldNow.owner !== state) return stopWith("authorization_outstanding", heldText(heldNow));
+          hold(paid, state, { until: nowSeconds() + r.maxTimeoutSeconds, checking: false, inFlight: true });
         }
         // Committed before signing: a signed authorization can be settled even if the response is lost.
         spentMicro += cost;
