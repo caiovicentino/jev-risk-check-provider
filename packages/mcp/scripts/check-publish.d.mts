@@ -16,6 +16,8 @@ export function packedFiles(dir?: string): string[];
 export function sourceModules(dir?: string): string[];
 /** The entries of a .tgz (`tar -tzf`). */
 export function tarballEntries(tgz: string): string[];
+/** Each entry's type, in `tarballEntries` order: the first character of its `tar -tvzf` line ("-" a regular file). */
+export function tarballEntryTypes(tgz: string): string[];
 /** One entry of a .tgz (`tar -xzOf`), or undefined when it does not hold it. */
 export function tarballText(tgz: string, entry: string): string | undefined;
 /** What is wrong with a packed .tgz: the same checks, on what it holds. `modules` default to this checkout's src/. */

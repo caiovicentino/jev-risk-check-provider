@@ -3,8 +3,8 @@
 //   what `npm pack --dry-run` lists and ./npm-shrinkwrap.json;
 // - `node scripts/check-publish.mjs --tarball <file.tgz>`: checks a packed tarball itself, which is
 //   what `npm publish <file.tgz>` uploads (that command runs no prepublishOnly, and a later `npm pack`
-//   rebuilds): its listing (`tar -tzf`), and the package.json and npm-shrinkwrap.json inside it
-//   (`tar -xzOf`).
+//   rebuilds): its listing (`tar -tzf`, and `tar -tvzf` for each entry's type: regular files only),
+//   and the package.json and npm-shrinkwrap.json inside it (`tar -xzOf`).
 // Both refuse:
 // - a local `file:` / `link:` / `workspace:` dependency: it works in this checkout but breaks for
 //   everyone installing from npm. Replace it with the published version first (e.g.
@@ -198,6 +198,22 @@ export function tarballEntries(tgz) {
     .filter((line) => line !== "");
 }
 
+/**
+ * The type of each entry of a .tgz, in the order `tar -tzf` lists them: the first character of its
+ * `tar -tvzf` line, as both bsdtar and GNU tar print it ("-" a regular file, "d" a directory, "l" a
+ * symbolic link, "h" a hard link, ...). Only the first character is read: the rest of the line
+ * (owner, date) differs between tars and locales.
+ */
+export function tarballEntryTypes(tgz) {
+  return execFileSync("tar", ["-tvzf", resolve(tgz)], TAR)
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => line[0]);
+}
+
+/** What an entry type other than a regular file is, for the refusal. */
+const ENTRY_KINDS = { d: "a directory", l: "a symbolic link", h: "a hard link", c: "a character device", b: "a block device", p: "a FIFO", s: "a socket" };
+
 /** One entry of a .tgz, as `tar -xzOf` prints it; undefined when the tarball does not hold it. */
 export function tarballText(tgz, entry) {
   try {
@@ -217,16 +233,23 @@ function parsed(text) {
 
 /**
  * What is wrong with a packed .tgz (empty when it may be published): the checks above, applied to
- * what it holds. Every entry must be a file under package/, listed once; `modules` are the modules
- * its dist/ must hold (default: this checkout's src/).
+ * what it holds. Every entry must be a regular file under package/, listed once: npm packs no
+ * directory or link entries (checked on the published 0.3.1 tarball and on npm 10.9's pack of
+ * nested directories), and a link under an expected name (package/dist/server.js) is refused.
+ * `modules` are the modules its dist/ must hold (default: this checkout's src/).
  */
 export function packedTarballProblems(tgz, modules = sourceModules()) {
   const problems = [];
   const files = [];
   const seen = new Set();
-  for (const entry of tarballEntries(tgz)) {
+  const entries = tarballEntries(tgz);
+  const types = tarballEntryTypes(tgz);
+  if (types.length !== entries.length) problems.push(`tar lists ${entries.length} entries but ${types.length} entry types: the tarball cannot be checked entry by entry`);
+  for (const [i, entry] of entries.entries()) {
+    const type = types[i];
     if (seen.has(entry)) problems.push(`the tarball holds ${entry} more than once`);
     else if (!entry.startsWith("package/")) problems.push(`unexpected entry in the tarball, outside package/: ${entry}`);
+    else if (type !== "-") problems.push(`the tarball holds ${entry} as ${ENTRY_KINDS[type] ?? `an entry of type "${String(type)}"`}: npm packs regular files only`);
     else files.push(entry.slice("package/".length));
     seen.add(entry);
   }
@@ -262,7 +285,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const pkg = parsed(tarballText(tgz, "package/package.json"));
     const what = isRecord(pkg) ? `${basename(tgz)} (${pkg.name}@${pkg.version})` : basename(tgz);
     if (problems.length > 0) refuse(what, problems);
-    console.log(`${what}: no local dependency; the tarball holds package.json, README.md, LICENSE, a dist/ for every module of src/ and an npm-shrinkwrap.json that pins every package from the registry.`);
+    console.log(`${what}: no local dependency; the tarball holds, as regular files only, package.json, README.md, LICENSE, a dist/ for every module of src/ and an npm-shrinkwrap.json that pins every package from the registry.`);
   } else {
     const pkg = JSON.parse(readFileSync(join(PACKAGE_DIR, "package.json"), "utf8"));
     const local = localDependencies(pkg);

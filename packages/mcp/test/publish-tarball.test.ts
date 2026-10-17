@@ -4,12 +4,12 @@
 // with a sha512 hash. Local only: fixtures in a temp dir, nothing installed or published.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { packedFiles, packedTarballProblems, registryTarball, shrinkwrapProblems, tarballEntries } from "../scripts/check-publish.mjs";
+import { packedFiles, packedTarballProblems, registryTarball, shrinkwrapProblems, tarballEntries, tarballEntryTypes } from "../scripts/check-publish.mjs";
 
 const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { files: string[]; dependencies: Record<string, string> };
 const CHECK_PUBLISH = fileURLToPath(new URL("../scripts/check-publish.mjs", import.meta.url));
@@ -43,11 +43,11 @@ function pack(dir: string): string {
   return join(dir, `${NAME}-1.0.0.tgz`);
 }
 
-/** A tarball holding exactly `entries` of `dir` (no directory entries, as npm packs). */
+/** A tarball holding exactly `entries` of `dir`, as tar stores them (a directory named alone, without its contents). */
 function tarOf(dir: string, entries: readonly string[]): string {
   const out = join(dir, "crafted.tgz");
   // COPYFILE_DISABLE: macOS tar would add AppleDouble (._*) entries for extended attributes.
-  execFileSync("tar", ["-czf", out, "-C", dir, ...entries], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+  execFileSync("tar", ["--no-recursion", "-czf", out, "-C", dir, ...entries], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
   return out;
 }
 
@@ -174,6 +174,7 @@ describe("L3: --tarball checks the packed .tgz itself", () => {
   test("a tarball npm packed, with a shrinkwrap that pins its tree, passes", () => {
     const tgz = pack(fixture());
     assert.ok(tarballEntries(tgz).every((entry) => entry.startsWith("package/")));
+    assert.deepEqual(tarballEntryTypes(tgz), tarballEntries(tgz).map(() => "-"), "npm packs regular files only: no directory or link entries");
     assert.deepEqual(packedTarballProblems(tgz, ["index", "server"]), []);
   });
 
@@ -204,6 +205,32 @@ describe("L3: --tarball checks the packed .tgz itself", () => {
     const twice = content([...files, "package/package.json"]);
     // Refused for the duplicate itself; what tar then prints for that member differs between bsdtar and GNU tar.
     assert.match(twice, /the tarball holds package\/package\.json more than once/);
+  });
+
+  test("an entry that is not a regular file is refused, even under an expected name: a symbolic link, a hard link, a directory", () => {
+    // The 2026-10-17 review (low): the entries' names were checked, not their types, so a
+    // package/dist/server.js that was a symbolic or hard link passed. npm packs regular files only
+    // (the published 0.3.1 tarball, and npm 10.9's pack of nested dist/ directories, hold nothing else).
+    const dir = fixture();
+    mkdirSync(join(dir, "package"));
+    for (const f of ["package.json", "README.md", "LICENSE", "npm-shrinkwrap.json", "dist"]) cpSync(join(dir, f), join(dir, "package", f), { recursive: true });
+    const files = ["package/package.json", "package/README.md", "package/LICENSE", "package/npm-shrinkwrap.json", ...["index.js", "index.d.ts", "server.js", "server.d.ts"].map((f) => `package/dist/${f}`)];
+    const content = (entries: readonly string[]): string => packedTarballProblems(tarOf(dir, entries), ["index", "server"]).join("\n");
+    const server = join(dir, "package", "dist", "server.js");
+    assert.equal(content(files), "", "regular files pass");
+    rmSync(server);
+    symlinkSync("index.js", server);
+    assert.deepEqual(tarballEntryTypes(tarOf(dir, files)).slice(-2), ["l", "-"], "tar stores it as a symbolic link");
+    assert.match(content(files), /the tarball holds package\/dist\/server\.js as a symbolic link: npm packs regular files only/);
+    rmSync(server);
+    // tar stores the second name of one file as a hard link to the first (package/dist/index.js).
+    linkSync(join(dir, "package", "dist", "index.js"), server);
+    assert.deepEqual(tarballEntryTypes(tarOf(dir, files)).slice(-2), ["h", "-"], "tar stores it as a hard link");
+    assert.match(content(files), /the tarball holds package\/dist\/server\.js as a hard link: npm packs regular files only/);
+    rmSync(server);
+    writeFileSync(server, "export {};\n");
+    assert.equal(content(files), "");
+    assert.match(content(["package/", "package/dist/", ...files]), /the tarball holds package\/ as a directory: npm packs regular files only\n.*the tarball holds package\/dist\/ as a directory: npm packs regular files only/s);
   });
 
   test("the command: exit 0 for a tarball that passes, 1 for one that does not, 2 for a usage error", () => {
