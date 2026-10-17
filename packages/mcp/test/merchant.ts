@@ -77,6 +77,15 @@ export function authorizationOf(call: Call | undefined): Record<string, string> 
   return ((call?.payload?.payload as { authorization?: Record<string, string> } | undefined)?.authorization ?? {}) as Record<string, string>;
 }
 
+/**
+ * A 200 that accepts the signed payment `call` carried: its settlement receipt (PAYMENT-RESPONSE)
+ * says `success: true`, for the network paid on, which is what x402check_pay reports as "paid".
+ */
+export function accepted(call: Call, body: unknown = { ok: true }): Response {
+  const network = (call.payload?.accepted as { network?: string } | undefined)?.network ?? "eip155:8453";
+  return json(200, body, { "PAYMENT-RESPONSE": b64({ success: true, transaction: TX, network, payer: authorizationOf(call).from ?? "" }) });
+}
+
 export function world(issuer: Issuer, o: WorldOptions = {}) {
   const calls: Call[] = [];
   const checks: RiskCheckRequest[] = [];
@@ -97,8 +106,7 @@ export function world(issuer: Issuer, o: WorldOptions = {}) {
     }
     if (o.merchant) return o.merchant(call);
     if (!call.paid) return paymentRequired();
-    const from = authorizationOf(call).from ?? "";
-    return json(200, { city: "Lisbon", forecast: "sunny" }, { "PAYMENT-RESPONSE": b64({ success: true, transaction: TX, network: "eip155:8453", payer: from }) });
+    return accepted(call, { city: "Lisbon", forecast: "sunny" });
   };
   const merchantCalls = (): Call[] => calls.filter((c) => c.url !== DID_URL && c.url !== api);
   return { fetch, calls, checks, merchantCalls, payments: () => merchantCalls().filter((c) => c.paid) };

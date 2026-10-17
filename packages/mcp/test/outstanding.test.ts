@@ -145,14 +145,20 @@ describe("finding M3: one settleable authorization per payee and site", () => {
     }
   });
 
-  test("a 2xx whose receipt says the payment failed, or cannot be read, leaves it settleable", async () => {
+  test("a 2xx without a receipt that says success: true leaves it settleable", async () => {
+    // Until the 2026-10-17 review, a 2xx with no receipt, or with a `success` other than the
+    // boolean false, cleared the record (test/payment-accepted.test.ts).
     const cases: Array<[string, (from: string) => Record<string, string>, boolean]> = [
       ["PAYMENT-RESPONSE success: false", (from) => ({ "PAYMENT-RESPONSE": receipt({ success: false, errorReason: "nonce" }, from) }), false],
       ["X-PAYMENT-RESPONSE success: false", (from) => ({ "X-PAYMENT-RESPONSE": receipt({ success: false }, from) }), false],
       ["an unreadable PAYMENT-RESPONSE", () => ({ "PAYMENT-RESPONSE": "not base64 json!" }), false],
       ["a PAYMENT-RESPONSE that is not an object", () => ({ "PAYMENT-RESPONSE": b64("ok") }), false],
+      ["no receipt", () => ({}), false],
+      ['PAYMENT-RESPONSE success: "false"', (from) => ({ "PAYMENT-RESPONSE": receipt({ success: "false" }, from) }), false],
+      ["PAYMENT-RESPONSE success: null", (from) => ({ "PAYMENT-RESPONSE": receipt({ success: null }, from) }), false],
+      ["a PAYMENT-RESPONSE without success", (from) => ({ "PAYMENT-RESPONSE": receipt({}, from) }), false],
       ["PAYMENT-RESPONSE success: true", (from) => ({ "PAYMENT-RESPONSE": receipt({ success: true }, from) }), true],
-      ["no receipt", () => ({}), true],
+      ["X-PAYMENT-RESPONSE success: true", (from) => ({ "X-PAYMENT-RESPONSE": receipt({ success: true }, from) }), true],
     ];
     for (const [label, headers, accepted] of cases) {
       const w = world(issuer, { merchant: (c) => (c.paid ? json(200, { error: "payment failed: please retry" }, headers(authorizationOf(c).from ?? "")) : paymentRequired()) });

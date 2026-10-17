@@ -201,11 +201,11 @@ Arguments: `url`, `method` (`GET` by default), `body`, `headers`, `max_usd`, `co
 
 | `outcome` | Meaning |
 |---|---|
-| `paid` | x402check cleared the payee, and the payment was signed, sent and accepted: the resource answered with a 2xx whose settlement receipt, if it sent one, does not say the payment failed. |
+| `paid` | x402check cleared the payee, and the payment was signed, sent and accepted: the resource answered with a 2xx and a settlement receipt (`PAYMENT-RESPONSE`) that says `success: true`. |
 | `no_payment_required` | The resource answered without a 402: returned as is, nothing checked or paid. |
 | `refused` | Nothing was sent with a signature. Refusals come from x402check's verdict, the user, `max_usd`, the cap, the budget (the payer's, or the credits' for the check), no payable option, an unsupported x402 version, a too long-lived authorization, an oversized or slow 402, a redirect, a private host, a cancelled call, a bad URL or a missing payer. `error.code` says which. |
 | `payment_rejected` | The payment was sent, but the resource answered 402 again. The signed authorization can still be settled until `payment.valid_until`: do not pay that resource again before then. Until then the server refuses to sign another payment to that payee on that site (`authorization_outstanding`), on any network and for any path, whatever the resource's response says. The same holds after any other answer that does not confirm the payment, after a lost connection once a payment was sent, and while another call's payment to that payee on that site awaits its answer. |
-| `failed` | The resource could not be reached, or it answered the payment without accepting it: an error, a redirect (not followed), or a 2xx whose receipt says the payment was not settled or cannot be read (the last two are `payment_unconfirmed`). `payment_sent` says whether a signed payment went out; such a payment may still be settled until `payment.valid_until`, and until then the server signs no new one to that payee on that site. |
+| `failed` | The resource could not be reached, or it answered the payment without accepting it: an error, a redirect (not followed), or a 2xx without a settlement receipt that says `success: true` (no receipt, one that cannot be read, or one that says otherwise). The last two are `payment_unconfirmed`. `payment_sent` says whether a signed payment went out; such a payment may still be settled until `payment.valid_until`, and until then the server signs no new one to that payee on that site. |
 
 ```text
 x402check_pay: PAID. x402check cleared the payee right before the payment was signed.

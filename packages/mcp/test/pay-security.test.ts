@@ -9,6 +9,7 @@ import { runPay } from "../src/pay.js";
 import { createPayer, PaymentRefused } from "../src/payer.js";
 import { json, makeIssuer, USDC_BASE, ISSUER, type Issuer } from "./helpers.js";
 import {
+  accepted,
   assertNoSecret,
   authorizationOf,
   b64,
@@ -303,7 +304,7 @@ describe("redirects with a custom fetch (mcp-3)", () => {
   test("a response for the URL requested (fragment aside) is not a redirect", async () => {
     const w = world(issuer, {
       merchant: (c) => {
-        const res = c.paid ? json(200, { ok: true }) : paymentRequired();
+        const res = c.paid ? accepted(c) : paymentRequired();
         Object.defineProperty(res, "url", { value: c.url.replace(/#.*$/, "") });
         return res;
       },
@@ -369,7 +370,7 @@ describe("x402check's own pay_to (mcp-6)", () => {
       [() => BLOCK, "refused"],
       [undefined, "paid"],
     ] as const) {
-      const w = world(issuer, { ...(decide ? { decide } : {}), merchant: (c) => (c.paid ? json(200, { ok: true }) : paymentRequired([option({ payTo: X402CHECK_PAY_TO })])) });
+      const w = world(issuer, { ...(decide ? { decide } : {}), merchant: (c) => (c.paid ? accepted(c) : paymentRequired([option({ payTo: X402CHECK_PAY_TO })])) });
       const s = await session({ fetch: w.fetch, creditToken: TOKEN, payerKey: generatePrivateKey() });
       try {
         const r = await call(s.client, "x402check_pay", { url: RESOURCE });
@@ -389,7 +390,7 @@ describe("x402check's own pay_to (mcp-6)", () => {
 
   test("on x402check's own API origin, its pay_to is paid without a check", async () => {
     const credits = "https://x402check.xyz/v1/credits";
-    const w = world(issuer, { merchant: (c) => (c.paid ? json(200, { credited_usd: "$0.010" }) : paymentRequired([option({ payTo: X402CHECK_PAY_TO })])) });
+    const w = world(issuer, { merchant: (c) => (c.paid ? accepted(c, { credited_usd: "$0.010" }) : paymentRequired([option({ payTo: X402CHECK_PAY_TO })])) });
     const s = await session({ fetch: w.fetch, creditToken: TOKEN, payerKey: generatePrivateKey() });
     try {
       const r = await call(s.client, "x402check_pay", { url: credits, method: "POST", body: '{"amount_usd":0.01}' });
@@ -403,7 +404,7 @@ describe("x402check's own pay_to (mcp-6)", () => {
 
   test("with another API origin configured, only that origin is trusted", async () => {
     const staging = "https://staging.x402check.example";
-    const w = world(issuer, { api: staging, merchant: (c) => (c.paid ? json(200, { ok: true }) : paymentRequired([option({ payTo: X402CHECK_PAY_TO })])) });
+    const w = world(issuer, { api: staging, merchant: (c) => (c.paid ? accepted(c) : paymentRequired([option({ payTo: X402CHECK_PAY_TO })])) });
     const s = await session({ fetch: w.fetch, creditToken: TOKEN, payerKey: generatePrivateKey(), baseUrl: staging });
     try {
       const production = await call(s.client, "x402check_pay", { url: "https://x402check.xyz/v1/credits" });
@@ -500,7 +501,7 @@ describe("the authorization's lifetime (mcp-8)", () => {
     const w = world(issuer, {
       merchant: (c) =>
         c.paid
-          ? json(200, { ok: true })
+          ? accepted(c)
           : paymentRequired([option({ maxTimeoutSeconds: 86_400 }), option({ network: "eip155:137", asset: USDC_POLYGON, payTo: POLYGON_MERCHANT, maxTimeoutSeconds: 120 })]),
     });
     const s = await session({ fetch: w.fetch, creditToken: TOKEN, payerKey: generatePrivateKey() });
@@ -518,7 +519,7 @@ describe("the authorization's lifetime (mcp-8)", () => {
   });
 
   test("15 minutes is accepted, and the signed authorization expires then", async () => {
-    const w = world(issuer, { merchant: (c) => (c.paid ? json(200, { ok: true }) : paymentRequired([option({ maxTimeoutSeconds: 900 })])) });
+    const w = world(issuer, { merchant: (c) => (c.paid ? accepted(c) : paymentRequired([option({ maxTimeoutSeconds: 900 })])) });
     const s = await session({ fetch: w.fetch, creditToken: TOKEN, payerKey: generatePrivateKey() });
     try {
       const r = await call(s.client, "x402check_pay", { url: RESOURCE });

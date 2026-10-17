@@ -296,14 +296,13 @@ export function settlementReceipt(res: unknown): Record<string, unknown> | null 
 
 /**
  * Whether the resource accepted the signed authorization it was sent: a 2xx whose settlement
- * receipt, when it has one, decodes and does not say `success: false`. Anything else (a 402, an
- * error, a redirect, a receipt that says the payment failed or cannot be read) leaves it to be
+ * receipt decodes and says `success: true`. Anything else (a 402, an error, a redirect, a 2xx with
+ * no receipt, or with one that cannot be read or does not say `success: true`) leaves it to be
  * settled until it expires. x402check_pay reports "paid" on exactly this.
  */
 export function paymentAccepted(res: { status: number }): boolean {
   if (!(res.status >= 200 && res.status < 300)) return false;
-  const receipt = settlementReceipt(res);
-  return receipt === undefined || (receipt !== null && receipt.success !== false);
+  return settlementReceipt(res)?.success === true;
 }
 
 /** Whether `err`, or an error in its `cause` chain, is an instance of `type` (identity, never text). */

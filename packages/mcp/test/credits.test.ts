@@ -6,7 +6,7 @@ import { before, describe, test } from "node:test";
 import { generatePrivateKey } from "viem/accounts";
 import { createX402CheckServer } from "../src/server.js";
 import { json, makeIssuer, SPENDER, type Issuer } from "./helpers.js";
-import { assertNoSecret, call, errorCode, option, paymentRequired, RESOURCE, session, TOKEN, world } from "./merchant.js";
+import { accepted, assertNoSecret, call, errorCode, option, paymentRequired, RESOURCE, session, TOKEN, world } from "./merchant.js";
 
 let issuer: Issuer;
 before(async () => {
@@ -92,7 +92,7 @@ describe("X402CHECK_BUDGET_USD bounds prepaid credits", () => {
 
   test("x402check_pay: once the credit budget cannot buy the check, nothing is checked or signed", async () => {
     // $0.0001 a payment: the payer's budget (the same $0.0015, counted separately) covers both payments.
-    const w = world(issuer, { merchant: (c) => (c.paid ? json(200, { ok: true }) : paymentRequired([option({ amount: "100" })])) });
+    const w = world(issuer, { merchant: (c) => (c.paid ? accepted(c) : paymentRequired([option({ amount: "100" })])) });
     const s = await session({ fetch: w.fetch, creditToken: TOKEN, payerKey: generatePrivateKey(), budgetUsd: 0.0015 });
     try {
       assert.equal((await call(s.client, "x402check_pay", { url: RESOURCE })).structuredContent?.outcome, "paid");

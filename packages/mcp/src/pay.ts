@@ -65,7 +65,7 @@ export const payOutput = {
   outcome: z
     .enum(OUTCOMES)
     .describe(
-      "paid (sent and accepted: a 2xx whose receipt, if any, does not say it failed) · no_payment_required (the resource answered without asking) · refused (nothing signed) · payment_rejected (sent, but answered 402 again) · failed (see payment_sent and error)",
+      "paid (sent and accepted: a 2xx whose settlement receipt says success: true) · no_payment_required (the resource answered without asking) · refused (nothing signed) · payment_rejected (sent, but answered 402 again) · failed (see payment_sent and error)",
     ),
   payment_sent: z.boolean().describe("True when a signed payment authorization was sent (it can be settled even when the response is lost)."),
   action: z.enum(ACTIONS).optional().describe("x402check's verdict on the payee, checked right before signing."),
@@ -259,14 +259,17 @@ function shownMediaType(raw: string | null | undefined): string | undefined {
 
 /**
  * Why an answer below 400 to a sent payment does not confirm it (the payer keeps the authorization
- * outstanding): a redirect, or a 2xx whose receipt says the payment failed or cannot be read.
+ * outstanding): a redirect, or a 2xx without a settlement receipt that says `success: true` (none,
+ * one that cannot be read, or one that says otherwise).
  */
 function unconfirmedWhy(status: number, receipt: Record<string, unknown> | null | undefined): string {
   if (status >= 300) return `the resource answered the signed payment with a redirect (HTTP ${status}), which this server does not follow, so the payment is not confirmed`;
   if (status < 200) return `the resource answered the signed payment with HTTP ${status}, which does not confirm it`;
-  return receipt === null
-    ? `the resource answered HTTP ${status}, but its settlement receipt could not be read, so the payment is not confirmed`
-    : `the resource answered HTTP ${status}, but its settlement receipt says the payment was not settled`;
+  if (receipt === undefined) return `the resource answered HTTP ${status} without a settlement receipt (PAYMENT-RESPONSE), so the payment is not confirmed`;
+  if (receipt === null) return `the resource answered HTTP ${status}, but its settlement receipt could not be read, so the payment is not confirmed`;
+  return receipt.success === false
+    ? `the resource answered HTTP ${status}, but its settlement receipt says the payment was not settled`
+    : `the resource answered HTTP ${status}, but its settlement receipt does not say the payment was settled (success: true), so the payment is not confirmed`;
 }
 
 /** The jti of an attestation the guard already verified (the verdict is not not_verified). */
@@ -551,7 +554,9 @@ export async function runPay(args: PayArgs, deps: PayDeps): Promise<PayOutcome> 
     lines.push(`x402check: ${verdict.action.replace("_", " ").toUpperCase()}${detail.length ? ` · ${detail.join(" · ")}` : ""}`);
     lines.push("Why:", ...reasons.slice(0, 6).map((r) => `- ${clean(r, 600)}`));
   }
-  if (view?.settled !== undefined || view?.transaction) lines.push(`Settlement: ${view.settled === false ? "NOT settled" : "settled"}${view.network ? ` on ${view.network}` : ""}${view.transaction ? ` · tx ${view.transaction}` : ""}`);
+  // "settled" only when the receipt says success: true, as for "paid".
+  const settlement = view?.settled === true ? "settled" : view?.settled === false ? "NOT settled" : "not confirmed (the receipt does not say success: true)";
+  if (view?.settled !== undefined || view?.transaction) lines.push(`Settlement: ${settlement}${view.network ? ` on ${view.network}` : ""}${view.transaction ? ` · tx ${view.transaction}` : ""}`);
   if (view?.spent_usd !== undefined && view.budget_usd !== undefined) lines.push(`Payer budget: ${dollars(view.spent_usd)} of ${dollars(view.budget_usd)} spent by this server (checks and payments)`);
   if (message && !verdict) lines.push(`Why: ${clean(message, 600)}`);
   else if (message && (code === "payment_unconfirmed" || code === "cancelled" || code === "budget_exhausted")) lines.push(`Error: ${clean(message, 600)}`);
