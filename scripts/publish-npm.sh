@@ -75,6 +75,13 @@ restore() {
 }
 trap restore EXIT
 npm pkg set "dependencies.@x402check/client=^$CLIENT_VERSION"
+# The lock links ../client: drop that entry so the client resolves from the registry (npm keeps a link otherwise).
+node -e '
+  const fs = require("node:fs");
+  const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+  for (const key of Object.keys(lock.packages)) if (key === "node_modules/@x402check/client" || key === "../client" || key.startsWith("../client/")) delete lock.packages[key];
+  fs.writeFileSync("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
+'
 npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 npm shrinkwrap
 node scripts/check-publish.mjs

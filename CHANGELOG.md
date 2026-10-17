@@ -14,6 +14,11 @@ The daily maintenance run's review of 0.5.0 found two critical issues, three hig
 - **Medium: a serializer passed with the call is read back.** The bytes a viem account signs are what its serializer writes, so a caller's serializer could sign a transaction the guard never saw. Its unsigned output must now be the transaction that was checked (legacy, EIP-2930 or EIP-1559), or nothing is signed; the OP Stack's serializer on Base passes.
 - **Low:** list fields must be arrays (an `authorizationList` given as a `Set` slipped past the EIP-7702 rule); viem's `sendTransactionSync` and `eth_fillTransaction` options (`timeout`, `_capabilities`) are dropped like `account` and `chain`; a transaction that names no counterparty is refused as `no_counterparty`, not `not_simulated`; a domain with no declared `EIP712Domain` is typed exactly as viem types it, so a `chainId` written as a string is not read as a chain viem never signs.
 
+**MCP:**
+- **A payment counts as accepted only on a receipt that says `success: true`.** A 2xx with no receipt, an unreadable one, or one that says anything else is reported as unconfirmed (`payment_unconfirmed`), and no new authorization goes to that payee and site until the earlier one expires (up to 15 minutes).
+- **Concurrent calls to one payee and site:** the second is refused before it buys an x402check check, instead of after.
+- **Publishing:** `check-publish --tarball` refuses any tarball entry that is not a regular file (a symlink or hard link named like a module), and `scripts/publish-npm.sh` reads the tarball's name from `npm pack --json` and resolves the client from the registry when it pins the tree.
+
 ## v0.6.18 — 2026-10-17: a produced verdict is paid, and withdrawals to L1 are never read as clear
 
 The daily maintenance run's review of v0.6.17 and of the SDK fixes found one medium issue in the Worker and one high issue that the provider shares with the SDK; both are fixed here (`test/payments-hardening.test.ts`, `test/simulation.test.ts`).
