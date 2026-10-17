@@ -390,17 +390,18 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           out.notes.push("it uses a durable nonce: once signed, it can be submitted at any later time");
           return;
         case 5: {
-          // WithdrawNonceAccount [nonce, to, recent blockhashes, rent, authority] lamports
+          // WithdrawNonceAccount [nonce, to, recent blockhashes, rent, authority] lamports. The System program
+          // accepts the nonce authority's signature from any account of the instruction, not only that position.
           if (d.length !== 12) return unread("a System WithdrawNonceAccount");
           const target = to(1);
-          if (account(4) === signer && target && target !== signer) funded.push({ to: target, lamports: u64(d, 4).toString(), how: "nonce account withdrawal" });
+          if (involves && target && target !== signer) funded.push({ to: target, lamports: u64(d, 4).toString(), how: "nonce account withdrawal" });
           return;
         }
         case 7: {
-          // AuthorizeNonceAccount [nonce, authority] new authority
+          // AuthorizeNonceAccount [nonce, authority] new authority: any signer among the accounts can be the authority.
           if (d.length !== 36) return unread("a System AuthorizeNonceAccount");
           const next = base58Encode(d.subarray(4, 36));
-          if (account(1) === signer && next !== signer) out.danger.push(`it hands the authority of nonce account ${account(0)} to ${next}`);
+          if (involves && next !== signer) out.danger.push(`it hands the authority of nonce account ${account(0)} to ${next}`);
           return;
         }
         case 6: // InitializeNonceAccount [nonce, recent blockhashes, rent] authority: it alone withdraws the lamports.
@@ -547,10 +548,11 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           return;
         }
         case 8: {
-          // AuthorizeWithSeed [stake, base, (clock), (custodian)] new authority, which, seed, owner: the base signs.
+          // AuthorizeWithSeed [stake, base, (clock), (custodian)] new authority, which, seed, owner. The custodian's
+          // key joins the signers the authority is checked against, so the signer counts in any position.
           if (d.length < 40) return unread("a Stake AuthorizeWithSeed");
           const next = base58Encode(d.subarray(4, 36));
-          if (account(1) === signer && next !== signer) out.danger.push(`Stake AuthorizeWithSeed hands the ${kinds[u32(d, 36)] ?? "stake"} authority of ${account(0)} to ${next}`);
+          if (next !== signer) out.danger.push(`Stake AuthorizeWithSeed hands the ${kinds[u32(d, 36)] ?? "stake"} authority of ${account(0)} to ${next}`);
           return;
         }
         case 10: {
@@ -562,18 +564,19 @@ export function analyzeSolanaMessage(message: SolanaMessage, keys: readonly stri
           return;
         }
         case 11: {
-          // AuthorizeCheckedWithSeed [stake, base, (clock), new authority, (custodian)] which, seed, owner: the base signs.
+          // AuthorizeCheckedWithSeed [stake, base, (clock), new authority, (custodian)] which, seed, owner: the base's
+          // derived key and the custodian's both count as signers, so the signer counts in any position.
           const next = clockAt(2) ? account(3) : account(2);
           if (!next) return unread("a Stake AuthorizeCheckedWithSeed");
-          if (account(1) === signer && next !== signer) out.danger.push(`Stake AuthorizeCheckedWithSeed hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
+          if (next !== signer) out.danger.push(`Stake AuthorizeCheckedWithSeed hands the ${kinds[d.length >= 8 ? u32(d, 4) : -1] ?? "stake"} authority of ${account(0)} to ${next}`);
           return;
         }
         case 4: {
-          // Withdraw [stake, recipient, (clock, stake history), withdraw authority, (custodian)] lamports.
+          // Withdraw [stake, recipient, (clock, stake history), withdraw authority, (custodian)] lamports. The custodian's
+          // key joins the signers the withdraw authority is checked against: the signer counts in any position.
           if (d.length !== 12) return unread("a Stake Withdraw");
           const recipient = account(1);
-          const authority = clockAt(2) ? account(4) : account(2);
-          if (authority === signer && recipient && recipient !== signer) funded.push({ to: recipient, lamports: u64(d, 4).toString(), how: "stake withdrawal" });
+          if (recipient && recipient !== signer) funded.push({ to: recipient, lamports: u64(d, 4).toString(), how: "stake withdrawal" });
           return;
         }
         case 6: // SetLockup

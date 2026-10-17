@@ -1429,6 +1429,8 @@ const KEY_RANKS: Record<string, { rank: number; role: Role }> = {
   to: { rank: RANK.transfer, role: "recipient" },
   recipient: { rank: RANK.transfer, role: "recipient" },
   receiver: { rank: RANK.transfer, role: "recipient" },
+  destination: { rank: RANK.transfer, role: "recipient" },
+  dst: { rank: RANK.transfer, role: "recipient" },
   taker: { rank: RANK.transfer, role: "counterparty" },
 };
 
@@ -1480,13 +1482,20 @@ type Payload = { path: string; type: string; size: number };
 
 /** Declared `bytes` values and hash-named fixed bytes, anywhere in the message. */
 function collectPayloads(types: TypedTypes, type: string, value: CanonValue, path: string, name: string, out: Payload[], depth = 0): void {
-  if (depth > 10 || out.length >= 4) return;
+  if (out.length >= 4) return;
+  // Past the reading limits nothing is read, so nothing there can be called absent: a calldata payload
+  // nested deeper, or in the 65th call of a list, is unread content (never "only addresses here").
+  if (depth > 10) {
+    out.push({ path, type: "content nested deeper than 10 levels, not read", size: 0 });
+    return;
+  }
   if (type.endsWith("]")) {
     if (!Array.isArray(value)) return;
     const itemType = type.slice(0, type.lastIndexOf("["));
     for (let index = 0; index < Math.min(value.length, 64); index += 1) {
       collectPayloads(types, itemType, value[index], `${path}[${index}]`, name, out, depth + 1);
     }
+    if (value.length > 64 && out.length < 4) out.push({ path, type: `${value.length - 64} more item(s) past the first 64, not read`, size: 0 });
     return;
   }
   if (hasOwn(types, type)) {
@@ -1758,7 +1767,13 @@ function decodeParsed(parsed: unknown, signer: string | undefined, method: strin
         decodeMetaTransaction(ctx) ??
         decodeForwardRequest(ctx);
   }
-  return decoded ?? decodeGeneric(ctx);
+  const result = decoded ?? decodeGeneric(ctx);
+  // A field the decoders could not read as its type (a uint sent as `true` or `[1]`, which viem hashes
+  // as 1) was read as missing, and its rule with it: never "decoded", whatever the rest says.
+  if (canon.unsignable.length > 0 && !result.unsignable) {
+    return { ...result, unsignable: `field(s) ${canon.unsignable.slice(0, 3).join(", ")} could not be read as their declared types` };
+  }
+  return result;
 }
 
 /** eth_signTypedData (v1): address values must be strict hex to be signable. */

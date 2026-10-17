@@ -2,6 +2,24 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/client` 0.5.1 and `@x402check/mcp` 0.3.2 — 2026-10-17
+
+The daily maintenance run's review of 0.5.0 found two critical issues, three high, one medium and several low ones in the client; all are fixed here (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`). Client 0.5.0 and older should not be used.
+
+**Client (signing guard):**
+- **Critical: Solana authorities are judged as the programs judge them.** The Stake program checks a withdrawal's or an authority change's signature against every signer it collects, the lockup custodian's slot included, and the System program accepts a nonce authority's signature from any account of the instruction. The guard looked at one position: with the victim's key in the custodian slot (or anywhere in a nonce instruction), a stake withdrawal to an attacker or the hand-over of a stake or nonce authority was signed unchecked. The signer's presence now counts, in both Stake layouts.
+- **Critical: a typed-data number written as `true` or `[1]`** (viem hashes it as 1) was read as missing, which disarmed the local rules (a SafeTx `operation: true` was read as a CALL and signed as a DELEGATECALL). A field the decoders cannot read as its declared type now makes the request malformed (`malformed`), and so does a fixed-size bytes field they cannot read.
+- **High: withdrawals to L1.** A withdrawal through Arbitrum's ArbSys behind Multicall3 was signed with only Multicall3 checked: Multicall3 batches (aggregate, aggregate3, aggregate3Value and relatives) are now decoded call by call. A withdrawal through the OP Stack's L2StandardBridge or L2ToL1MessagePasser on Base names its L1 recipient only in calldata: that recipient is now read and checked.
+- **High: typed data read only in part.** The search for calldata payloads stopped at 10 levels and at the 64th item of a list, silently: content past those limits now makes the request unreadable. A payee written as a string field (Hyperliquid's `usdSend`, `withdraw3`) is now checked.
+- **Medium: a serializer passed with the call is read back.** The bytes a viem account signs are what its serializer writes, so a caller's serializer could sign a transaction the guard never saw. Its unsigned output must now be the transaction that was checked (legacy, EIP-2930 or EIP-1559), or nothing is signed; the OP Stack's serializer on Base passes.
+- **Low:** list fields must be arrays (an `authorizationList` given as a `Set` slipped past the EIP-7702 rule); viem's `sendTransactionSync` and `eth_fillTransaction` options (`timeout`, `_capabilities`) are dropped like `account` and `chain`; a transaction that names no counterparty is refused as `no_counterparty`, not `not_simulated`; a domain with no declared `EIP712Domain` is typed exactly as viem types it, so a `chainId` written as a string is not read as a chain viem never signs.
+
+## v0.6.18 — 2026-10-17: a produced verdict is paid, and withdrawals to L1 are never read as clear
+
+The daily maintenance run's review of v0.6.17 and of the SDK fixes found one medium issue in the Worker and one high issue that the provider shares with the SDK; both are fixed here (`test/payments-hardening.test.ts`, `test/simulation.test.ts`).
+- **Medium: an abandoned check was still free.** v0.6.17 counted an abandoned evaluation against the payer, but released the payment: up to 8 in flight before the hold was read, a 25-item batch counting once, and the same authorization reusable. That came to about 300 item evaluations an hour per wallet holding a batch's price that never moved. A client gone during its evaluation is now charged like one that stayed: the verdict was produced, the payment settles, and the settlement is recorded `undelivered`. A client gone before its check starts is still not evaluated and not charged. An honest client whose timeouts used to count as refusals is no longer held back.
+- **High: a withdrawal to L1 looked clear in the simulation.** Value sent to L1 through Arbitrum's ArbSys or the OP Stack's messenger, bridge or message passer leaves for an address the simulation never sees, also when another contract (Multicall3) makes the call. An event from one of these contracts now makes the simulation incomplete (`l1_withdrawal`: at least a review, never a clear result).
+
 ## v0.6.17 — 2026-10-16: an abandoned check is never a free one
 
 The daily maintenance run's independent review of v0.6.15 and v0.6.16 found one high issue and five low ones; all are fixed here (`test/payments-hardening.test.ts`, `test/discovery-routes.test.ts`, `test/review-1016-prod.test.ts`, `test/fresh-feeds-coldwait.test.ts`).

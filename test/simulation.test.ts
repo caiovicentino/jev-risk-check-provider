@@ -166,3 +166,13 @@ test("RPC fallback: a rate-limited primary hands over to the next endpoint withi
   assert.deepEqual(await rpcWithFallback(["https://primary", "https://fallback"], [{ id: 1 }], 1000, batchFetch, ok), [{ id: 1, result: "0x" }]);
   await assert.rejects(rpcWithFallback(["https://primary"], [{ id: 1 }], 1000, batchFetch, ok));
 });
+
+test("an event from an L2 to L1 withdrawal contract makes the simulation incomplete, never clear (2026-10-17 review)", async () => {
+  // ArbSys (Arbitrum) and the OP Stack's message passer: the L1 recipient is never visible to the simulation.
+  for (const sink of ["0x0000000000000000000000000000000000000064", "0x4200000000000000000000000000000000000016"]) {
+    const withdraw = createSimulator({ fetchImpl: rpcStub([{ address: sink, topics: [`0x${"ab".repeat(32)}`, t(USER)], data: amt(10n) }]) });
+    const result = await withdraw({ from: USER, to: ROUTER, value: "10", data: "0x12345678" }, "eip155:8453", { declared: [{ address: ROUTER }] });
+    assert.ok((result.findings ?? []).includes("simulation_incomplete"), `${sink}: ${JSON.stringify(result.findings)}`);
+    assert.ok((result as { limits?: string[] }).limits?.includes("l1_withdrawal"));
+  }
+});

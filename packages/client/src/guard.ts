@@ -43,6 +43,7 @@ import { X402CHECK_KEY_THUMBPRINTS } from "./keys.js";
 import { normalizeHost, toCaip2 } from "./normalize.js";
 import type { AttestationClaims, FetchLike, PaymentBinding, RiskCheckRequest, RiskCheckResult } from "./types.js";
 import { decodeTransaction } from "./decode/tx.js";
+import { serializedMismatch } from "./serialized.js";
 import { decodeTypedData } from "./decode/typed.js";
 import { decodePersonalSign } from "./decode/personal.js";
 import { buildRiskCheckBodies, type RiskCheckBody } from "./decode/request.js";
@@ -114,7 +115,7 @@ export interface GuardVerdict {
    * "raw_hash_signing", "opaque_signature", "not_simulated", "simulation_reverted",
    * "unreadable_self_call", "no_chain", "every_chain_authorization", "fee_cap",
    * "unguarded_method", "uncopyable", "undecodable", "invalid_transaction",
-   * "too_many_counterparties", "malformed", "unreadable_instruction".
+   * "too_many_counterparties", "malformed", "no_counterparty", "unreadable_instruction".
    */
   code?: string | undefined;
   /** One per checked address (primary first). Empty when nothing needed checking. */
@@ -225,8 +226,12 @@ const TRANSACTION_TYPES = new Set(["legacy", "eip2930", "eip1559", "eip4844", "e
  * not (a Tempo `calls` list, a Celo `feeCurrency`, a zkSync paymaster): any other field is refused.
  */
 const TRANSACTION_FIELDS = new Set(["type", "chainId", "nonce", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "maxFeePerBlobGas", "to", "value", "data", "input", "accessList", "authorizationList", "blobs", "blobVersionedHashes", "sidecars", "kzg", "from"]);
-/** What viem's wallet actions attach to a transaction and never serialize (objects, not fields). */
-const VIEM_ATTACHMENTS = ["account", "chain", "nonceManager"];
+/**
+ * What viem's wallet actions attach to a transaction and never serialize: objects (account, chain,
+ * nonceManager) and options (sendTransactionSync's timeout and polling, eth_fillTransaction's
+ * _capabilities).
+ */
+const VIEM_ATTACHMENTS = ["account", "chain", "nonceManager", "timeout", "pollingInterval", "throwOnReceiptRevert", "_capabilities"];
 /** Fields viem serializes as unsigned integers (numberToHex: BigInt semantics). */
 const AMOUNT_FIELDS = ["value", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "maxFeePerBlobGas"] as const;
 const HEX_BYTES = /^0[xX](?:[0-9a-fA-F]{2})*$/;
@@ -263,6 +268,12 @@ function normalizeTransaction(input: unknown, fallbackChainId: number | undefine
     if (tx[key] === undefined) delete tx[key];
     else if (!TRANSACTION_FIELDS.has(key)) return { reason: `its field "${key.slice(0, 40)}" is not one the standard serializer reads (a chain's own serializer could sign what it holds)` };
   }
+  // List fields are arrays, as the serializer iterates them: a Set or another iterable would pass a
+  // length or emptiness test the guard makes and still be serialized (a delegation hidden in a Set).
+  for (const key of ["accessList", "authorizationList", "blobs", "blobVersionedHashes"]) {
+    if (tx[key] !== undefined && !Array.isArray(tx[key])) return { reason: `its ${key} is not an array` };
+  }
+  if (tx.sidecars !== undefined && tx.sidecars !== false && !Array.isArray(tx.sidecars)) return { reason: "its sidecars are not an array" };
   const to = tx.to;
   if (to === undefined || to === null || to === "" || to === "0x" || to === "0X") delete tx.to;
   else if (typeof to !== "string" || !EVM_ADDRESS.test(to)) return { reason: "its recipient (to) is not 0x followed by 40 hex digits" };
@@ -328,12 +339,15 @@ function withDomainType(td: Extract<SigningRequest, { kind: "typed_data" }>["typ
   const domain = td.domain ?? {};
   const types: Record<string, unknown> = { ...(td.types ?? {}) };
   if (!types["EIP712Domain"]) {
+    // Exactly what viem hashes when the request declares no EIP712Domain (getTypesForEIP712Domain): a
+    // chainId given as a string is not signed, so it must not be read either (the signature would be
+    // valid on every chain while the checks ran on one).
     const fields: Array<{ name: string; type: string }> = [];
-    if (domain["name"] !== undefined) fields.push({ name: "name", type: "string" });
-    if (domain["version"] !== undefined) fields.push({ name: "version", type: "string" });
-    if (domain["chainId"] !== undefined) fields.push({ name: "chainId", type: "uint256" });
-    if (domain["verifyingContract"] !== undefined) fields.push({ name: "verifyingContract", type: "address" });
-    if (domain["salt"] !== undefined) fields.push({ name: "salt", type: "bytes32" });
+    if (typeof domain["name"] === "string") fields.push({ name: "name", type: "string" });
+    if (domain["version"]) fields.push({ name: "version", type: "string" });
+    if (typeof domain["chainId"] === "number" || typeof domain["chainId"] === "bigint") fields.push({ name: "chainId", type: "uint256" });
+    if (domain["verifyingContract"]) fields.push({ name: "verifyingContract", type: "address" });
+    if (domain["salt"]) fields.push({ name: "salt", type: "bytes32" });
     types["EIP712Domain"] = fields;
   }
   return jsonSafe({ types, domain, primaryType: td.primaryType, message: td.message }) as Record<string, unknown>;
@@ -619,7 +633,7 @@ export function createGuard(options: GuardOptions = {}) {
       // A transaction that moves value or calls code but names nobody this guard can check (a special
       // address, say) is not signed on nothing; a value-free deployment and a plain self-transfer are inert.
       if (kind === "transaction" && !deployment && (hasValue || hasData) && !(selfCall && !hasData)) {
-        return verdictOf(kind, decoded.summary, "not_verified", ["it moves value or calls code but names no counterparty this guard can check, so it is not signed on nothing"], [], "not_simulated");
+        return verdictOf(kind, decoded.summary, "not_verified", ["it moves value or calls code but names no counterparty this guard can check, so it is not signed on nothing"], [], "no_counterparty");
       }
       return verdictOf(kind, decoded.summary, "allow", [decoded.localNote ?? "nothing to check: no counterparty"], []);
     }
@@ -892,7 +906,24 @@ export function guardAccount<A extends GuardableAccount>(account: A, options: Gu
         );
       }
       await guard.enforce({ kind: "transaction", from, transaction: normalized.tx });
-      return sign(normalized.tx, opts);
+      // A serializer passed with the call (a chain's own, as viem passes on Base, or the caller's) writes
+      // the bytes the key signs: its unsigned output is read back and must be the transaction checked.
+      const serializer = opts && typeof opts === "object" ? (opts as { serializer?: unknown }).serializer : undefined;
+      if (typeof serializer !== "function") return sign(normalized.tx, opts);
+      const checked = async (tx: unknown, signature?: unknown) => {
+        const out = await (serializer as (t: unknown, s?: unknown) => unknown)(tx, signature);
+        if (signature === undefined) {
+          const mismatch = serializedMismatch(out, normalized.tx);
+          if (mismatch) {
+            return refuse(
+              { action: "not_verified", signed: false, kind: "transaction", summary: "a transaction whose serialization differs from what was checked", reasons: [`${mismatch}: the key would sign something other than what was checked, so it is not signed`], code: "invalid_transaction", checks: [] },
+              options,
+            );
+          }
+        }
+        return out;
+      };
+      return sign(normalized.tx, { ...(opts as object), serializer: checked });
     };
   }
   if (account.signTypedData) {

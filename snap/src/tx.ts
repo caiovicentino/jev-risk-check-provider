@@ -1114,6 +1114,47 @@ function crossChainSelfCalls(args: string, call: Call, ctx: Ctx): Action {
 
 type WrapperDecoder = (args: string, call: Call, ctx: Ctx) => Action;
 
+/**
+ * Multicall3 and its relatives (aggregate, tryAggregate, blockAndAggregate, aggregate3,
+ * aggregate3Value): the contract makes each call itself (msg.sender is Multicall3), forwarding the
+ * value aggregate3Value names. Each call is decoded, so value sent on to a system contract or a
+ * bridge is read like a direct call (a withdrawal through ArbSys behind Multicall3 is not missed).
+ *
+ * @param arrayArg - Index of the calls array among the arguments.
+ * @param valueAt - Offset of the value word in a call tuple, when calls carry value.
+ * @param dataAt - Offset of the calldata offset in a call tuple.
+ * @returns The wrapper decoder.
+ */
+function multicall3(arrayArg: number, valueAt: number | undefined, dataAt: number): WrapperDecoder {
+  return (args: string, call: Call, ctx: Ctx): Action => {
+    const array = dynamicAt(args, arrayArg * 32);
+    const declared = array === undefined ? 0 : (smallAt(args, array) ?? 0);
+    const count = Math.min(declared, MAX_ARRAY);
+    const base = (array ?? 0) + 32;
+    const calls: InnerCall[] = [];
+    const warnings: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const tuple = dynamicAt(args, base + index * 32, base);
+      if (tuple === undefined) break;
+      const target = addressAt(args, tuple, warnings);
+      const value = valueAt === undefined ? 0n : uintAt(args, tuple + valueAt);
+      const data = bytesAt(args, dynamicAt(args, tuple + dataAt, tuple));
+      if (target === undefined || value === undefined || data === undefined) break;
+      calls.push({ sender: call.to, to: target, value, data });
+    }
+    if (calls.length === 0 && count > 0) {
+      return { ...plainCall(call, ctx, "malformed Multicall3 batch"), warnings: ["Multicall3 calldata could not be decoded"] };
+    }
+    const cut: string[] = [];
+    truncated(cut, declared, calls.length, "Multicall3 calls");
+    return combine("Multicall3 batch", `Multicall3 batch on ${call.to} with ${calls.length} call(s)`, decodeInner(calls, ctx), {
+      candidates: call.value > 0n ? [contractCandidate(call, ctx)] : [],
+      warnings,
+      opaque: cut,
+    });
+  };
+}
+
 const WRAPPERS: Record<string, WrapperDecoder> = {
   ac9650d8: multicall(0),
   "5ae401dc": multicall(32),
@@ -1143,6 +1184,13 @@ const WRAPPERS: Record<string, WrapperDecoder> = {
   "541d63c8": executeWithOperation("Safe 4337 executeUserOp"),
   // Coinbase Smart Wallet executeWithoutChainIdValidation(bytes[]).
   "2c2abd1e": crossChainSelfCalls,
+  // Multicall3: aggregate, blockAndAggregate, tryAggregate, tryBlockAndAggregate, aggregate3, aggregate3Value.
+  "252dba42": multicall3(0, undefined, 32),
+  c3077fa9: multicall3(0, undefined, 32),
+  bce38bd7: multicall3(1, undefined, 32),
+  "399542e9": multicall3(1, undefined, 32),
+  "82ad56cb": multicall3(0, undefined, 64),
+  "174dea71": multicall3(0, 64, 96),
 };
 
 // ---------------------------------------------------------------------------
@@ -1407,6 +1455,62 @@ const CONTROL_FUNCTIONS: Record<string, ControlFunction> = {
   "7eff275e": { name: "changeProxyAdmin(address,address)", words: 2, decode: adminChange("Proxy admin change", 0) },
 };
 
+/** OP Stack predeploys (Base, Optimism and other OP chains) that send funds to an L1 address named in calldata. */
+const OP_STANDARD_BRIDGE = "0x4200000000000000000000000000000000000010";
+const OP_MESSAGE_PASSER = "0x4200000000000000000000000000000000000016";
+
+/**
+ * A withdrawal to L1 through an OP Stack bridge: the simulation sees the funds sink into the bridge
+ * or the message passer, never the L1 recipient, so the recipient is read from the calldata and
+ * checked. A message passer call that carries calldata for L1 is not read.
+ *
+ * @param call - The call.
+ * @param ctx - Decoding context.
+ * @returns The decoded action, or undefined when the call is not one.
+ */
+function l2Withdrawal(call: InnerCall, ctx: Ctx): Action | undefined {
+  const selector = call.data.slice(0, 8);
+  const args = call.data.slice(8);
+  const warnings: string[] = [];
+  const recipientAt = (offset: number) => addressAt(args, offset, warnings);
+  let recipient: string | undefined;
+  let opaque: string[] = [];
+  if (call.to === OP_STANDARD_BRIDGE) {
+    // bridgeETHTo(address _to, uint32, bytes); withdrawTo(address _l2Token, address _to, uint256, uint32, bytes);
+    // bridgeERC20To(address _localToken, address _remoteToken, address _to, uint256, uint32, bytes)
+    if (selector === "e11013dd") recipient = recipientAt(0);
+    else if (selector === "a3a79548") recipient = recipientAt(32);
+    else if (selector === "540abf73") recipient = recipientAt(64);
+    else return undefined;
+  } else if (call.to === OP_MESSAGE_PASSER) {
+    // initiateWithdrawal(address _target, uint256 _gasLimit, bytes _data)
+    if (selector !== "c2b3e5ac") return undefined;
+    recipient = recipientAt(0);
+    const data = bytesAt(args, dynamicAt(args, 64));
+    if (data === undefined || data.length > 0) opaque = [`a withdrawal to L1 that calls ${recipient ?? "an L1 contract"} with calldata, which x402check cannot read`];
+  } else {
+    return undefined;
+  }
+  if (!recipient) return { ...plainCall(call, ctx, "a malformed L2 to L1 withdrawal"), warnings: ["the withdrawal's L1 recipient could not be decoded"] };
+  return {
+    label: "Withdrawal to L1",
+    summary: `Withdrawal to L1 through ${call.to}${call.value > 0n ? `, sending ${nativeAmount(call.value, ctx.chain)}` : ""}, to the L1 address ${recipient}.`,
+    candidates: [
+      {
+        address: recipient,
+        role: "recipient",
+        interaction: interaction("native_transfer"),
+        rank: RANK.transfer,
+        reason: "receives the withdrawal on L1",
+        ...(call.value > 0n ? { amountLabel: nativeAmount(call.value, ctx.chain) } : {}),
+      },
+    ],
+    warnings,
+    danger: [],
+    ...(opaque.length ? { opaque } : {}),
+  };
+}
+
 /**
  * Decodes one call (recursively for wrappers).
  *
@@ -1448,6 +1552,8 @@ function decodeCall(call: InnerCall, ctx: Ctx): Action {
     };
   }
   if (call.data.length < 8) return plainCall(call, ctx, `${call.data.length / 2} bytes of non-standard calldata`);
+  const withdrawal = l2Withdrawal(call, ctx);
+  if (withdrawal) return withdrawal;
   const selector = call.data.slice(0, 8);
   const args = call.data.slice(8);
   const token = TOKEN_FUNCTIONS[selector] as TokenDecoder | undefined;

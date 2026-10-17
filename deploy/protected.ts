@@ -823,14 +823,10 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
       await admission.finish("unused");
       return json(503, { error: "evaluation_unavailable", detail: "no charge: the evaluation could not be completed" }, { "Retry-After": "5" });
     }
-    // The client left during its evaluation: nothing is settled and the payment can be sent again,
-    // but it counts against the payer as a refusal does (5 an hour hold it back). Without that, one
-    // authorization abandoned again and again would buy unlimited evaluations (2026-10-16 review).
-    if (request.signal?.aborted) {
-      await admission.finish("refused");
-      console.warn(`client left during its check on ${path}: nothing settled, counted against the payer`);
-      return json(499, { error: "client_closed_request", detail: "no charge: the client disconnected before settlement" });
-    }
+    // A client that left during its evaluation is charged like one that stayed: the verdict was
+    // produced, and the settlement below records it `undelivered`. Releasing the payment instead made an
+    // abandoned check a free evaluation, repeatable with the same authorization (reviews of 2026-10-16
+    // and 2026-10-17); only a client gone before its check started is not charged (above).
     // Settle before releasing the result: a payload that verifies but cannot settle
     // (replayed authorization, funds moved between verify and settle) must not
     // receive a signed attestation.
@@ -847,7 +843,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
           return json(402, { error: "payment_settlement_reused", detail: "this settlement transaction already paid for another request; sign a new payment" });
         }
         for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
-        // A client that left while it settled paid for a verdict it never received: the record says so.
+        // A client that left during its check or while it settled paid for a verdict it never received: the record says so.
         const undelivered = request.signal?.aborted === true;
         if (undelivered) console.warn(`client left while its payment settled on ${path}: the verdict reached nobody`);
         if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction, ...(undelivered ? { undelivered } : {}) });

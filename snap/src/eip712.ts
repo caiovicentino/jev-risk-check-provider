@@ -309,7 +309,10 @@ function canonValue(ctx: Context, type: string, value: unknown, path: string, de
   }
   if (type === "bytes") return canonBytes(ctx, value, path);
   if (type.startsWith("bytes") && !type.includes("[")) {
-    return typeof value === "string" && isStrictHexString(value) && value.length <= 66 ? value.toLowerCase() : undefined;
+    if (typeof value === "string" && isStrictHexString(value) && value.length <= 66) return value.toLowerCase();
+    // A value the decoders cannot read for a fixed-size bytes field: a signer may still hash it somehow.
+    ctx.unsignable.push(path);
+    return undefined;
   }
   if (type.startsWith("int") && !type.includes("[")) return canonInt(ctx, type, value, path);
   if (type === "string") return canonString(value);
@@ -391,9 +394,15 @@ export function canonBigInt(value: CanonValue): bigint | undefined {
 
 export type AddressVisit = { path: string; key: string; address: string };
 
+/** An EVM address written as a string field's whole value (0x and 40 hex digits), lowercased. */
+function stringAddress(value: CanonValue): string | undefined {
+  return typeof value === "string" && /^0[xX][0-9a-fA-F]{40}$/u.test(value.trim()) ? `0x${value.trim().slice(2).toLowerCase()}` : undefined;
+}
+
 /**
- * Walks declared fields and yields every address-typed value (type-directed,
- * so a string field that merely looks like an address is never used).
+ * Walks declared fields and yields every address-typed value, and every string field whose whole
+ * value is an address: some protocols name their payee as a string (Hyperliquid's usdSend and
+ * withdraw3), and a payee left unread is a payee left unchecked.
  *
  * @param types - Declared types.
  * @param type - Type of `value`.
@@ -419,6 +428,10 @@ export function collectAddressFields(
       if (field.type === "address") {
         const address = canonAddressValue(child);
         if (address) out.push({ path: childPath, key: field.name, address });
+      } else if (field.type === "string") {
+        // A payee written as a string (Hyperliquid's usdSend and withdraw3 name their destination so).
+        const address = stringAddress(child);
+        if (address) out.push({ path: childPath, key: field.name, address });
       } else {
         collectAddressFields(types, field.type, child, childPath, out, depth + 1);
       }
@@ -428,8 +441,8 @@ export function collectAddressFields(
   if (type.endsWith("]") && Array.isArray(value)) {
     const itemType = type.slice(0, type.lastIndexOf("["));
     value.forEach((item, index) => {
-      if (itemType === "address") {
-        const address = canonAddressValue(item);
+      if (itemType === "address" || itemType === "string") {
+        const address = itemType === "address" ? canonAddressValue(item) : stringAddress(item);
         if (address) out.push({ path: `${path}[${index}]`, key: path.split(".").pop() ?? path, address });
       } else {
         collectAddressFields(types, itemType, item, `${path}[${index}]`, out, depth + 1);

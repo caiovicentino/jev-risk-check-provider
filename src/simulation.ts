@@ -100,6 +100,13 @@ export const MAX_FLOWS = 5_000;
 export const MAX_PROBE = 40;
 /** Contracts that keep the sender's assets checked for source verification per simulation. */
 export const MAX_SINKS = 8;
+/** Contracts whose events mean funds leave for L1: ArbSys (Arbitrum) and the OP Stack's L2CrossDomainMessenger, L2StandardBridge and L2ToL1MessagePasser. */
+const L1_WITHDRAWAL_SINKS: ReadonlySet<string> = new Set([
+  "0x0000000000000000000000000000000000000064",
+  "0x4200000000000000000000000000000000000007",
+  "0x4200000000000000000000000000000000000010",
+  "0x4200000000000000000000000000000000000016",
+]);
 const PROBE_BATCH = 10; // some public RPCs cap JSON-RPC batches at 10 calls
 // A plausible sender balance (value + 0.1 ETH), not an implausible one a contract could test for.
 const BALANCE_HEADROOM = 10n ** 17n;
@@ -514,6 +521,12 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
 
     const limits: string[] = [];
     let logs = Array.isArray(c.logs) ? c.logs : [];
+    // Value withdrawn to L1 (Arbitrum's ArbSys, the OP Stack's messenger, bridge and message passer)
+    // leaves for an L1 address the simulation never sees: an event from one of them makes the result
+    // incomplete, never clear, whichever contract made the call (2026-10-17 review).
+    if (logs.some((log) => typeof (log as { address?: unknown })?.address === "string" && L1_WITHDRAWAL_SINKS.has(((log as { address: string }).address).toLowerCase()))) {
+      limits.push("l1_withdrawal");
+    }
     if (logs.length > MAX_LOGS) {
       logs = logs.slice(0, MAX_LOGS);
       limits.push("logs_truncated");

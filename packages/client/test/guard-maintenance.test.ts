@@ -138,7 +138,7 @@ describe("A3: a call to a precompile or system contract is not signed unread", (
     const api = boundProvider(() => LOW);
     const { spy, signed } = evmSigner();
     const v = await refused(signTx(spy, { pinnedKeys: false, fetch: api.fetch })({ type: "eip1559", chainId: 8453, nonce: 0, gas: 50_000n, maxFeePerGas: 10n ** 8n, maxPriorityFeePerGas: 1n, to: "0x0000000000000000000000000000000000000004", value: 0n, data: "0xdeadbeef" } as never));
-    assert.deepEqual([v.action, signed.length], ["not_verified", 0]);
+    assert.deepEqual([v.action, v.code, signed.length], ["not_verified", "no_counterparty", 0]);
   });
 });
 

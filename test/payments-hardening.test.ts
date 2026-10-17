@@ -568,24 +568,26 @@ test("an unpaid challenge reuses a recent Solana blockhash for 15 s instead of a
   }
 });
 
-test("a client gone before settlement is not charged (499), the work is handed to waitUntil, and the payment can be sent again", async () => {
-  const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((s) => new PaymentClaim(s)) };
+test("a client gone during its evaluation is charged and recorded undelivered; the work is handed to waitUntil; the payment cannot be used again", async () => {
+  const kv = memoryKv();
+  const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((s) => new PaymentClaim(s)), RATE: kv };
   const settle = { ok: true, tx: "0xeee", settled: 0 };
   const s = stack(USER, settle);
   const header = payment(USER, "0x14");
   const controller = new AbortController();
   const gone = new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": header }, body: JSON.stringify({ wallet: WALLET }), signal: controller.signal });
   const handed: Promise<unknown>[] = [];
-  // The client disconnects while its check is being evaluated.
+  // The client disconnects while its check is being evaluated: the verdict is produced, so it is settled.
   const res = await handleProtected(gone, env, s, async (r) => {
     controller.abort();
     return createHandler(s.deps)(r);
   }, { waitUntil: (p) => void handed.push(p) });
-  assert.equal(res.status, 499);
-  assert.equal(settle.settled, 0, "nothing settled");
+  assert.equal(res.status, 200);
+  assert.equal(settle.settled, 1, "settled once");
   assert.equal(handed.length, 1, "the work runs to completion even if the isolate would cancel the request");
+  assert.equal((JSON.parse(kv.data.get("st:eip155:8453:0xeee") ?? "{}") as { undelivered?: boolean }).undelivered, true);
   const again = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header }), env, s, (r) => createHandler(s.deps)(r));
-  assert.equal(again.status, 200, "the claim was released");
+  assert.equal(again.status, 409, "the settled payment is used");
   assert.equal(settle.settled, 1);
 });
 
@@ -660,9 +662,9 @@ test("a buyer can hold the token before paying: a pack bought as a top-up of a s
   assert.equal(((await balance.json()) as { balance_usd: string }).balance_usd, "$0.10");
 });
 
-test("an evaluation abandoned by its client counts against the payer: one authorization cannot buy unlimited free checks", async () => {
-  // 2026-10-16 review: a 499 released the claim without counting anything, so one signed
-  // authorization, abandoned mid-check again and again, bought unlimited evaluations.
+test("an evaluation abandoned by its client is paid: one authorization abandoned in a loop buys one settled check, never free ones", async () => {
+  // 2026-10-16/17 reviews: releasing the payment after an abandoned evaluation (counted or not) let one
+  // signed authorization buy evaluation after evaluation. A produced verdict is now settled.
   const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((s) => new PaymentClaim(s)) };
   const settle = { ok: true, tx: "0xb1", settled: 0 };
   const s = stack(USER, settle);
@@ -678,11 +680,9 @@ test("an evaluation abandoned by its client counts against the payer: one author
     });
   };
   const statuses: number[] = [];
-  for (let i = 0; i < 7; i++) statuses.push((await abandon()).status);
-  assert.deepEqual(statuses.slice(0, 5), [499, 499, 499, 499, 499]);
-  assert.ok(statuses.slice(5).every((st) => st === 429), `then the payer is held back: ${statuses.join(",")}`);
-  assert.equal(evaluations, 5, "five evaluations, not seven");
-  assert.equal(settle.settled, 0);
+  for (let i = 0; i < 4; i++) statuses.push((await abandon()).status);
+  assert.deepEqual(statuses, [200, 409, 409, 409]);
+  assert.deepEqual([evaluations, settle.settled], [1, 1], "one evaluation, paid");
   // A client already gone before its check starts costs nothing and counts nothing.
   const env2: WorkerEnv = { PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)) };
   const gone = new AbortController();
