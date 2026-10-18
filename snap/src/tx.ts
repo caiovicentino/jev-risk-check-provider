@@ -1465,13 +1465,23 @@ const CONTROL_FUNCTIONS: Record<string, ControlFunction> = {
  * - `recipients`: who receives funds on the other chain (or a refund there), an address word or a
  *   32-byte word (`bytes32`: an EVM recipient has 12 zero bytes; any other is not read).
  * - `bytesAt`: a bytes argument that, when not empty, is calldata run on the other chain: not read.
+ * - `bytesArrayAt`: a bytes[] argument that, when not empty, is contract code deployed on the other
+ *   chain (zkSync's factory dependencies): not read.
  * - `creationAt`: a bool that deploys a contract on the other chain instead of paying a recipient.
+ * - `tuple`: the arguments are one dynamic tuple, reached through the offset in the first head word;
+ *   the offsets above are inside it.
+ * - `unread`: the call names what it pays on the other chain in a form this decoder cannot read.
+ * - `across`: an Across deposit, whose input and output amounts are read too (acrossAmounts).
  */
 type BridgeFunction = {
   name: string;
   recipients: ReadonlyArray<{ at: number; bytes32?: true; reason: string }>;
   bytesAt?: number;
+  bytesArrayAt?: number;
   creationAt?: number;
+  tuple?: true;
+  unread?: string;
+  across?: true;
 };
 
 const RECEIVES = "receives the bridged funds on the other chain";
@@ -1502,25 +1512,30 @@ const BRIDGE_FUNCTIONS: Record<string, BridgeFunction> = {
   "4fb1a07b": { name: "outboundTransferCustomRefund(address,address,address,uint256,uint256,uint256,bytes)", recipients: [{ at: 32, reason: REFUNDED }, { at: 64, reason: RECEIVES }] },
   "7b3a3c8b": { name: "outboundTransfer(address,address,uint256,bytes)", recipients: [{ at: 32, reason: RECEIVES }] },
   // Across SpokePool: the depositor is refunded if the deposit is not filled; a message is run by the recipient.
+  // The relayer that fills a deposit pays outputAmount and is repaid inputAmount (acrossAmounts).
   "7b939232": {
     name: "depositV3(address,address,address,address,uint256,uint256,uint256,address,uint32,uint32,uint32,bytes)",
     recipients: [{ at: 32, reason: RECEIVES }, { at: 0, reason: REFUNDED }],
     bytesAt: 352,
+    across: true,
   },
   "7aef642c": {
     name: "depositV3Now(address,address,address,address,uint256,uint256,uint256,address,uint32,uint32,bytes)",
     recipients: [{ at: 32, reason: RECEIVES }, { at: 0, reason: REFUNDED }],
     bytesAt: 320,
+    across: true,
   },
   ad5425c6: {
     name: "deposit(bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint256,bytes32,uint32,uint32,uint32,bytes)",
     recipients: [{ at: 32, bytes32: true, reason: RECEIVES }, { at: 0, bytes32: true, reason: REFUNDED }],
     bytesAt: 352,
+    across: true,
   },
   ea86bd46: {
     name: "depositNow(bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint256,bytes32,uint32,uint32,bytes)",
     recipients: [{ at: 32, bytes32: true, reason: RECEIVES }, { at: 0, bytes32: true, reason: REFUNDED }],
     bytesAt: 320,
+    across: true,
   },
   // Circle CCTP TokenMessenger (v1) and TokenMessengerV2: USDC is burned here and minted to mintRecipient.
   "6fd3504e": { name: "depositForBurn(uint256,uint32,bytes32,address)", recipients: [{ at: 64, bytes32: true, reason: RECEIVES }] },
@@ -1531,12 +1546,108 @@ const BRIDGE_FUNCTIONS: Record<string, BridgeFunction> = {
     recipients: [{ at: 64, bytes32: true, reason: RECEIVES }],
     bytesAt: 224,
   },
+  // Polygon's unified bridge (zkEVM, Agglayer: PolygonZkEVMBridgeV2, Ethereum 0x2a3DD3EB832aF982ec71669E178424b10Dca2EDe).
+  // bridgeAsset's permitData is a token permit the bridge uses on this chain (its spender is the bridge), never
+  // calldata for the other chain; bridgeMessage's metadata is run by its recipient there.
+  cd586579: { name: "bridgeAsset(uint32,address,uint256,address,bool,bytes)", recipients: [{ at: 32, reason: RECEIVES }] },
+  "240ff378": { name: "bridgeMessage(uint32,address,bool,bytes)", recipients: [{ at: 32, reason: RECEIVES }], bytesAt: 96 },
+  // Celer cBridge (Ethereum 0x5427FEFA711Eff984124bFBB1AB6fbf5E3DA1820).
+  "3f2e5fc3": { name: "sendNative(address,uint256,uint64,uint64,uint32)", recipients: [{ at: 0, reason: RECEIVES }] },
+  a5977fbb: { name: "send(address,address,uint256,uint64,uint64,uint32)", recipients: [{ at: 0, reason: RECEIVES }] },
+  // Gnosis Chain: the OmniBridge (Ethereum 0x88ad09518695c6c3712AC10a214bE5109a655671, Gnosis
+  // 0xf6A78083ca3e2a662D6dd1703c939c8aCE2e268d), its WETH router (Ethereum 0xa6439Ca0FCbA1d0F80df0bE6A17220feD9c9038a)
+  // and the xDAI bridge (Ethereum 0x4aa42145Aa6Ebf72e164C9bBC74fbD3788045016).
+  ad58bdd1: { name: "relayTokens(address,address,uint256)", recipients: [{ at: 32, reason: RECEIVES }] },
+  d7405481: { name: "relayTokensAndCall(address,address,uint256,bytes)", recipients: [{ at: 32, reason: RECEIVES }], bytesAt: 96 },
+  f52cbf0e: { name: "wrapAndRelayTokens(address)", recipients: [{ at: 0, reason: RECEIVES }] },
+  "3ace4765": { name: "wrapAndRelayTokens(address,bytes)", recipients: [{ at: 0, reason: RECEIVES }], bytesAt: 32 },
+  // One selector, two functions: the xDAI bridge's relayTokens(address _receiver, uint256 _amount) and the
+  // OmniBridge's relayTokens(address token, uint256 _value), which pays the sender itself. The first word is
+  // checked either way: the receiver, or a token checked for nothing; never a receiver left unchecked.
+  "01e4f53a": {
+    name: "relayTokens(address,uint256)",
+    recipients: [{ at: 0, reason: "receives the bridged funds on the other chain (xDAI bridge), or is the token bridged to the sender (OmniBridge)" }],
+  },
+  // zkSync Era: the Bridgehub (Ethereum 0x303a465B659cBB0ab36eE643eA362c509EEb5213) and Era's legacy Mailbox on its
+  // diamond (Ethereum 0x32400084C286CF3E17e7B677ea9583e60a000324). The refund recipient receives on L2 what the
+  // deposit leaves over (all of it when the L2 call fails); factory dependencies are code deployed there.
+  d52471c1: {
+    name: "requestL2TransactionDirect((uint256,uint256,address,uint256,bytes,uint256,uint256,bytes[],address))",
+    tuple: true,
+    recipients: [{ at: 64, reason: RECEIVES }, { at: 256, reason: REFUNDED }],
+    bytesAt: 128,
+    bytesArrayAt: 224,
+  },
+  eb672419: {
+    name: "requestL2Transaction(address,uint256,bytes,uint256,uint256,bytes[],address)",
+    recipients: [{ at: 0, reason: RECEIVES }, { at: 192, reason: REFUNDED }],
+    bytesAt: 64,
+    bytesArrayAt: 160,
+  },
+  "24fd57fb": {
+    name: "requestL2TransactionTwoBridges((uint256,uint256,uint256,uint256,uint256,address,address,uint256,bytes))",
+    recipients: [],
+    unread: "names its recipient only inside the calldata it hands a second bridge",
+  },
 };
+
+/**
+ * Across deposits name what the depositor pays here (inputToken at 64, inputAmount at 128) and what the
+ * recipient is paid on the destination chain (outputToken at 96, outputAmount at 160, destinationChainId at
+ * 192). The relayer that fills a deposit pays outputAmount there and is repaid inputAmount here, so a
+ * deposit that pays out little or nothing hands the deposit to whoever fills it. Two amounts are compared
+ * only in the same token known on both chains, scaled by each chain's decimals (USDC and USDT have 18 on
+ * BNB Chain); a fee is far below half. Anything else is named in a warning.
+ *
+ * @param args - The arguments (calldata after the selector).
+ * @param ctx - Decoding context (its chain is the source chain).
+ * @param out - Receives the danger, warnings and unread parts found.
+ * @param out.danger - Proven danger.
+ * @param out.warnings - Warnings.
+ * @param out.opaque - What could not be read.
+ * @returns The amounts, for the summary ("" when they cannot be read).
+ */
+function acrossAmounts(args: string, ctx: Ctx, out: { danger: string[]; warnings: string[]; opaque: string[] }): string {
+  const input = uintAt(args, 128);
+  const output = uintAt(args, 160);
+  const destination = uintAt(args, 192);
+  if (input === undefined || output === undefined || destination === undefined) {
+    out.opaque.push("the Across deposit is too short to read the amounts it takes and pays out");
+    return "";
+  }
+  // deposit and depositNow name tokens as bytes32: a token outside EVM address form is named as it is, and unknown.
+  const tokenAt = (offset: number): string => {
+    const value = paddedWord(args, offset);
+    return /^0{24}/u.test(value) ? `0x${value.slice(24)}` : `0x${value}`;
+  };
+  const inputToken = tokenAt(64);
+  const outputToken = tokenAt(96);
+  const target = destination > 0n && destination <= BigInt(Number.MAX_SAFE_INTEGER) ? `eip155:${destination.toString()}` : undefined;
+  const inputText = tokenAmount(input, ctx.chain, inputToken);
+  const outputText = target ? `${tokenAmount(output, target, outputToken)} on ${target}` : `${output.toString()} base units of token ${outputToken} on chain ${destination.toString()}`;
+  // Each token is looked up on its own chain only: the same address can be another token elsewhere.
+  const paid = ctx.chain ? knownToken(ctx.chain, inputToken) : undefined;
+  const paidOut = target ? knownToken(target, outputToken) : undefined;
+  if (output === 0n && input > 0n) {
+    out.danger.push(`the Across deposit takes ${inputText} and pays nothing on the other chain (outputAmount 0): the relayer that fills it keeps the deposit`);
+  } else if (paid && paidOut && paid.symbol === paidOut.symbol) {
+    const decimals = Math.max(paid.decimals, paidOut.decimals);
+    const taken = input * 10n ** BigInt(decimals - paid.decimals);
+    const given = output * 10n ** BigInt(decimals - paidOut.decimals);
+    if (given * 2n < taken) {
+      out.danger.push(`the Across deposit takes ${inputText} and pays only ${outputText}, less than half: the relayer that fills it keeps the difference`);
+    }
+  } else {
+    out.warnings.push(`the Across deposit takes ${inputText} and pays ${outputText}; their tokens are not both known, so the two amounts were not compared`);
+  }
+  return `, taking ${inputText} to pay ${outputText}`;
+}
 
 /**
  * A call that sends funds to another chain through a bridge this decoder knows. Its recipients there
  * are checked; what cannot be read (a recipient outside EVM address form, calldata or a contract
- * deployment run on the other chain) makes the request unread, never clear.
+ * deployment run on the other chain) makes the request unread, never clear. An Across deposit that
+ * pays out nothing, or less than half of what it takes, is proven danger.
  *
  * @param call - The call.
  * @param ctx - Decoding context.
@@ -1545,39 +1656,55 @@ const BRIDGE_FUNCTIONS: Record<string, BridgeFunction> = {
 function bridgeCall(call: InnerCall, ctx: Ctx): Action | undefined {
   const selector = call.data.slice(0, 8);
   const fn = BRIDGE_FUNCTIONS[selector];
-  if (!fn) return undefined;
+  // The signer's own account runs its own code, never a bridge's: such a call is left to the decoders
+  // after this one (an account calling its own code with calldata they do not read stays unread).
+  if (!fn || isOwnAccount(call, ctx)) return undefined;
   const args = call.data.slice(8);
   const warnings: string[] = [];
-  const opaque: string[] = [];
+  const danger: string[] = [];
+  const opaque: string[] = fn.unread ? [`the bridge call ${fn.name} ${fn.unread}, which x402check cannot read`] : [];
   const recipients: Array<{ address: string; reason: string }> = [];
-  for (const r of fn.recipients) {
-    const value = word(args, r.at);
-    if (value === undefined) {
-      opaque.push(`the bridge call ${fn.name} is too short to name who receives the funds on the other chain`);
-      continue;
+  // A tuple argument is reached through its offset; the offsets of what it holds are relative to its start.
+  const base = fn.tuple ? dynamicAt(args, 0) : 0;
+  if (base === undefined) {
+    opaque.push(`the bridge call ${fn.name} is too short to read`);
+  } else {
+    for (const r of fn.recipients) {
+      const value = word(args, base + r.at);
+      if (value === undefined) {
+        opaque.push(`the bridge call ${fn.name} is too short to name who receives the funds on the other chain`);
+        continue;
+      }
+      if (r.bytes32 && !/^0{24}/u.test(value)) {
+        opaque.push(`the bridge call ${fn.name} names 0x${value} on the other chain, which is not an EVM address this guard can check`);
+        continue;
+      }
+      const address = wordAddress(value, warnings);
+      if (!recipients.some((x) => x.address === address)) recipients.push({ address, reason: r.reason });
     }
-    if (r.bytes32 && !/^0{24}/u.test(value)) {
-      opaque.push(`the bridge call ${fn.name} names 0x${value} on the other chain, which is not an EVM address this guard can check`);
-      continue;
+    if (fn.creationAt !== undefined) {
+      const creation = uintAt(args, base + fn.creationAt);
+      if (creation === undefined) opaque.push(`the bridge call ${fn.name} is too short to read`);
+      else if (creation !== 0n) opaque.push(`the bridge call ${fn.name} deploys a contract on the other chain, which x402check cannot read`);
     }
-    const address = wordAddress(value, warnings);
-    if (!recipients.some((x) => x.address === address)) recipients.push({ address, reason: r.reason });
+    if (fn.bytesAt !== undefined) {
+      const data = bytesAt(args, dynamicAt(args, base + fn.bytesAt, base));
+      if (data === undefined) opaque.push(`the calldata of the bridge call ${fn.name} could not be read`);
+      else if (data.length > 0) opaque.push(`the bridge call ${fn.name} carries calldata run on the other chain, which x402check cannot read`);
+    }
+    if (fn.bytesArrayAt !== undefined) {
+      const at = dynamicAt(args, base + fn.bytesArrayAt, base);
+      const count = at === undefined ? undefined : smallAt(args, at);
+      if (count === undefined) opaque.push(`the code the bridge call ${fn.name} deploys on the other chain could not be read`);
+      else if (count > 0) opaque.push(`the bridge call ${fn.name} deploys contract code on the other chain, which x402check cannot read`);
+    }
   }
-  if (fn.creationAt !== undefined) {
-    const creation = uintAt(args, fn.creationAt);
-    if (creation === undefined) opaque.push(`the bridge call ${fn.name} is too short to read`);
-    else if (creation !== 0n) opaque.push(`the bridge call ${fn.name} deploys a contract on the other chain, which x402check cannot read`);
-  }
-  if (fn.bytesAt !== undefined) {
-    const data = bytesAt(args, dynamicAt(args, fn.bytesAt));
-    if (data === undefined) opaque.push(`the calldata of the bridge call ${fn.name} could not be read`);
-    else if (data.length > 0) opaque.push(`the bridge call ${fn.name} carries calldata run on the other chain, which x402check cannot read`);
-  }
+  const amounts = fn.across ? acrossAmounts(args, ctx, { danger, warnings, opaque }) : "";
   const sends = call.value > 0n ? `, sending ${nativeAmount(call.value, ctx.chain)}` : "";
   const named = recipients.length > 0 ? `, to ${recipients.map((r) => r.address).join(" and ")} on the other chain` : "";
   return {
     label: "Bridge transfer",
-    summary: `Bridge transfer to another chain through ${call.to} (${fn.name})${sends}${named}.`,
+    summary: `Bridge transfer to another chain through ${call.to} (${fn.name})${sends}${amounts}${named}.`,
     candidates: [
       ...recipients.map((r, index) => ({
         address: r.address,
@@ -1590,7 +1717,7 @@ function bridgeCall(call: InnerCall, ctx: Ctx): Action | undefined {
       contractCandidate(call, ctx),
     ],
     warnings,
-    danger: [],
+    danger,
     ...(opaque.length ? { opaque } : {}),
   };
 }

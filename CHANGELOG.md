@@ -2,6 +2,22 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/client` 0.5.2 (unreleased)
+
+The follow-ups of the 2026-10-18 review of 0.5.1 (`packages/client/test/guard-052.test.ts`). Versions are not bumped yet.
+
+- **Four more bridges whose recipient on the other chain is only in calldata.** The guard checked only the bridge contract, so a transfer through one of them to an attacker on the other chain was signed on the bridge's check alone (since v0.6.20 the Worker's simulation reads them as `cross_chain`, a review). Their recipients there, refund recipients included, are now read and checked along with the bridge:
+  - Polygon's unified bridge (zkEVM, Agglayer): `bridgeAsset` and `bridgeMessage`. The `permitData` of `bridgeAsset` is a permit the bridge uses on this chain, so it is not unread. The metadata of `bridgeMessage` is run by its recipient on the other chain, so it is.
+  - Celer cBridge: `send` and `sendNative`.
+  - Gnosis Chain: the OmniBridge's `relayTokens(token, receiver, value)` and `relayTokensAndCall`, its WETH router's two `wrapAndRelayTokens`, and the xDAI bridge's `relayTokens(receiver, amount)`. That last selector is also the OmniBridge's `relayTokens(token, value)`, which pays the sender itself. Its first word is checked either way: at worst a token is checked for nothing, and a receiver is never left unchecked.
+  - zkSync Era: the Bridgehub's `requestL2TransactionDirect`, whose one argument is a tuple, and the Era diamond's legacy `requestL2Transaction`. Their refund recipient receives what the deposit leaves over on L2, or all of it when the L2 call fails. Calldata or factory dependencies (code deployed on L2) make the request unread. `requestL2TransactionTwoBridges` is unread as a whole, because its recipient is inside the calldata it hands a second bridge.
+  - Each selector was computed with viem's `toFunctionSelector` from the canonical signature, and each was found in the deployed code: the dispatcher of each bridge's implementation on Ethereum, the OmniBridge's on Gnosis Chain too, and the zkSync Era diamond's `facetAddress`.
+- **Across: what a deposit pays on the other chain.** The decoder read who receives an Across deposit, but not how much. A deposit to the signer that paid out 1 wei was signed, and the relayer that fills such a deposit is repaid all of it. `depositV3`, `depositV3Now`, `deposit` and `depositNow` now show both amounts in the summary:
+  - A deposit that pays out nothing for a nonzero input is refused before any check (`local_danger`).
+  - When both tokens are in the decoders' registry with the same symbol, the amounts are compared after scaling by each chain's decimals (USDC and USDT have 18 on BNB Chain). A deposit that pays out less than half of its input is refused (`local_danger`). Across's fees are far below half, so a legitimate deposit is not refused.
+  - Otherwise, a warning names both amounts.
+- **A bridge selector sent to the signer's own account** was read as a bridge transfer and signed on its recipient's check. The account runs its own code there, not a bridge's, so the call is now read like any other call to the account. At the top level it is refused as `unreadable_self_call`.
+
 ## v0.6.20 — 2026-10-18: a verdict paid for reaches its payer on a resend
 
 Since v0.6.18, a client that leaves during its evaluation is charged, because its verdict was produced. That closed the free-evaluation loop. But an honest client that times out paid for a verdict it never received, and a resend of the same payment was refused: 409, or 402 from the facilitator, whose verify sees the nonce already used. The 2026-10-18 review suggested keeping that verdict.
