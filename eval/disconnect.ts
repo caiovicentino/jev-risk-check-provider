@@ -1,8 +1,12 @@
-// Production probe for a client that disconnects before settlement (v0.6.15). The paid request
-// leaves with its payment and is abandoned `--abandon-ms` later (default 1500: past the payment's
-// verification, while the check is evaluated). The Worker must then settle nothing (it answers 499
-// to nobody) and release the payment's claim, so the same signed payment, sent again a little
-// later, is evaluated and settled once.
+// Production probe for a client that disconnects mid-check. The paid request leaves with its
+// payment and is abandoned `--abandon-ms` later (default 1500), then the same signed payment is
+// sent again for the same request. Whatever the moment, one payment buys one verdict that reaches
+// the payer:
+// - abandoned before its check started: nothing is settled and the payment is released, so the
+//   resend is evaluated and settled once (v0.6.16);
+// - abandoned during its evaluation or settlement: the verdict was produced and settled (v0.6.18),
+//   and the resend receives that same verdict, `X-Payment-Delivery: resent`, with its receipt and
+//   no second evaluation or charge (v0.6.20).
 //
 //   X402CHECK_BASE=https://x402check.xyz PAY_NETWORK=eip155:8453 npx tsx eval/disconnect.ts [--abandon-ms 1500]
 //   npx tsx eval/disconnect.ts --credits [--abandon-ms 600]
@@ -13,8 +17,8 @@
 // most $0.001, never more.
 //
 // Cost: one check on the payment network ($0.0035 on Base), paid by the probe payer to
-// x402check's own pay_to. If the abandoned request had been settled, the resend is refused
-// (409 or 402) and the probe fails: the cost is the same either way.
+// x402check's own pay_to. A resend that is refused (409 or 402) fails the probe: the payer then
+// paid for a verdict it never received.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -84,10 +88,12 @@ async function main(): Promise<void> {
   const res = await fetch(`${BASE}/v1/risk-check`, { method: "POST", headers: { "content-type": "application/json", "PAYMENT-SIGNATURE": signature }, body: BODY });
   const receipt = settlementReceipt(res.headers);
   const error = res.status === 200 ? null : (((await res.clone().json().catch(() => ({}))) as { error?: string }).error ?? null);
-  const resent = { status: res.status, error, settled: receipt?.success === true, ...(receipt?.transaction ? { transaction: receipt.transaction } : {}) };
-  console.log(`resent after ${RESEND_AFTER_MS / 1000} s: HTTP ${resent.status} ${error ?? ""}${resent.settled ? ` settled ${resent.transaction}` : ""}`);
+  const delivery = res.headers.get("x-payment-delivery");
+  const resent = { status: res.status, error, settled: receipt?.success === true, ...(receipt?.transaction ? { transaction: receipt.transaction } : {}), ...(delivery ? { delivery } : {}) };
+  console.log(`resent after ${RESEND_AFTER_MS / 1000} s: HTTP ${resent.status} ${error ?? ""}${resent.settled ? ` settled ${resent.transaction}` : ""}${delivery ? ` (${delivery}: the verdict of the abandoned request)` : ""}`);
 
-  // The abandoned request got no settled answer, and the same payment then paid for exactly one check.
+  // The abandoned request got no answer, and the same payment then delivered exactly one paid
+  // verdict: evaluated now, or the one produced for the abandoned request (resent).
   const pass = abandoned.status === 0 && resent.status === 200 && resent.settled;
   const report = {
     timestamp: new Date().toISOString(),
@@ -104,7 +110,7 @@ async function main(): Promise<void> {
   };
   mkdirSync(EVAL_EVIDENCE_DIR, { recursive: true });
   writeFileSync(`${EVAL_EVIDENCE_DIR}/disconnect-v${deployed.version ?? "unknown"}-${ABANDON_AFTER_MS}ms-report.json`, JSON.stringify(report, null, 2));
-  console.log(pass ? "PASS  the abandoned request settled nothing; the same payment then paid for one check" : "FAIL  see the outcomes above");
+  console.log(pass ? `PASS  one payment, one verdict delivered${delivery ? " (the abandoned request's, resent)" : " (evaluated on the resend)"}` : "FAIL  see the outcomes above");
   if (!pass) process.exit(1);
 }
 

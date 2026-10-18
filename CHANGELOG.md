@@ -2,6 +2,15 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## v0.6.20 — 2026-10-18: a verdict paid for reaches its payer on a resend
+
+Since v0.6.18, a client that leaves during its evaluation is charged, because its verdict was produced. That closed the free-evaluation loop. But an honest client that times out paid for a verdict it never received, and a resend of the same payment was refused: 409, or 402 from the facilitator, whose verify sees the nonce already used. The 2026-10-18 review suggested keeping that verdict.
+
+- **The verdict is kept.** It is stored with the payment's claim for a day (up to 100 KB). The same payment resent for the same request (same route, same body) receives it as it was produced, with `X-Payment-Delivery: resent` and its settlement receipt. Nothing is evaluated or charged again, and the settlement record then says `delivered: "resent"`.
+- **No cost on other paths.** The kept verdict is looked up only for a payment that was refused or already used, never on the way of a new one. Any other request with that payment is refused as before.
+- **Credit purchases are unchanged.** A new credit token lost the same way is not kept, because that would store the token itself; it stays the owner's to make right.
+- **`eval/disconnect.ts`** now expects one payment to buy one verdict that reaches the payer, whenever the client leaves.
+
 ## v0.6.19 — 2026-10-18: a transfer to another chain is never read as clear
 
 The 2026-10-18 maintenance review found that the rule from v0.6.18 covered only withdrawals from an L2 to L1. A deposit from Ethereum to an L2, or a transfer to someone else through a third-party bridge, came back from the simulation `ok` with no finding: the funds sink into the bridge, and the recipient on the other chain is never visible to the simulation. Now any event from a bridge or message layer the simulation knows makes the simulation incomplete (`cross_chain`, review):

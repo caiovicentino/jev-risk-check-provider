@@ -18,7 +18,7 @@ The lead agent's daily routine for x402check: check production and the repositor
    - the unpaid black box: the 402 challenge against the routes and the price table, 405/422 paths, HTTPS, security headers, the JWKS against the attestation thumbprint, discovery documents;
    - GitHub: CI on main, the feeds workflow, CodeQL and Dependabot alerts, open PRs, the release of the deployed version, new comments in the AGENTS.md §2.6 threads;
    - the deployed commit against main, and the embedded OFAC snapshot against the published release;
-   - money: new settlements (KV `st:*`), each payer read on-chain, outside payments with the caller's user agent, credit packs settled for a buyer who left (`undelivered`: the owner decides how to make it right), and the probe budget;
+   - money: new settlements (KV `st:*`), each payer read on-chain, outside payments with the caller's user agent, payments settled for a client who left (`undelivered`: a verdict reaches its payer on a resend of the same payment within a day, and the record then says `delivered: "resent"`; a credit token lost that way is the owner's to make right), and the probe budget;
    - npm versions against the repository.
 3. **Regression.** Run the four suites (AGENTS.md §3.1) and the Worker bundle dry-run (`cd deploy && ../node_modules/.bin/wrangler deploy --dry-run --outdir <tmp>`) on `origin/main`.
 4. **Review.** If main has code commits since the last run, review their diff for correctness and security (a subagent review). Docs-only changes need no review.

@@ -8,7 +8,7 @@ import assert from "node:assert";
 import { generateKeyPairSync } from "node:crypto";
 import { CreditLedger, handleCredits, retryPendingCredits } from "../deploy/credits.js";
 import { buildAccepts, handleProtected, loadKeyPair, type PaymentRoute, type Stack } from "../deploy/protected.js";
-import { PaymentClaim, paymentIdentity } from "../deploy/payment-claims.js";
+import { claimPayment, KEPT_MAX_BYTES, keptVerdict, PaymentClaim, paymentIdentity } from "../deploy/payment-claims.js";
 import type { DurableObjectNamespace, DurableObjectState, KVNamespace, WorkerEnv } from "../deploy/runtime.js";
 import { createHandler } from "../src/handler.js";
 import { Provider } from "../src/provider.js";
@@ -568,7 +568,7 @@ test("an unpaid challenge reuses a recent Solana blockhash for 15 s instead of a
   }
 });
 
-test("a client gone during its evaluation is charged and recorded undelivered; the work is handed to waitUntil; the payment cannot be used again", async () => {
+test("a client gone during its evaluation is charged and recorded undelivered; the same payment resent for the same request receives that verdict, never evaluated or charged again", async () => {
   const kv = memoryKv();
   const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((s) => new PaymentClaim(s)), RATE: kv };
   const settle = { ok: true, tx: "0xeee", settled: 0 };
@@ -577,18 +577,72 @@ test("a client gone during its evaluation is charged and recorded undelivered; t
   const controller = new AbortController();
   const gone = new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": header }, body: JSON.stringify({ wallet: WALLET }), signal: controller.signal });
   const handed: Promise<unknown>[] = [];
+  let evaluations = 0;
+  const evaluate = (stackUsed: Stack) => async (r: Request) => {
+    evaluations++;
+    return createHandler(stackUsed.deps)(r);
+  };
   // The client disconnects while its check is being evaluated: the verdict is produced, so it is settled.
   const res = await handleProtected(gone, env, s, async (r) => {
     controller.abort();
-    return createHandler(s.deps)(r);
+    return evaluate(s)(r);
   }, { waitUntil: (p) => void handed.push(p) });
   assert.equal(res.status, 200);
+  const verdict = await res.text();
   assert.equal(settle.settled, 1, "settled once");
   assert.equal(handed.length, 1, "the work runs to completion even if the isolate would cancel the request");
   assert.equal((JSON.parse(kv.data.get("st:eip155:8453:0xeee") ?? "{}") as { undelivered?: boolean }).undelivered, true);
-  const again = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header }), env, s, (r) => createHandler(s.deps)(r));
-  assert.equal(again.status, 409, "the settled payment is used");
-  assert.equal(settle.settled, 1);
+  // Resent for the same request: the verdict it paid for, as it was produced, with its receipt.
+  const again = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header }), env, s, evaluate(s));
+  assert.deepEqual([again.status, again.headers.get("X-Payment-Delivery")], [200, "resent"]);
+  assert.equal(await again.text(), verdict, "the same verdict");
+  assert.ok(again.headers.get("PAYMENT-RESPONSE"), "with its settlement receipt");
+  assert.deepEqual([evaluations, settle.settled], [1, 1], "no second evaluation, no second charge");
+  const record = JSON.parse(kv.data.get("st:eip155:8453:0xeee") ?? "{}") as { undelivered?: boolean; delivered?: string };
+  assert.deepEqual([record.undelivered, record.delivered], [undefined, "resent"], "the record says it was delivered");
+  // The same payment for another request is used: nothing is evaluated for it.
+  const other = await handleProtected(req("/v1/risk-check", { wallet: USER }, { "PAYMENT-SIGNATURE": header }), env, s, evaluate(s));
+  assert.equal(other.status, 409, "the settled payment is used");
+  // In production the facilitator refuses the used authorization before admission: the same request
+  // still receives its verdict, and another request still gets the refusal.
+  const refusing = { ...s, http: { ...s.http, processHTTPRequest: async () => ({ type: "payment-error", response: { status: 402, headers: {}, body: { error: "invalid_exact_evm_payload_authorization_nonce" } } }) } } as unknown as Stack;
+  const viaRefusal = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header }), env, refusing, evaluate(refusing));
+  assert.deepEqual([viaRefusal.status, await viaRefusal.text()], [200, verdict]);
+  const refused = await handleProtected(req("/v1/risk-check", { wallet: USER }, { "PAYMENT-SIGNATURE": header }), env, refusing, evaluate(refusing));
+  assert.equal(refused.status, 402);
+  const batch = await handleProtected(req("/v1/risk-check/batch", { requests: [{ wallet: WALLET }] }, { "PAYMENT-SIGNATURE": header }), env, refusing, evaluate(refusing));
+  assert.equal(batch.status, 402, "another route is another request");
+  assert.deepEqual([evaluations, settle.settled], [1, 1]);
+  // A verdict that reached its client is not kept: a resend of a delivered payment is refused.
+  const delivered = payment(USER, "0x15");
+  const s2 = stack(USER, { ok: true, tx: "0xef0", settled: 0 });
+  assert.equal((await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": delivered }), env, s2, evaluate(s2))).status, 200);
+  assert.equal((await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": delivered }), env, s2, evaluate(s2))).status, 409);
+});
+
+test("a verdict is kept only for a settled payment, served only for the same request, and never past its size bound", async () => {
+  const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)) };
+  const kept = { request: "r1", status: 200, headers: { "content-type": "application/json" }, body: "{}" };
+  const claim = await claimPayment(env, "kept-1");
+  assert.ok(claim.claimed);
+  await claim.keep(kept);
+  assert.equal(await keptVerdict(env, "kept-1", "r1"), null, "a pending claim keeps nothing");
+  await claim.settled();
+  await claim.keep(kept);
+  assert.deepEqual(await keptVerdict(env, "kept-1", "r1"), kept);
+  assert.equal(await keptVerdict(env, "kept-1", "r2"), null, "another request");
+  assert.equal(await keptVerdict(env, "kept-2", "r1"), null, "another payment");
+  const big = await claimPayment(env, "kept-3");
+  assert.ok(big.claimed);
+  await big.settled();
+  await big.keep({ ...kept, body: "x".repeat(KEPT_MAX_BYTES + 1) });
+  assert.equal(await keptVerdict(env, "kept-3", "r1"), null, "too large to keep");
+  // A released claim (nothing settled) keeps nothing either.
+  const released = await claimPayment(env, "kept-4");
+  assert.ok(released.claimed);
+  await released.release();
+  await released.keep(kept);
+  assert.equal(await keptVerdict(env, "kept-4", "r1"), null);
 });
 
 test("the work handed to waitUntil starts before any state changes: a claim, a debit or a pack is never left half done by a cancelled request", async () => {
@@ -679,9 +733,13 @@ test("an evaluation abandoned by its client is paid: one authorization abandoned
       return createHandler(s.deps)(inner);
     });
   };
-  const statuses: number[] = [];
-  for (let i = 0; i < 4; i++) statuses.push((await abandon()).status);
-  assert.deepEqual(statuses, [200, 409, 409, 409]);
+  const answers: Array<[number, string | null]> = [];
+  for (let i = 0; i < 4; i++) {
+    const r = await abandon();
+    answers.push([r.status, r.headers.get("X-Payment-Delivery")]);
+  }
+  // The first is evaluated and settled; each resend of the same request receives that same verdict.
+  assert.deepEqual(answers, [[200, null], [200, "resent"], [200, "resent"], [200, "resent"]]);
   assert.deepEqual([evaluations, settle.settled], [1, 1], "one evaluation, paid");
   // A client already gone before its check starts costs nothing and counts nothing.
   const env2: WorkerEnv = { PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)) };

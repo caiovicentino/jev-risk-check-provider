@@ -2,7 +2,7 @@ import type { HTTPAdapter } from "@x402/core/http";
 import { decodeSolanaMessage } from "../packages/client/src/solana.js";
 import { parseSubject } from "../src/address.js";
 import { screenSubject } from "../src/sanctions.js";
-import { acquirePayerSlot, claimPayment, paymentIdentity, paymentScheme, paymentVersion, RETENTION_MS, settlementIdentity } from "./payment-claims.js";
+import { acquirePayerSlot, claimPayment, keptVerdict, paymentIdentity, paymentScheme, paymentVersion, RETENTION_MS, settlementIdentity } from "./payment-claims.js";
 import { isAssociatedTokenAccount } from "./svm-ata.js";
 import type { WorkerEnv } from "./runtime.js";
 
@@ -213,7 +213,15 @@ function expiresAt(paymentPayload: unknown): number | null {
 /** How a paid request ended: its claim and the payer's slot are closed accordingly. */
 export type PaymentOutcome = "settled" | "refused" | "unused";
 
-export type Admission = { ok: true; id: string; finish: (outcome: PaymentOutcome) => Promise<void> } | { ok: false; response: Response };
+export type Admission =
+  | {
+      ok: true;
+      id: string;
+      finish: (outcome: PaymentOutcome) => Promise<void>;
+      /** Keeps a settled verdict that reached nobody, for a resend of the same payment (`record`: its settlement record). */
+      keep: (res: Response, record?: string) => Promise<void>;
+    }
+  | { ok: false; response: Response };
 
 /**
  * Admits a verified payment before any work is done for it:
@@ -223,7 +231,7 @@ export type Admission = { ok: true; id: string; finish: (outcome: PaymentOutcome
  * - the payer may have only a few payments in flight, and is held back after repeated settlement failures;
  * - the payment is claimed once, by what its payer signed, however it is re-encoded.
  */
-export async function admitPayment(env: WorkerEnv, paymentPayload: unknown): Promise<Admission> {
+export async function admitPayment(env: WorkerEnv, paymentPayload: unknown, request?: string): Promise<Admission> {
   // Exactly one scheme payload, for the route paid on; a payer that cannot be read (a transaction
   // format the decoder does not know yet) cannot be screened: no service is sold unscreened.
   const read = readPayer(paymentPayload);
@@ -252,6 +260,11 @@ export async function admitPayment(env: WorkerEnv, paymentPayload: unknown): Pro
   const claim = await claimPayment(env, id);
   if (!claim.claimed) {
     await slot.done(false);
+    // The same payment resent for the same request, whose verdict reached nobody the first time.
+    if (claim.reason === "duplicate" && request !== undefined) {
+      const resent = await resendKept(env, id, request);
+      if (resent) return { ok: false, response: resent };
+    }
     const response =
       claim.reason === "duplicate"
         ? json(409, { error: "payment_already_used", detail: "this payment was already presented; sign a new one" })
@@ -267,7 +280,44 @@ export async function admitPayment(env: WorkerEnv, paymentPayload: unknown): Pro
       await (outcome === "settled" ? claim.settled() : claim.release());
       await slot.done(outcome === "refused");
     },
+    keep: async (res, record) => {
+      if (request === undefined) return;
+      const headers: Record<string, string> = {};
+      res.headers.forEach((value, key) => {
+        if (key !== "content-length") headers[key] = value;
+      });
+      await claim.keep({ request, status: res.status, headers, body: await res.text(), ...(record ? { record } : {}) });
+    },
   };
+}
+
+/**
+ * A verdict paid for that reached nobody, for the same payment resent with the same request: that
+ * verdict, as it was produced and paid for (no second evaluation, no second charge), or null.
+ * A facilitator refuses a settled authorization before admission (its nonce is used), so this is
+ * asked both for a refused payment and for a duplicate one.
+ */
+export async function resendKept(env: WorkerEnv, id: string | null, request: string): Promise<Response | null> {
+  const kept = await keptVerdict(env, id, request);
+  if (!kept) return null;
+  console.warn("a resent payment received the verdict it paid for, which its first request never received");
+  if (kept.record) await markDelivered(env, kept.record);
+  return new Response(kept.body, { status: kept.status, headers: { ...kept.headers, "X-Payment-Delivery": "resent" } });
+}
+
+/** A settlement record whose verdict reached its payer on a resend: it is no longer undelivered. */
+async function markDelivered(env: WorkerEnv, record: string): Promise<void> {
+  try {
+    const raw = await env.RATE?.get(record);
+    if (!raw) return;
+    const entry = JSON.parse(raw) as Record<string, unknown>;
+    if (entry.undelivered !== true) return;
+    delete entry.undelivered;
+    entry.delivered = "resent";
+    await env.RATE?.put(record, JSON.stringify(entry), { expirationTtl: 400 * 86400 });
+  } catch (err) {
+    console.error(`settlement record update failed: ${String(err).slice(0, 120)}`);
+  }
 }
 
 /**

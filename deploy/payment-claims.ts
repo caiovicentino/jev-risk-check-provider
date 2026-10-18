@@ -21,6 +21,21 @@ const PAYER_IDLE_MS = 2 * 60 * 1000;
 
 type PayerState = { inflight: number; last: number; failures: number[] };
 
+/**
+ * A verdict that was paid for but reached nobody (its client left before the response): kept with
+ * its settled claim, so a resend of the same payment for the same request receives it instead of
+ * a 409, with no second evaluation and no second charge. `request` is `requestFingerprint` of the
+ * paid request; `record` names its settlement record (`st:<network>:<tx>`).
+ */
+export type KeptResponse = { request: string; status: number; headers: Record<string, string>; body: string; record?: string };
+/** The largest body kept: a Durable Object value holds at most 128 KiB. A larger verdict is not kept. */
+export const KEPT_MAX_BYTES = 100_000;
+
+function isKept(value: unknown): value is KeptResponse {
+  const k = value as Partial<KeptResponse> | null;
+  return !!k && typeof k === "object" && typeof k.request === "string" && typeof k.status === "number" && typeof k.body === "string" && !!k.headers && typeof k.headers === "object";
+}
+
 export class PaymentClaim {
   constructor(private readonly state: DurableObjectState) {}
 
@@ -39,6 +54,19 @@ export class PaymentClaim {
     }
     if (op === "release") {
       if (current?.state === "pending") await this.state.storage.delete("claim");
+      return Response.json({ ok: true });
+    }
+    if (op === "kept") {
+      // Read only: the verdict a settled payment paid for, when it was kept and the request is the same.
+      const asked = (await request.json().catch(() => null)) as { request?: unknown } | null;
+      const kept = current?.state === "settled" ? await this.state.storage.get<KeptResponse>("kept") : undefined;
+      if (isKept(kept) && typeof asked?.request === "string" && asked.request === kept.request) return Response.json({ kept });
+      return Response.json({ kept: null }, { status: 404 });
+    }
+    if (op === "keep") {
+      // Only for a settled payment; it goes with the claim when the alarm clears it.
+      const kept = (await request.json().catch(() => null)) as unknown;
+      if (current?.state === "settled" && isKept(kept) && new TextEncoder().encode(kept.body).length <= KEPT_MAX_BYTES) await this.state.storage.put("kept", kept);
       return Response.json({ ok: true });
     }
     // Per-payer objects ("payer:<address>"): a payer's payments are verified before they settle, so
@@ -175,6 +203,15 @@ export async function settlementIdentity(network: string, transaction: string): 
   return sha256Hex(`tx|${network.toLowerCase()}|${tx}`);
 }
 
+/** A PAYMENT-SIGNATURE header's payment payload as sent, unverified (null when it does not decode). */
+export function decodedPayment(header: string): unknown {
+  try {
+    return JSON.parse(atob(header)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /** The x402 protocol version a PAYMENT-SIGNATURE declares (null when it does not decode). */
 export function paymentVersion(header: string | null): number | null {
   if (!header) return null;
@@ -186,7 +223,14 @@ export function paymentVersion(header: string | null): number | null {
   }
 }
 
-export type Claim = { claimed: true; settled: () => Promise<void>; release: () => Promise<void> } | { claimed: false; reason: "duplicate" | "unavailable" | "unidentified" };
+export type Claim =
+  | { claimed: true; settled: () => Promise<void>; release: () => Promise<void>; keep: (kept: KeptResponse) => Promise<void> }
+  | { claimed: false; reason: "duplicate" | "unavailable" | "unidentified" };
+
+/** What identifies a paid request for a resend: the route and the exact body. */
+export async function requestFingerprint(path: string, body: string): Promise<string> {
+  return sha256Hex(`${path}\n${body}`);
+}
 
 /**
  * Claims a payment. Without the Durable Object binding (local development, tests) every payment
@@ -194,11 +238,12 @@ export type Claim = { claimed: true; settled: () => Promise<void>; release: () =
  */
 export async function claimPayment(env: WorkerEnv, id: string | null): Promise<Claim> {
   const ns = env.PAYMENT_CLAIMS;
-  if (!ns) return { claimed: true, settled: async () => undefined, release: async () => undefined };
+  if (!ns) return { claimed: true, settled: async () => undefined, release: async () => undefined, keep: async () => undefined };
   // With the claim store bound, a payment it cannot identify is refused: single use must hold for every payment.
   if (!id) return { claimed: false, reason: "unidentified" };
   const stub = ns.get(ns.idFromName(id));
-  const call = (op: string) => stub.fetch(`https://claims/${op}`, { method: "POST" });
+  const call = (op: string, body?: unknown) =>
+    stub.fetch(`https://claims/${op}`, { method: "POST", ...(body !== undefined ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
   try {
     const res = await call("claim");
     if (res.status === 409) return { claimed: false, reason: "duplicate" };
@@ -214,7 +259,27 @@ export async function claimPayment(env: WorkerEnv, id: string | null): Promise<C
     release: async () => {
       await call("release").catch((err: unknown) => console.error(`payment claim: release failed: ${String(err).slice(0, 120)}`));
     },
+    keep: async (kept) => {
+      await call("keep", kept).catch((err: unknown) => console.error(`payment claim: keep failed: ${String(err).slice(0, 120)}`));
+    },
   };
+}
+
+/**
+ * The verdict kept for a settled payment and this same request (`requestFingerprint`), or null.
+ * Asked only for a payment that was refused or already used: never on the way of a new payment.
+ */
+export async function keptVerdict(env: WorkerEnv, id: string | null, request: string): Promise<KeptResponse | null> {
+  const ns = env.PAYMENT_CLAIMS;
+  if (!ns || !id) return null;
+  try {
+    const res = await ns.get(ns.idFromName(id)).fetch("https://claims/kept", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request }) });
+    if (!res.ok) return null;
+    const answer = (await res.json()) as { kept?: unknown };
+    return isKept(answer.kept) && answer.kept.request === request ? answer.kept : null;
+  } catch {
+    return null;
+  }
 }
 
 export type PayerSlot = { ok: true; done: (failed: boolean) => Promise<void> } | { ok: false; reason: "failures" | "busy"; retryAfter: number };

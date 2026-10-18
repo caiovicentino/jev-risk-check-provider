@@ -11,8 +11,8 @@ import { createContractIntel } from "../src/contract-intel.js";
 import { kitWatchLookup } from "./kit-watch.js";
 import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice, SIMULATION_PRICE } from "./pricing.js";
-import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, paymentUnavailable, readCapped, recordSettlement, settlementReceipt, settlementReused } from "./http-util.js";
-import { paymentVersion } from "./payment-claims.js";
+import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, paymentUnavailable, readCapped, recordSettlement, resendKept, settlementReceipt, settlementReused } from "./http-util.js";
+import { decodedPayment, paymentIdentity, paymentVersion, requestFingerprint } from "./payment-claims.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
 import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
 import { BATCH_DISCOVERY, openApiDocument, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "./discovery.js";
@@ -789,7 +789,15 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
     return paymentUnavailable(path, err);
   }
   // 3. Evaluate, then settle; the result is released only after settlement succeeds.
-  if (result.type === "payment-error") return instructionsToResponse(result.response);
+  if (result.type === "payment-error") {
+    // A settled payment resent (the facilitator refuses its used nonce): if its verdict reached nobody
+    // the first time and this is the same request, that verdict is what it paid for.
+    if (payment) {
+      const resent = await resendKept(_env, await paymentIdentity(decodedPayment(payment)), await requestFingerprint(path, text ?? ""));
+      if (resent) return resent;
+    }
+    return instructionsToResponse(result.response);
+  }
   if (result.type === "no-payment-required") return json(402, { error: "payment_required" });
   // From admission on, the work runs to completion even if the client disconnects: the runtime
   // cancels whatever is not handed to waitUntil, and a payment claimed by a cancelled request stayed
@@ -799,7 +807,9 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
     // Admission: the payer is screened like any counterparty, the authorization must be settleable,
     // the payer may have only a few payments in flight, and the payment is used once, however often
     // (or however re-encoded) it is sent.
-    const admission = await admitPayment(_env, result.paymentPayload);
+    // The request's fingerprint lets a resend of this payment, for this same request, receive a verdict
+    // that was paid for but reached nobody (below), instead of a 409.
+    const admission = await admitPayment(_env, result.paymentPayload, await requestFingerprint(path, text ?? ""));
     if (!admission.ok) return admission.response;
     // The client is already gone: nothing is evaluated, and the payment can be sent again.
     if (request.signal?.aborted) {
@@ -847,6 +857,8 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
         const undelivered = request.signal?.aborted === true;
         if (undelivered) console.warn(`client left while its payment settled on ${path}: the verdict reached nobody`);
         if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction, ...(undelivered ? { undelivered } : {}) });
+        // Kept with the payment's claim (a day): the same payment resent for the same request receives it.
+        if (undelivered) await admission.keep(res.clone(), receipt ? `st:${receipt.network}:${receipt.transaction}` : undefined);
         return res;
       }
       reason = settle.errorReason ?? reason;
