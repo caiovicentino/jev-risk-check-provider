@@ -2,10 +2,17 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## `@x402check/client` 0.5.2 (unreleased)
+## `@x402check/client` 0.5.2 and `@x402check/mcp` 0.3.2 — 2026-10-18
 
-The follow-ups of the 2026-10-18 review of 0.5.1 (`packages/client/test/guard-052.test.ts`). Versions are not bumped yet.
+0.5.1 was never published: its fixes ship in 0.5.2, together with the follow-ups of the review's third round.
 
+Daily maintenance reviews found these, and all are fixed here:
+- the review of 0.5.0 (2026-10-17): two critical issues in the client, three high, one medium and several low (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`);
+- the review of this release itself, before its publish (2026-10-18, three rounds): two high, three medium and four low (`guard-0618.test.ts`), then the follow-ups below (`guard-052.test.ts`).
+
+Client 0.5.0 and older should not be used.
+
+**Client (signing guard), the review's third round (2026-10-18):**
 - **Four more bridges whose recipient on the other chain is only in calldata.** The guard checked only the bridge contract, so a transfer through one of them to an attacker on the other chain was signed on the bridge's check alone (since v0.6.20 the Worker's simulation reads them as `cross_chain`, a review). Their recipients there, refund recipients included, are now read and checked along with the bridge:
   - Polygon's unified bridge (zkEVM, Agglayer): `bridgeAsset` and `bridgeMessage`. The `permitData` of `bridgeAsset` is a permit the bridge uses on this chain, so it is not unread. The metadata of `bridgeMessage` is run by its recipient on the other chain, so it is.
   - Celer cBridge: `send` and `sendNative`.
@@ -17,6 +24,36 @@ The follow-ups of the 2026-10-18 review of 0.5.1 (`packages/client/test/guard-05
   - When both tokens are in the decoders' registry with the same symbol, the amounts are compared after scaling by each chain's decimals (USDC and USDT have 18 on BNB Chain). A deposit that pays out less than half of its input is refused (`local_danger`). Across's fees are far below half, so a legitimate deposit is not refused.
   - Otherwise, a warning names both amounts.
 - **A bridge selector sent to the signer's own account** was read as a bridge transfer and signed on its recipient's check. The account runs its own code there, not a bridge's, so the call is now read like any other call to the account. At the top level it is refused as `unreadable_self_call`.
+
+**Client (signing guard), before the publish (2026-10-18 review):**
+- **High: a string field given as bytes.** viem signs a string-typed field given as a `Uint8Array`, a byte array or a bigint as its bytes, which is the same hash as the text. The guard read it as no address, so a Hyperliquid `usdSend` to an attacker written that way was signed. A string field given as anything but a string now makes the request malformed (`malformed`). A string longer than the decoders read is unread.
+- **High: bridges other than the OP Stack's withdrawals.** A deposit from Ethereum to an L2 (the OP Stack's L1StandardBridge and OptimismPortal, Arbitrum's Inbox and gateway routers) or a transfer through Across or Circle CCTP names its recipient on the other chain only in calldata, so only the bridge was checked.
+  - Their recipients, refund addresses included, are now read and checked, along with the bridge.
+  - A recipient that is not an EVM address, or calldata or a deployment run on the other chain, makes the request unread.
+  - The Worker reads any transfer through a bridge or message layer it knows as incomplete (v0.6.19).
+- **Medium: a serializer that rewrites the transaction it is handed** passed the read-back. viem hands the serializer the very object it signs, and the read-back compared against that same object. It now compares against a copy taken before the call.
+- **Medium: a serializer that returns a native promise with its own `then`** passed the read-back too. The checked bytes went to the check while the `then` gave viem a drain to sign. Found by the review's second round. What the promise resolves to is now awaited and verified, and only that value reaches viem.
+- **Medium (a regression in the unpublished 0.5.1): viem before 2.37.11 hashes a serializer's return value without awaiting it.** With those versions, the read-back made every transaction fail on chains that have their own serializer (Base, OP, Celo, zkSync). A synchronous serializer now stays synchronous, and a thenable is adopted as a native promise.
+- **Low:**
+  - A Permit2 witness payee was exempt from its check when the order named it as its swapper, as an address or now as a string. Only the signing account is exempt, and outputs paid to another swapper no longer count as the signer's.
+  - Generic typed data checked its verifying contract only when the message named no other address, so a memo holding a clean address spared a flagged verifying contract. The verifying contract is now always checked.
+  - A Multicall3 selector sent with no value did not name the contract called, which can be any contract answering that selector. It is now checked.
+  - A list of more than 64 numbers in generic typed data was read as unread content. Only content that can hold calldata is marked unread past the reading limits.
+  - A string longer than 2048 characters is read as before, and an address padded with whitespace past that point is still read as the payee.
+  - `scripts/publish-npm.sh` resumes with the MCP when the client is already on the registry.
+
+**Client (signing guard), from the review of 0.5.0 (2026-10-17):**
+- **Critical: Solana authorities are judged as the programs judge them.** The Stake program checks a withdrawal's or an authority change's signature against every signer it collects, the lockup custodian's slot included, and the System program accepts a nonce authority's signature from any account of the instruction. The guard looked at one position: with the victim's key in the custodian slot (or anywhere in a nonce instruction), a stake withdrawal to an attacker or the hand-over of a stake or nonce authority was signed unchecked. The signer's presence now counts, in both Stake layouts.
+- **Critical: a typed-data number written as `true` or `[1]`** (viem hashes it as 1) was read as missing, which disarmed the local rules (a SafeTx `operation: true` was read as a CALL and signed as a DELEGATECALL). A field the decoders cannot read as its declared type now makes the request malformed (`malformed`), and so does a fixed-size bytes field they cannot read.
+- **High: withdrawals to L1.** A withdrawal through Arbitrum's ArbSys behind Multicall3 was signed with only Multicall3 checked: Multicall3 batches (aggregate, aggregate3, aggregate3Value and relatives) are now decoded call by call. A withdrawal through the OP Stack's L2StandardBridge or L2ToL1MessagePasser on Base names its L1 recipient only in calldata: that recipient is now read and checked.
+- **High: typed data read only in part.** The search for calldata payloads stopped at 10 levels and at the 64th item of a list, silently: content past those limits now makes the request unreadable. A payee written as a string field (Hyperliquid's `usdSend`, `withdraw3`) is now checked.
+- **Medium: a serializer passed with the call is read back.** The bytes a viem account signs are what its serializer writes, so a caller's serializer could sign a transaction the guard never saw. Its unsigned output must now be the transaction that was checked (legacy, EIP-2930 or EIP-1559), or nothing is signed; the OP Stack's serializer on Base passes.
+- **Low:** list fields must be arrays (an `authorizationList` given as a `Set` slipped past the EIP-7702 rule); viem's `sendTransactionSync` and `eth_fillTransaction` options (`timeout`, `_capabilities`) are dropped like `account` and `chain`; a transaction that names no counterparty is refused as `no_counterparty`, not `not_simulated`; a domain with no declared `EIP712Domain` is typed exactly as viem types it, so a `chainId` written as a string is not read as a chain viem never signs.
+
+**MCP:**
+- **A payment counts as accepted only on a receipt that says `success: true`.** A 2xx with no receipt, an unreadable one, or one that says anything else is reported as unconfirmed (`payment_unconfirmed`), and no new authorization goes to that payee and site until the earlier one expires (up to 15 minutes).
+- **Concurrent calls to one payee and site:** the second is refused before it buys an x402check check, instead of after.
+- **Publishing:** `check-publish --tarball` refuses any tarball entry that is not a regular file (a symlink or hard link named like a module), and `scripts/publish-npm.sh` reads the tarball's name from `npm pack --json` and resolves the client from the registry when it pins the tree.
 
 ## v0.6.20 — 2026-10-18: a verdict paid for reaches its payer on a resend
 
@@ -39,45 +76,7 @@ The 2026-10-18 maintenance review found that the rule from v0.6.18 covered only 
 - deposits from Ethereum through the OP Stack's portal and Arbitrum's bridge;
 - Across, Circle CCTP (v1 and v2), LayerZero, Wormhole, Hyperlane, Linea, Scroll, Polygon PoS and Starknet.
 
-Events are matched whichever contract emits them, and each was confirmed in live logs on Ethereum or Base. A bridge the simulation does not know is still read as an ordinary contract (`docs/METHODOLOGY.md`). The signing guard (client 0.5.1) reads and checks the recipients of the bridges its decoders know.
-
-## `@x402check/client` 0.5.1 and `@x402check/mcp` 0.3.2 — 2026-10-18
-
-Two daily maintenance reviews found these, and all are fixed here:
-- the review of 0.5.0 (2026-10-17): two critical issues in the client, three high, one medium and several low (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`);
-- the review of this release itself, before its publish (2026-10-18, two rounds): two high, three medium and four low (`guard-0618.test.ts`).
-
-Client 0.5.0 and older should not be used.
-
-**Client (signing guard), before the publish (2026-10-18 review):**
-- **High: a string field given as bytes.** viem signs a string-typed field given as a `Uint8Array`, a byte array or a bigint as its bytes, which is the same hash as the text. The guard read it as no address, so a Hyperliquid `usdSend` to an attacker written that way was signed. A string field given as anything but a string now makes the request malformed (`malformed`). A string longer than the decoders read is unread.
-- **High: bridges other than the OP Stack's withdrawals.** A deposit from Ethereum to an L2 (the OP Stack's L1StandardBridge and OptimismPortal, Arbitrum's Inbox and gateway routers) or a transfer through Across or Circle CCTP names its recipient on the other chain only in calldata, so only the bridge was checked.
-  - Their recipients, refund addresses included, are now read and checked, along with the bridge.
-  - A recipient that is not an EVM address, or calldata or a deployment run on the other chain, makes the request unread.
-  - The Worker reads any transfer through a bridge or message layer it knows as incomplete (v0.6.19).
-- **Medium: a serializer that rewrites the transaction it is handed** passed the read-back. viem hands the serializer the very object it signs, and the read-back compared against that same object. It now compares against a copy taken before the call.
-- **Medium: a serializer that returns a native promise with its own `then`** passed the read-back too. The checked bytes went to the check while the `then` gave viem a drain to sign. Found by the review's second round. What the promise resolves to is now awaited and verified, and only that value reaches viem.
-- **Medium (a regression in 0.5.1): viem before 2.37.11 hashes a serializer's return value without awaiting it.** With those versions, the read-back made every transaction fail on chains that have their own serializer (Base, OP, Celo, zkSync). A synchronous serializer now stays synchronous, and a thenable is adopted as a native promise.
-- **Low:**
-  - A Permit2 witness payee was exempt from its check when the order named it as its swapper, as an address or now as a string. Only the signing account is exempt, and outputs paid to another swapper no longer count as the signer's.
-  - Generic typed data checked its verifying contract only when the message named no other address, so a memo holding a clean address spared a flagged verifying contract. The verifying contract is now always checked.
-  - A Multicall3 selector sent with no value did not name the contract called, which can be any contract answering that selector. It is now checked.
-  - A list of more than 64 numbers in generic typed data was read as unread content. Only content that can hold calldata is marked unread past the reading limits.
-  - A string longer than 2048 characters is read as before, and an address padded with whitespace past that point is still read as the payee.
-  - `scripts/publish-npm.sh` resumes with the MCP when the client is already on the registry.
-
-**Client (signing guard), from the review of 0.5.0 (2026-10-17):**
-- **Critical: Solana authorities are judged as the programs judge them.** The Stake program checks a withdrawal's or an authority change's signature against every signer it collects, the lockup custodian's slot included, and the System program accepts a nonce authority's signature from any account of the instruction. The guard looked at one position: with the victim's key in the custodian slot (or anywhere in a nonce instruction), a stake withdrawal to an attacker or the hand-over of a stake or nonce authority was signed unchecked. The signer's presence now counts, in both Stake layouts.
-- **Critical: a typed-data number written as `true` or `[1]`** (viem hashes it as 1) was read as missing, which disarmed the local rules (a SafeTx `operation: true` was read as a CALL and signed as a DELEGATECALL). A field the decoders cannot read as its declared type now makes the request malformed (`malformed`), and so does a fixed-size bytes field they cannot read.
-- **High: withdrawals to L1.** A withdrawal through Arbitrum's ArbSys behind Multicall3 was signed with only Multicall3 checked: Multicall3 batches (aggregate, aggregate3, aggregate3Value and relatives) are now decoded call by call. A withdrawal through the OP Stack's L2StandardBridge or L2ToL1MessagePasser on Base names its L1 recipient only in calldata: that recipient is now read and checked.
-- **High: typed data read only in part.** The search for calldata payloads stopped at 10 levels and at the 64th item of a list, silently: content past those limits now makes the request unreadable. A payee written as a string field (Hyperliquid's `usdSend`, `withdraw3`) is now checked.
-- **Medium: a serializer passed with the call is read back.** The bytes a viem account signs are what its serializer writes, so a caller's serializer could sign a transaction the guard never saw. Its unsigned output must now be the transaction that was checked (legacy, EIP-2930 or EIP-1559), or nothing is signed; the OP Stack's serializer on Base passes.
-- **Low:** list fields must be arrays (an `authorizationList` given as a `Set` slipped past the EIP-7702 rule); viem's `sendTransactionSync` and `eth_fillTransaction` options (`timeout`, `_capabilities`) are dropped like `account` and `chain`; a transaction that names no counterparty is refused as `no_counterparty`, not `not_simulated`; a domain with no declared `EIP712Domain` is typed exactly as viem types it, so a `chainId` written as a string is not read as a chain viem never signs.
-
-**MCP:**
-- **A payment counts as accepted only on a receipt that says `success: true`.** A 2xx with no receipt, an unreadable one, or one that says anything else is reported as unconfirmed (`payment_unconfirmed`), and no new authorization goes to that payee and site until the earlier one expires (up to 15 minutes).
-- **Concurrent calls to one payee and site:** the second is refused before it buys an x402check check, instead of after.
-- **Publishing:** `check-publish --tarball` refuses any tarball entry that is not a regular file (a symlink or hard link named like a module), and `scripts/publish-npm.sh` reads the tarball's name from `npm pack --json` and resolves the client from the registry when it pins the tree.
+Events are matched whichever contract emits them, and each was confirmed in live logs on Ethereum or Base. A bridge the simulation does not know is still read as an ordinary contract (`docs/METHODOLOGY.md`). The signing guard (client 0.5.2) reads and checks the recipients of the bridges its decoders know.
 
 ## v0.6.18 — 2026-10-17: a produced verdict is paid, and withdrawals to L1 are never read as clear
 
