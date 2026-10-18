@@ -2,11 +2,17 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## `@x402check/client` 0.5.3 (unreleased)
+## `@x402check/client` 0.5.3 and `@x402check/mcp` 0.3.2 — 2026-10-18
 
-The independent review of 0.5.2 (2026-10-18) found two low issues in how the signing guard reads Across. Both are fixed here (`packages/client/test/guard-053.test.ts`), and the Snap's decoders carry the same changes.
+0.5.1 and 0.5.2 were never published: their fixes ship in 0.5.3, with the follow-ups of the review's third and fourth rounds.
 
-**Client (signing guard):**
+Daily maintenance reviews found these, and all are fixed here:
+- the review of 0.5.0 (2026-10-17): two critical issues in the client, three high, one medium and several low (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`);
+- the review of this release itself, before its publish (2026-10-18, four rounds): two high, three medium and four low (`guard-0618.test.ts`), then the follow-ups below (`guard-052.test.ts`, `guard-053.test.ts`).
+
+Client 0.5.0 and older should not be used.
+
+**Client (signing guard), the review's fourth round (2026-10-18): Across read on every chain it serves:**
 - **Low: Across deposits whose tokens the decoders did not both know.** A deposit's two amounts were compared only when the decoders' token registry knew both tokens under one symbol. Otherwise it got a warning, so a deposit that paid out 1 unit was signed with a stub provider, and the relayer that fills it keeps the input. Two cases did this: a destination missing from the registry (WETH from Base to WETH on Linea), and an output token with another symbol (USDC to USDT). The fixes:
   - The registry now holds the tokens Across routes on each chain it serves: 52 entries. 19 chains are new to it: Linea, zkSync Era, Unichain, Blast, Scroll, World Chain, Ink, Mode, Zora, Lisk, Soneium, Monad, Lens, HyperEVM, Tempo, MegaETH, Robinhood Chain, Arc and Plasma. Optimism gains its bridged USDC, BNB Chain its ETH, and Base USDbC and USDT.
   - The addresses come from Across (`@across-protocol/constants` 3.1.129 and its live routes API). Each was read on-chain through a free public RPC: the chain id, the code, `symbol()` and `decimals()`. `snap/src/util.ts` names the RPC used for each chain.
@@ -16,16 +22,7 @@ The independent review of 0.5.2 (2026-10-18) found two low issues in how the sig
 - **Low: Across speed-ups signed off-chain.** Across's SpokePool takes the depositor's EIP-712 signature of `UpdateDepositDetails` (`speedUpV3Deposit`, `speedUpDeposit`, `fillRelayWithUpdatedDeposit`; domain `ACROSS-V2` `1.0.0`). That signature rewrites what a pending deposit pays on the other chain and to whom, but does not name the deposit's input. A new amount of 1 wei to a clean recipient therefore hands the deposit to whoever fills it. The guard read it as a plain message and signed it: the address form after checking only the recipient, and the bytes32 form after checking only the signer. The typed-data decoder now recognizes the type and refuses it as unreadable (`opaque_signature`) in both forms of the SpokePool:
   - `UpdateDepositDetails(uint32 depositId,uint256 originChainId,uint256 updatedOutputAmount,address updatedRecipient,bytes updatedMessage)` (`UPDATE_V3_DEPOSIT_DETAILS_HASH`, contracts v3.0.0);
   - `UpdateDepositDetails(uint256 depositId,uint256 originChainId,uint256 updatedOutputAmount,bytes32 updatedRecipient,bytes updatedMessage)` (`UPDATE_BYTES32_DEPOSIT_DETAILS_HASH`, contracts v4.1.5 and master). The deployed SpokePools on Ethereum, Base and Arbitrum return its hash.
-
-## `@x402check/client` 0.5.2 and `@x402check/mcp` 0.3.2 — 2026-10-18
-
-0.5.1 was never published: its fixes ship in 0.5.2, together with the follow-ups of the review's third round.
-
-Daily maintenance reviews found these, and all are fixed here:
-- the review of 0.5.0 (2026-10-17): two critical issues in the client, three high, one medium and several low (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`);
-- the review of this release itself, before its publish (2026-10-18, three rounds): two high, three medium and four low (`guard-0618.test.ts`), then the follow-ups below (`guard-052.test.ts`).
-
-Client 0.5.0 and older should not be used.
+  - Note: the registry also feeds the order economics (Permit2 and UniswapX orders, Seaport, ERC-20 orders). There, an order that pays out less than $1 of a known stablecoin, or less than 0.001 of a known ETH, is "only dust" (`local_danger`), and that now holds for the newly known tokens as it already held for USDC. An order selling 100 units of a token for 0.50 USDT on Base was signed by 0.5.2 and is refused by 0.5.3. Larger amounts are unaffected.
 
 **Client (signing guard), the review's third round (2026-10-18):**
 - **Four more bridges whose recipient on the other chain is only in calldata.** The guard checked only the bridge contract, so a transfer through one of them to an attacker on the other chain was signed on the bridge's check alone (since v0.6.20 the Worker's simulation reads them as `cross_chain`, a review). Their recipients there, refund recipients included, are now read and checked along with the bridge:
@@ -91,7 +88,7 @@ The 2026-10-18 maintenance review found that the rule from v0.6.18 covered only 
 - deposits from Ethereum through the OP Stack's portal and Arbitrum's bridge;
 - Across, Circle CCTP (v1 and v2), LayerZero, Wormhole, Hyperlane, Linea, Scroll, Polygon PoS and Starknet.
 
-Events are matched whichever contract emits them, and each was confirmed in live logs on Ethereum or Base. A bridge the simulation does not know is still read as an ordinary contract (`docs/METHODOLOGY.md`). The signing guard (client 0.5.2) reads and checks the recipients of the bridges its decoders know.
+Events are matched whichever contract emits them, and each was confirmed in live logs on Ethereum or Base. A bridge the simulation does not know is still read as an ordinary contract (`docs/METHODOLOGY.md`). The signing guard (client 0.5.3) reads and checks the recipients of the bridges its decoders know.
 
 ## v0.6.18 — 2026-10-17: a produced verdict is paid, and withdrawals to L1 are never read as clear
 
