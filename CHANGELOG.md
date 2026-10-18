@@ -2,7 +2,7 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## `@x402check/client` 0.5.3 and `@x402check/mcp` 0.3.2 — 2026-10-18
+## `@x402check/client` 0.5.3 and `@x402check/mcp` 0.3.2 — 2026-10-18 (on npm; tags `client-v0.5.3`, `mcp-v0.3.2`; client 0.5.0 deprecated with a security notice)
 
 0.5.1 and 0.5.2 were never published: their fixes ship in 0.5.3, with the follow-ups of the review's third and fourth rounds.
 
