@@ -7,7 +7,7 @@
  * handlers, ownership, upgrades) are recognized in every decoded call.
  */
 import { planSimulation } from "./simulation";
-import type { Candidate, Decoded } from "./util";
+import type { Candidate, Decoded, TokenInfo } from "./util";
 import {
   PERMIT2_ADDRESS,
   RANK,
@@ -1592,12 +1592,28 @@ const BRIDGE_FUNCTIONS: Record<string, BridgeFunction> = {
 };
 
 /**
+ * What an Across deposit's two amounts are compared in: US dollars for a dollar stablecoin (USDC and its
+ * bridged forms, USDT and USDT0, DAI, USDB, at $1 each), ETH for WETH and bridged ETH (1:1), else the token's
+ * own symbol. Across treats these as one token too (USDC.e, USDbC and USDzC as USDC, USDB as DAI, ETH as
+ * WETH). No other price is assumed: WETH against USDC is never compared.
+ *
+ * @param info - A token of the decoders' registry.
+ * @returns The unit.
+ */
+function acrossUnit(info: TokenInfo): string {
+  if (info.stable) return "US dollars";
+  return info.symbol === "WETH" || info.symbol === "ETH" ? "ETH" : info.symbol;
+}
+
+/**
  * Across deposits name what the depositor pays here (inputToken at 64, inputAmount at 128) and what the
  * recipient is paid on the destination chain (outputToken at 96, outputAmount at 160, destinationChainId at
  * 192). The relayer that fills a deposit pays outputAmount there and is repaid inputAmount here, so a
  * deposit that pays out little or nothing hands the deposit to whoever fills it. Two amounts are compared
- * only in the same token known on both chains, scaled by each chain's decimals (USDC and USDT have 18 on
- * BNB Chain); a fee is far below half. Anything else is named in a warning.
+ * only when both tokens are in the registry (each on its own chain) and worth the same unit (acrossUnit),
+ * scaled by each chain's decimals (USDC and USDT have 18 on BNB Chain); Across's fees are under 1%, far
+ * below half. Two known tokens of different assets, or a token the registry does not know, are named in a
+ * warning.
  *
  * @param args - The arguments (calldata after the selector).
  * @param ctx - Decoding context (its chain is the source chain).
@@ -1630,13 +1646,18 @@ function acrossAmounts(args: string, ctx: Ctx, out: { danger: string[]; warnings
   const paidOut = target ? knownToken(target, outputToken) : undefined;
   if (output === 0n && input > 0n) {
     out.danger.push(`the Across deposit takes ${inputText} and pays nothing on the other chain (outputAmount 0): the relayer that fills it keeps the deposit`);
-  } else if (paid && paidOut && paid.symbol === paidOut.symbol) {
+  } else if (paid && paidOut && acrossUnit(paid) === acrossUnit(paidOut)) {
     const decimals = Math.max(paid.decimals, paidOut.decimals);
     const taken = input * 10n ** BigInt(decimals - paid.decimals);
     const given = output * 10n ** BigInt(decimals - paidOut.decimals);
     if (given * 2n < taken) {
-      out.danger.push(`the Across deposit takes ${inputText} and pays only ${outputText}, less than half: the relayer that fills it keeps the difference`);
+      const counted = paid.symbol === paidOut.symbol ? "" : ` (${paid.symbol} and ${paidOut.symbol} counted in ${acrossUnit(paid)}, ${paid.stable ? "$1 each" : "1:1"})`;
+      out.danger.push(`the Across deposit takes ${inputText} and pays only ${outputText}, less than half${counted}: the relayer that fills it keeps the difference`);
     }
+  } else if (paid && paidOut) {
+    out.warnings.push(
+      `the Across deposit takes ${inputText} and pays ${outputText}: ${paid.symbol} and ${paidOut.symbol} are different assets whose relative price x402check does not know, so the two amounts were not compared`,
+    );
   } else {
     out.warnings.push(`the Across deposit takes ${inputText} and pays ${outputText}; their tokens are not both known, so the two amounts were not compared`);
   }

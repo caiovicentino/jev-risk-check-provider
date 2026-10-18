@@ -2,6 +2,21 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/client` 0.5.3 (unreleased)
+
+The independent review of 0.5.2 (2026-10-18) found two low issues in how the signing guard reads Across. Both are fixed here (`packages/client/test/guard-053.test.ts`), and the Snap's decoders carry the same changes.
+
+**Client (signing guard):**
+- **Low: Across deposits whose tokens the decoders did not both know.** A deposit's two amounts were compared only when the decoders' token registry knew both tokens under one symbol. Otherwise it got a warning, so a deposit that paid out 1 unit was signed with a stub provider, and the relayer that fills it keeps the input. Two cases did this: a destination missing from the registry (WETH from Base to WETH on Linea), and an output token with another symbol (USDC to USDT). The fixes:
+  - The registry now holds the tokens Across routes on each chain it serves: 52 entries. 19 chains are new to it: Linea, zkSync Era, Unichain, Blast, Scroll, World Chain, Ink, Mode, Zora, Lisk, Soneium, Monad, Lens, HyperEVM, Tempo, MegaETH, Robinhood Chain, Arc and Plasma. Optimism gains its bridged USDC, BNB Chain its ETH, and Base USDbC and USDT.
+  - The addresses come from Across (`@across-protocol/constants` 3.1.129 and its live routes API). Each was read on-chain through a free public RPC: the chain id, the code, `symbol()` and `decimals()`. `snap/src/util.ts` names the RPC used for each chain.
+  - US-dollar stablecoins (USDC and its bridged forms, USDT and USDT0, DAI, Blast's USDB) are compared at $1 each, and WETH and bridged ETH 1:1, with decimals normalized. A deposit that pays out less than half is refused (`local_danger`). Across's fees are under 1%, so legitimate deposits sign, including those with mixed decimals (BNB Chain's USDC and USDT have 18).
+  - Two known tokens of different assets (WETH to USDC) are never priced, and their warning now says so. In production, the simulation reads every Across deposit as `cross_chain`, a review, so such a deposit is signed only if `onWarn` approves.
+  - Tokens still outside the registry keep the warning: WBTC, Across's USDG, pathUSD and USDH, and Tron.
+- **Low: Across speed-ups signed off-chain.** Across's SpokePool takes the depositor's EIP-712 signature of `UpdateDepositDetails` (`speedUpV3Deposit`, `speedUpDeposit`, `fillRelayWithUpdatedDeposit`; domain `ACROSS-V2` `1.0.0`). That signature rewrites what a pending deposit pays on the other chain and to whom, but does not name the deposit's input. A new amount of 1 wei to a clean recipient therefore hands the deposit to whoever fills it. The guard read it as a plain message and signed it: the address form after checking only the recipient, and the bytes32 form after checking only the signer. The typed-data decoder now recognizes the type and refuses it as unreadable (`opaque_signature`) in both forms of the SpokePool:
+  - `UpdateDepositDetails(uint32 depositId,uint256 originChainId,uint256 updatedOutputAmount,address updatedRecipient,bytes updatedMessage)` (`UPDATE_V3_DEPOSIT_DETAILS_HASH`, contracts v3.0.0);
+  - `UpdateDepositDetails(uint256 depositId,uint256 originChainId,uint256 updatedOutputAmount,bytes32 updatedRecipient,bytes updatedMessage)` (`UPDATE_BYTES32_DEPOSIT_DETAILS_HASH`, contracts v4.1.5 and master). The deployed SpokePools on Ethereum, Base and Arbitrum return its hash.
+
 ## `@x402check/client` 0.5.2 and `@x402check/mcp` 0.3.2 — 2026-10-18
 
 0.5.1 was never published: its fixes ship in 0.5.2, together with the follow-ups of the review's third round.

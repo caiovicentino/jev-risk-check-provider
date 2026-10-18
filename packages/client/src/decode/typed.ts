@@ -10,8 +10,9 @@
  * marketplace orders (Seaport, Blur, LooksRare), ERC-20 limit orders (1inch,
  * 0x v4, CoW Protocol), calls signed as typed data (SafeTx, ERC-4337 user
  * operations and Safe 4337 operations, ERC-2771 forward requests, EIP712Base
- * meta-transactions) and ERC-7739 nested signatures. Anything else is decoded
- * generically; when what it signs is a hash or calldata, it is `opaque`.
+ * meta-transactions), ERC-7739 nested signatures and Across deposit speed-ups
+ * (always `opaque`). Anything else is decoded generically; when what it signs
+ * is a hash or calldata, it is `opaque`.
  */
 import type { AddressVisit, CanonStruct, CanonValue, Canonical, TypedTypes } from "./eip712.js";
 import {
@@ -1399,6 +1400,59 @@ function decodeNestedPersonalSign(ctx: Ctx): Decoded | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Across deposit speed-ups
+// ---------------------------------------------------------------------------
+
+/**
+ * An Across deposit speed-up: UpdateDepositDetails, which Across's SpokePool accepts from a deposit's
+ * depositor (speedUpDeposit, speedUpV3Deposit, fillRelayWithUpdatedDeposit) under the domain "ACROSS-V2"
+ * "1.0.0" of the deposit's origin chain, EIP712Domain(string name,string version,uint256 chainId): no
+ * verifying contract. Its two forms in the SpokePool (github.com/across-protocol/contracts):
+ * - UpdateDepositDetails(uint32 depositId,uint256 originChainId,uint256 updatedOutputAmount,address updatedRecipient,bytes updatedMessage)
+ *   (UPDATE_V3_DEPOSIT_DETAILS_HASH, contracts v3.0.0);
+ * - UpdateDepositDetails(uint256 depositId,uint256 originChainId,uint256 updatedOutputAmount,bytes32 updatedRecipient,bytes updatedMessage)
+ *   (UPDATE_BYTES32_DEPOSIT_DETAILS_HASH, contracts v4.1.5 and master; speedUpV3Deposit takes an address and
+ *   checks this form).
+ * The relayer that fills the deposit with the signature pays the updated amount to the updated recipient and
+ * is repaid the deposit's whole input. The signature names neither that input nor the tokens, so a new amount
+ * of 1 wei, or a new recipient, hands the deposit away, and that cannot be judged here: whatever fields it
+ * declares, the type is never read as clear (opaque). The recipient it names is still listed.
+ *
+ * @param ctx - Decoding context.
+ * @returns The decoded speed-up.
+ */
+function decodeAcrossSpeedUp(ctx: Ctx): Decoded {
+  const recipientType = declared(ctx, ctx.primaryType, "updatedRecipient");
+  const raw = ctx.message.updatedRecipient;
+  // A bytes32 recipient is an EVM address when its first 12 bytes are zero (Across's toBytes32).
+  const recipient =
+    recipientType === "address"
+      ? addr(ctx.message, "updatedRecipient")
+      : recipientType === "bytes32" && typeof raw === "string" && /^0x0{24}[0-9a-f]{40}$/u.test(raw)
+        ? `0x${raw.slice(26)}`
+        : undefined;
+  const recipientText = recipient ?? (typeof raw === "string" && isStrictHexString(raw) ? `${capText(raw, 70)} (not an EVM address)` : "a recipient that could not be read");
+  const amount = num(ctx.message, "updatedOutputAmount");
+  const amountText = amount === undefined ? "an amount that could not be read" : `${amount.toString()} base units of its output token`;
+  const depositId = num(ctx.message, "depositId");
+  const deposit = `deposit #${depositId?.toString() ?? "?"}`;
+  const originChain = num(ctx.message, "originChainId");
+  const origin = originChain === undefined ? undefined : normalizeChainId(originChain);
+  const message = bytesHex(ctx.message.updatedMessage);
+  const messageText = message === undefined ? "" : message.length > 0 ? `, with a new message of ${message.length / 2} bytes run by the recipient` : "";
+  markOpaque(
+    ctx,
+    `an Across deposit speed-up (UpdateDepositDetails) rewrites what pending ${deposit} pays on the other chain (${amountText}) and to whom (${recipientText}); it names neither the deposit's input nor its tokens, so whether the new amount hands the deposit to whoever fills it cannot be judged`,
+  );
+  const summary = `Across deposit speed-up signature (UpdateDepositDetails, ${domainLabel(ctx)}${origin ? `, for a deposit made on ${origin}` : ""}): ${deposit} would pay ${amountText} to ${recipientText} on its destination chain${messageText}. The relayer that fills it is repaid the whole deposit.`;
+  const action = "Across deposit speed-up";
+  if (!recipient || isIgnorableAddress(recipient) || recipient === ctx.signer) return signerFallback(ctx, action, summary, interaction("order_signature"));
+  return done(ctx, { action, summary }, [
+    { address: recipient, role: "recipient", interaction: interaction("order_signature"), rank: RANK.transfer, reason: "receives the deposit on its destination chain (updatedRecipient)" },
+  ]);
+}
+
+// ---------------------------------------------------------------------------
 // Generic typed data
 // ---------------------------------------------------------------------------
 
@@ -1778,6 +1832,9 @@ function decodeParsed(parsed: unknown, signer: string | undefined, method: strin
       break;
     case "PersonalSign":
       decoded = decodeNestedPersonalSign(ctx);
+      break;
+    case "UpdateDepositDetails":
+      decoded = decodeAcrossSpeedUp(ctx);
       break;
     default:
       decoded =

@@ -282,17 +282,36 @@ export function normalizeChainId(value: unknown): string | undefined {
 // Known tokens (per chain) - revocation allowlist, symbols and dust thresholds
 // ---------------------------------------------------------------------------
 
-export type TokenInfo = { symbol: string; decimals: number; stable?: boolean | undefined; wrappedNative?: boolean | undefined };
+export type TokenInfo = {
+  symbol: string;
+  decimals: number;
+  /** A US-dollar stablecoin: one whole token is worth $1 (USDC and its bridged forms, USDT and USDT0, DAI, USDB). */
+  stable?: boolean | undefined;
+  wrappedNative?: boolean | undefined;
+};
 
-const USDC = (address: string): [string, TokenInfo] => [address, { symbol: "USDC", decimals: 6, stable: true }];
+const USDC = (address: string, symbol = "USDC"): [string, TokenInfo] => [address, { symbol, decimals: 6, stable: true }];
 const USDT = (address: string, decimals = 6): [string, TokenInfo] => [address, { symbol: "USDT", decimals, stable: true }];
+/** Tether's USDT0 (its on-chain symbol is "USDT0" or "USD₮0"). */
+const USDT0 = (address: string): [string, TokenInfo] => [address, { symbol: "USDT0", decimals: 6, stable: true }];
 const DAI = (address: string): [string, TokenInfo] => [address, { symbol: "DAI", decimals: 18, stable: true }];
 const WRAPPED = (address: string, symbol: string): [string, TokenInfo] => [
   address,
   { symbol, decimals: 18, wrappedNative: true },
 ];
+/** ETH bridged to a chain whose gas is not ETH: worth 1 ETH, but not the chain's wrapped native token. */
+const BRIDGED_ETH = (address: string, symbol = "WETH"): [string, TokenInfo] => [address, { symbol, decimals: 18 }];
 
-/** Well-known ERC-20s (never NFTs) on the supported chains. */
+/**
+ * Well-known ERC-20s (never NFTs) on the supported chains.
+ *
+ * The entries added on 2026-10-18 (client 0.5.3) are the tokens Across routes on each chain it serves, so
+ * that an Across deposit's two amounts can be compared: the addresses come from Across itself
+ * (@across-protocol/constants 3.1.129, TOKEN_SYMBOLS_MAP, and https://app.across.to/api/available-routes),
+ * and each was read on-chain that day through the free public RPC named in the comment above it (above its
+ * chain, or above the entry on a chain listed before): eth_chainId (the chain), eth_getCode (code present),
+ * symbol() and decimals(). The symbol recorded is the one symbol() returns, except "USDT0" for Tether's USD₮0.
+ */
 export const KNOWN_TOKENS: Record<string, Map<string, TokenInfo>> = {
   "eip155:1": new Map([
     USDC("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
@@ -305,6 +324,8 @@ export const KNOWN_TOKENS: Record<string, Map<string, TokenInfo>> = {
     USDT("0x94b008aa00579c1307b0ef2c499ad98a8ce58e58"),
     DAI("0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"),
     WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    // Bridged USDC (Across: USDC.e; symbol() "USDC"), https://mainnet.optimism.io
+    USDC("0x7f5c764cbc14f9669b88837ca1490cca17c31607"),
   ]),
   "eip155:56": new Map([
     [
@@ -313,6 +334,8 @@ export const KNOWN_TOKENS: Record<string, Map<string, TokenInfo>> = {
     ],
     USDT("0x55d398326f99059ff775485246999027b3197955", 18),
     WRAPPED("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "WBNB"),
+    // Binance-Peg ETH, Across's WETH on BNB Chain (symbol() "ETH"), https://bsc-dataseed1.bnbchain.org
+    BRIDGED_ETH("0x2170ed0880ac9a755fd29b2688956bd959f933f8", "ETH"),
   ]),
   "eip155:137": new Map([
     USDC("0x3c499c542cef5e3811e1192ce70d8cc03d5c3359"),
@@ -326,6 +349,9 @@ export const KNOWN_TOKENS: Record<string, Map<string, TokenInfo>> = {
     USDC("0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"),
     DAI("0x50c5725949a6f0c72e6c4a641f24049a917db0cb"),
     WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    // https://mainnet.base.org
+    USDC("0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca", "USDbC"),
+    USDT("0xfde4c96c8593536e31f229ea8f37b2ada2699bb2"),
   ]),
   "eip155:42161": new Map([
     USDC("0xaf88d065e77c8cc2239327c5edb3a432268e5831"),
@@ -338,6 +364,108 @@ export const KNOWN_TOKENS: Record<string, Map<string, TokenInfo>> = {
     USDC("0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e"),
     USDT("0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7"),
     WRAPPED("0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7", "WAVAX"),
+  ]),
+  // Unichain, https://mainnet.unichain.org
+  "eip155:130": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDC("0x078d782b760474a361dda0af3839290b0ef57ad6"),
+    USDT0("0x9151434b16b9763660705744891fa906f660ecc5"),
+  ]),
+  // Monad (gas in MON), https://rpc.monad.xyz
+  "eip155:143": new Map([
+    BRIDGED_ETH("0xee8c0e9f1bffb4eb878d8f15f368a02a35481242"),
+    USDC("0x754704bc059f8c67012fed69bc8a327a5aafb603"),
+    USDT0("0xe7cd86e13ac4309349f30b3435a9d337750fc82d"),
+  ]),
+  // Lens (gas in GHO; bridged ETH's symbol() is "ETH"), https://rpc.lens.xyz
+  "eip155:232": new Map([
+    BRIDGED_ETH("0xe5ecd226b3032910ceaa43ba92ee8232f8237553", "ETH"),
+    USDC("0x88f08e304ec4f90d644cec3fb69b8ad414acf884"),
+  ]),
+  // zkSync Era, https://mainnet.era.zksync.io
+  "eip155:324": new Map([
+    WRAPPED("0x5aea5775959fbc2557cc8789bc1bf90a239d9a91", "WETH"),
+    USDC("0x3355df6d4c9c3035724fd0e3914de96a5a83aaf4", "USDC.e"),
+    USDT("0x493257fd37edb34451f62edf8d2a0c418852ba4c"),
+    DAI("0x4b9eb6c0b6ea15176bbf62841c6b2a8a398cb656"),
+  ]),
+  // World Chain, https://worldchain-mainnet.g.alchemy.com/public
+  "eip155:480": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDC("0x79a02482a880bce3f13e09da970dc34db4cd24d1"),
+  ]),
+  // HyperEVM, https://rpc.hyperliquid.xyz/evm
+  "eip155:999": new Map([
+    USDC("0xb88339cb7199b77e23db6e890353e22632ba630f"),
+    USDT0("0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb"),
+  ]),
+  // Lisk, https://rpc.api.lisk.com
+  "eip155:1135": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDC("0xf242275d3a6527d877f2c927a82d9b057609cc71", "USDC.e"),
+    USDT("0x05d032ac25d322df992303dca074ee7392c117b9"),
+  ]),
+  // Soneium, https://rpc.soneium.org
+  "eip155:1868": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDC("0xba9986d2381edf1da03b0b9c1f8b00dc4aacc369", "USDC.e"),
+    USDT("0x3a337a6ada9d885b6ad95ec48f9b75f197b5ae35"),
+  ]),
+  // Tempo (TIP-20 tokens: their code is the 1-byte marker 0xef), https://rpc.mainnet.tempo.xyz
+  "eip155:4217": new Map([
+    USDC("0x20c000000000000000000000b9537d11c60e8b50", "USDC.e"),
+    USDT0("0x20c00000000000000000000014f22ca97301eb73"),
+  ]),
+  // MegaETH, https://mainnet.megaeth.com/rpc
+  "eip155:4326": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDT0("0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb"),
+  ]),
+  // Robinhood Chain, https://robinhood-rpc.publicnode.com
+  "eip155:4663": new Map([WRAPPED("0x0bd7d308f8e1639fab988df18a8011f41eacad73", "WETH")]),
+  // Arc (its native USDC, as an ERC-20 of 6 decimals), https://rpc.mainnet.arc.io
+  "eip155:5042": new Map([USDC("0x3600000000000000000000000000000000000000")]),
+  // Plasma (gas in XPL), https://rpc.plasma.to
+  "eip155:9745": new Map([
+    BRIDGED_ETH("0x9895d81bb462a195b4922ed7de0e3acd007c32cb"),
+    USDC("0x2d661c89d812261039af9764eceaaee884f5f67f"),
+    USDT0("0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb"),
+  ]),
+  // Mode (Across: USDC.e; symbol() "USDC"), https://mainnet.mode.network
+  "eip155:34443": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDC("0xd988097fb8612cc24eec14542bc03424c656005f"),
+    USDT("0xf0f161fda2712db8b566946122a5af183995e2ed"),
+  ]),
+  // Ink, https://rpc-gel.inkonchain.com
+  "eip155:57073": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDC("0x2d270e6886d130d724215a266106e6832161eaed"),
+    USDT0("0x0200c29006150606b650577bbe7b6248f58470c1"),
+  ]),
+  // Linea, https://rpc.linea.build
+  "eip155:59144": new Map([
+    WRAPPED("0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f", "WETH"),
+    USDC("0x176211869ca2b568f2a7d4ee941e073a821ee1ff"),
+    USDT("0xa219439258ca9da29e9cc4ce5596924745e12b93"),
+    DAI("0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5"),
+  ]),
+  // Blast: WETH and USDB are its native-yield (rebasing) predeploys; their balances grow, but one whole token
+  // stays worth 1 ETH and $1 (Across routes DAI to USDB as one token). https://rpc.blast.io
+  "eip155:81457": new Map([
+    WRAPPED("0x4300000000000000000000000000000000000004", "WETH"),
+    ["0x4300000000000000000000000000000000000003", { symbol: "USDB", decimals: 18, stable: true }],
+  ]),
+  // Scroll, https://rpc.scroll.io
+  "eip155:534352": new Map([
+    WRAPPED("0x5300000000000000000000000000000000000004", "WETH"),
+    USDC("0x06efdbff2a14a7c8e15944d1f4a48f9f95f663a4"),
+    USDT("0xf55bec9cafdbe8730f096aa55dad6d22d44099df"),
+  ]),
+  // Zora (USDzC: USDC bridged from Ethereum), https://rpc.zora.energy
+  "eip155:7777777": new Map([
+    WRAPPED("0x4200000000000000000000000000000000000006", "WETH"),
+    USDC("0xcccccccc7021b32ebb4e8c08314bd62f7c653ec4", "USDzC"),
   ]),
 };
 
@@ -373,14 +501,23 @@ const NATIVE_SYMBOLS: Record<string, string> = {
   "eip155:10": "ETH",
   "eip155:56": "BNB",
   "eip155:100": "xDAI",
+  "eip155:130": "ETH",
   "eip155:137": "POL",
   "eip155:324": "ETH",
+  "eip155:480": "ETH",
+  "eip155:1135": "ETH",
+  "eip155:1868": "ETH",
+  "eip155:4326": "ETH",
+  "eip155:4663": "ETH",
   "eip155:8453": "ETH",
+  "eip155:34443": "ETH",
   "eip155:42161": "ETH",
   "eip155:43114": "AVAX",
+  "eip155:57073": "ETH",
   "eip155:59144": "ETH",
   "eip155:81457": "ETH",
   "eip155:534352": "ETH",
+  "eip155:7777777": "ETH",
   "eip155:11155111": "ETH",
   "eip155:84532": "ETH",
 };
