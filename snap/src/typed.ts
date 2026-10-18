@@ -551,7 +551,10 @@ function decodePermit2Transfer(ctx: Ctx): Decoded | undefined {
       swapper ??= visit.address;
       if (ctx.signer && visit.address !== ctx.signer) ctx.warnings.push(`the order's swapper ${visit.address} is not the signing account`);
     }
-    const you = new Set([ctx.signer, swapper].filter((address): address is string => address !== undefined));
+    // "You" is the signing account. A swapper that is not the signer is a warning, never a pass: it
+    // exempted the witness payee and counted outputs paid to it as the signer's (2026-10-18 review).
+    // Only when the signer is not known does the swapper stand in for it.
+    const you = new Set(ctx.signer ? [ctx.signer] : swapper ? [swapper] : []);
     // A witness `to` (x402 exact and upto: Witness{to, validAfter[, facilitator]})
     // is where the permitted tokens are paid: the payee, bound to the permit.
     const payee = fieldType(ctx.types, witnessType, "to") === "address" && isCanonStruct(witness) ? canonAddressValue(witness.to) : undefined;
@@ -1480,13 +1483,28 @@ const FIXED_BYTES_RE = /^bytes\d{1,2}$/u;
 
 type Payload = { path: string; type: string; size: number };
 
+/**
+ * Whether a value of `type` (in a field named `name`) can hold what collectPayloads looks for: `bytes`,
+ * hash-named fixed bytes, or a struct or list holding them. Plain numbers, addresses and strings cannot.
+ */
+function mayHoldPayload(types: TypedTypes, type: string, name: string, seen: Set<string> = new Set()): boolean {
+  if (type.endsWith("]")) return mayHoldPayload(types, type.slice(0, type.lastIndexOf("[")), name, seen);
+  if (hasOwn(types, type)) {
+    if (seen.has(type)) return false;
+    seen.add(type);
+    return (types[type] ?? []).some((field) => mayHoldPayload(types, field.type, field.name, seen));
+  }
+  return type === "bytes" || (FIXED_BYTES_RE.test(type) && HASH_FIELD_RE.test(name));
+}
+
 /** Declared `bytes` values and hash-named fixed bytes, anywhere in the message. */
 function collectPayloads(types: TypedTypes, type: string, value: CanonValue, path: string, name: string, out: Payload[], depth = 0): void {
   if (out.length >= 4) return;
   // Past the reading limits nothing is read, so nothing there can be called absent: a calldata payload
   // nested deeper, or in the 65th call of a list, is unread content (never "only addresses here").
+  // Content of a type that cannot hold a payload (a list of numbers) is not one either.
   if (depth > 10) {
-    out.push({ path, type: "content nested deeper than 10 levels, not read", size: 0 });
+    if (mayHoldPayload(types, type, name)) out.push({ path, type: "content nested deeper than 10 levels, not read", size: 0 });
     return;
   }
   if (type.endsWith("]")) {
@@ -1495,7 +1513,7 @@ function collectPayloads(types: TypedTypes, type: string, value: CanonValue, pat
     for (let index = 0; index < Math.min(value.length, 64); index += 1) {
       collectPayloads(types, itemType, value[index], `${path}[${index}]`, name, out, depth + 1);
     }
-    if (value.length > 64 && out.length < 4) out.push({ path, type: `${value.length - 64} more item(s) past the first 64, not read`, size: 0 });
+    if (value.length > 64 && out.length < 4 && mayHoldPayload(types, itemType, name)) out.push({ path, type: `${value.length - 64} more item(s) past the first 64, not read`, size: 0 });
     return;
   }
   if (hasOwn(types, type)) {
@@ -1584,6 +1602,9 @@ function decodeGeneric(ctx: Ctx): Decoded {
         ...(granted && grant.amount !== undefined ? { payment: payment({ network: ctx.chain, pay_to: visit.address, amount: grant.amount.toString() }) } : {}),
       };
     });
+    // The verifying contract is what the signature is for, whatever else the message names: an
+    // address in a memo field once spared a flagged verifying contract its check (2026-10-18 review).
+    if (ctx.verifyingContract && ctx.verifyingContract !== ctx.signer && !isIgnorableAddress(ctx.verifyingContract)) candidates.push(...verifyingCandidate(ctx, kind));
     const first = chosen[0] as { path: string; address: string };
     const granted = grant !== undefined && chosen.some((visit) => visit.path === grant.field);
     return done(

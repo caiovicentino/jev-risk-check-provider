@@ -42,16 +42,22 @@ npm whoami >/dev/null || { echo "Run npm login first."; exit 1; }
 CLIENT_VERSION=$(node -p 'require("./packages/client/package.json").version')
 MCP_VERSION=$(node -p 'require("./packages/mcp/package.json").version')
 
-echo "== @x402check/client@$CLIENT_VERSION: test, pack, publish"
-(
-  cd packages/client
-  npm ci
-  npm run typecheck
-  npm test
-  npm run prepack
-  tgz=$(npm pack --json --ignore-scripts | packed_tgz)
-  npm publish "$tgz" --access public
-)
+# A version already on the registry is not published again (npm would refuse it with E403): a run
+# after the client went out, for instance after an expired 2FA link on the MCP, resumes with the MCP.
+if [ "$(npm view "@x402check/client@$CLIENT_VERSION" version --prefer-online 2>/dev/null || true)" = "$CLIENT_VERSION" ]; then
+  echo "== @x402check/client@$CLIENT_VERSION is already on the registry: not published again"
+else
+  echo "== @x402check/client@$CLIENT_VERSION: test, pack, publish"
+  (
+    cd packages/client
+    npm ci
+    npm run typecheck
+    npm test
+    npm run prepack
+    tgz=$(npm pack --json --ignore-scripts | packed_tgz)
+    npm publish "$tgz" --access public
+  )
+fi
 
 echo "== waiting for @x402check/client@$CLIENT_VERSION on the registry (staged publishing can hold it a few minutes)"
 for _ in $(seq 1 60); do
@@ -59,7 +65,7 @@ for _ in $(seq 1 60); do
   sleep 15
 done
 [ "$(npm view "@x402check/client@$CLIENT_VERSION" version --prefer-online 2>/dev/null || true)" = "$CLIENT_VERSION" ] \
-  || { echo "@x402check/client@$CLIENT_VERSION is not on the registry yet: release it (Staged Packages) and run the MCP part again."; exit 1; }
+  || { echo "@x402check/client@$CLIENT_VERSION is not on the registry yet: release it (Staged Packages), then run this script again (it goes on with the MCP)."; exit 1; }
 
 echo "== @x402check/mcp@$MCP_VERSION: test, pin, check, pack, check the tarball, publish (depends on @x402check/client@^$CLIENT_VERSION)"
 cd packages/mcp

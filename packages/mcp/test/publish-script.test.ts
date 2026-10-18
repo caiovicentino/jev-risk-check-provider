@@ -96,3 +96,25 @@ test("packed_tgz refuses anything but one .tgz that the report names in the curr
     assert.match(r.stderr, /npm pack --json did not report exactly one \.tgz in this directory/, report);
   }
 });
+
+// The 2026-10-18 review (low): a second run after the client went out (an expired 2FA link on the
+// MCP, a staged client) published the client again, which npm refuses (E403), so the MCP part could
+// not be resumed. A fake npm (on PATH, no network) says the client is on the registry and stops the
+// run at the MCP's first step; nothing in the repository is touched.
+test("a run after the client is on the registry does not publish it again and goes on with the MCP", () => {
+  const bin = mkdtempSync(join(TEMP, "bin-"));
+  const log = join(bin, "calls.log");
+  const version = (JSON.parse(readFileSync(new URL("../../client/package.json", import.meta.url), "utf8")) as { version: string }).version;
+  writeFileSync(
+    join(bin, "npm"),
+    `#!/usr/bin/env bash\necho "$(basename "$PWD") $*" >> "${log}"\ncase "$1" in\n  whoami) echo probe ;;\n  view) echo "${version}" ;;\n  *) exit 7 ;;\nesac\n`,
+    { mode: 0o755 },
+  );
+  const r = spawnSync("bash", [SCRIPT], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` } });
+  const calls = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(r.status, 7, r.stdout + r.stderr);
+  assert.match(r.stdout, /already on the registry: not published again/u);
+  assert.ok(!calls.some((c) => / publish /u.test(` ${c} `)), calls.join("\n"));
+  assert.ok(!calls.some((c) => c.startsWith("client ")), "nothing runs in packages/client");
+  assert.equal(calls.at(-1), "mcp ci", "it stops at the MCP's first step (the fake npm refuses it)");
+});

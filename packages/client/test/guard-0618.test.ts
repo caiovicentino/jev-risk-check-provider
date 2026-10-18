@@ -174,3 +174,79 @@ describe("bridges: the recipient on the other chain is checked", () => {
     assert.equal(signed.length, 0);
   });
 });
+
+describe("the low findings of the same review", () => {
+  const flag = (r: { wallet: string }) => (r.wallet.toLowerCase() === DRAINER ? BLOCK : LOW);
+  test("a Permit2 witness payee is checked whoever the order names as its swapper (an address or a string)", async () => {
+    const SPENDER = "0x5555555555555555555555555555555555555555";
+    const td = (swapperType: "address" | "string") => ({
+      domain: { name: "Permit2", chainId: 8453, verifyingContract: "0x000000000022D473030F116dDEE9F6B43aC78BA3" as Hex },
+      types: {
+        PermitWitnessTransferFrom: [{ name: "permitted", type: "TokenPermissions" }, { name: "spender", type: "address" }, { name: "nonce", type: "uint256" }, { name: "deadline", type: "uint256" }, { name: "witness", type: "Payment" }],
+        TokenPermissions: [{ name: "token", type: "address" }, { name: "amount", type: "uint256" }],
+        Payment: [{ name: "to", type: "address" }, { name: "swapper", type: swapperType }, { name: "validAfter", type: "uint256" }],
+      },
+      primaryType: "PermitWitnessTransferFrom" as const,
+      message: { permitted: { token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", amount: 1_000_000_000n }, spender: SPENDER, nonce: 1n, deadline: 1_900_000_000n, witness: { to: DRAINER, swapper: DRAINER, validAfter: 0n } },
+    });
+    for (const swapperType of ["address", "string"] as const) {
+      const api = boundProvider(flag);
+      const key = privateKeyToAccount(generatePrivateKey());
+      const v = await refused(guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(td(swapperType) as never));
+      assert.equal(v.action, "block", swapperType);
+      assert.ok(api.seen.some((r) => r.wallet.toLowerCase() === DRAINER), swapperType);
+    }
+  });
+  test("generic typed data checks its verifying contract, whatever addresses the message names", async () => {
+    for (const recipient of [{ type: "address", value: BOB }, { type: "string", value: BOB }] as const) {
+      const api = boundProvider(flag);
+      const key = privateKeyToAccount(generatePrivateKey());
+      const td = {
+        domain: { name: "Some App", version: "1", chainId: 8453, verifyingContract: DRAINER as Hex },
+        types: { Order: [{ name: "memo", type: "string" }, { name: "recipient", type: recipient.type }, { name: "amount", type: "uint256" }] },
+        primaryType: "Order" as const,
+        message: { memo: "thanks", recipient: recipient.value, amount: 5n },
+      };
+      const v = await refused(guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(td as never));
+      assert.equal(v.action, "block", recipient.type);
+      assert.ok(api.seen.some((r) => r.wallet.toLowerCase() === BOB), "the message's address is checked too");
+    }
+  });
+  test("a Multicall3 selector sent to a flagged contract with no value: the contract is checked", async () => {
+    const api = boundProvider(flag);
+    const { key, spy, signed } = signer();
+    const balanceOf = encodeFunctionData({ abi: parseAbi(["function balanceOf(address) view returns (uint256)"]), functionName: "balanceOf", args: [key.address] });
+    const data = encodeFunctionData({
+      abi: parseAbi(["function aggregate3((address target, bool allowFailure, bytes callData)[] calls) payable returns ((bool success, bytes returnData)[])"]),
+      functionName: "aggregate3",
+      args: [[{ target: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", allowFailure: false, callData: balanceOf }]],
+    });
+    const v = await refused(signTx(spy, { pinnedKeys: false, fetch: api.fetch })({ chainId: 8453, ...FEES, to: DRAINER, value: 0n, data } as never));
+    assert.deepEqual([v.action, signed.length], ["block", 0]);
+  });
+  test("a list of numbers longer than 64 items is read (nothing there can hold calldata); a list of bytes is not", async () => {
+    const api = boundProvider(flag);
+    const key = privateKeyToAccount(generatePrivateKey());
+    const td = (type: "uint256[]" | "bytes[]", values: unknown[]) => ({
+      domain: { name: "Batch", version: "1", chainId: 8453, verifyingContract: "0x7777777777777777777777777777777777777777" as Hex },
+      types: { Batch: [{ name: "owner", type: "address" }, { name: "values", type }] },
+      primaryType: "Batch" as const,
+      message: { owner: BOB, values },
+    });
+    assert.match(await guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(td("uint256[]", Array.from({ length: 65 }, (_, i) => BigInt(i))) as never), /^0x[0-9a-f]{130}$/u);
+    const v = await refused(guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(td("bytes[]", Array.from({ length: 65 }, () => "0x")) as never));
+    assert.equal(v.action, "not_verified");
+  });
+  test("past 2048 characters: an address padded with whitespace is still read; plain long text stays readable", async () => {
+    const api = boundProvider(flag);
+    const key = privateKeyToAccount(generatePrivateKey());
+    const send = (destination: string, note: string) => ({
+      domain: { name: "HyperliquidSignTransaction", version: "1", chainId: 42161, verifyingContract: "0x0000000000000000000000000000000000000000" as Hex },
+      types: { "HyperliquidTransaction:UsdSend": [{ name: "hyperliquidChain", type: "string" }, { name: "destination", type: "string" }, { name: "amount", type: "string" }, { name: "note", type: "string" }, { name: "time", type: "uint64" }] },
+      primaryType: "HyperliquidTransaction:UsdSend" as const,
+      message: { hyperliquidChain: "Mainnet", destination, amount: "250000", note, time: 1n },
+    });
+    assert.equal((await refused(guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(send(`${" ".repeat(3000)}${DRAINER}`, "") as never))).action, "block");
+    assert.match(await guardAccount(key, { pinnedKeys: false, fetch: api.fetch }).signTypedData(send(BOB, "a".repeat(5000)) as never), /^0x[0-9a-f]{130}$/u);
+  });
+});

@@ -270,8 +270,9 @@ function canonBytes(ctx: Context, value: unknown, path: string): string | undefi
 /**
  * A string field. viem hashes what it is given as bytes (a Uint8Array as itself, a number as its
  * hex), so anything but a JavaScript string is read here as nothing like what is signed: unsignable,
- * never coerced (an address given as bytes once escaped the payee check). A string past MAX_STRING is
- * not read in full.
+ * never coerced (an address given as bytes once escaped the payee check). Past MAX_STRING only the
+ * start is kept: the checks read a string only as a whole-value address (stringAddress), which is
+ * kept whole, so whitespace around it cannot push it out of view.
  */
 function canonString(ctx: Context, value: unknown, path: string): string {
   if (value === null || value === undefined) return "";
@@ -279,11 +280,9 @@ function canonString(ctx: Context, value: unknown, path: string): string {
     ctx.unsignable.push(path);
     return "";
   }
-  if (value.length > MAX_STRING) {
-    ctx.truncated = true;
-    return value.slice(0, MAX_STRING);
-  }
-  return value;
+  if (value.length <= MAX_STRING) return value;
+  const trimmed = value.trim();
+  return /^0[xX][0-9a-fA-F]{40}$/u.test(trimmed) ? trimmed : value.slice(0, MAX_STRING);
 }
 
 function canonValue(ctx: Context, type: string, value: unknown, path: string, depth: number): CanonValue {

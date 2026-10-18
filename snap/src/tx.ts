@@ -1147,8 +1147,10 @@ function multicall3(arrayArg: number, valueAt: number | undefined, dataAt: numbe
     }
     const cut: string[] = [];
     truncated(cut, declared, calls.length, "Multicall3 calls");
+    // The contract called is checked too, with or without value: any contract can answer these
+    // selectors, and one flagged by address is still the one making the calls (2026-10-18 review).
     return combine("Multicall3 batch", `Multicall3 batch on ${call.to} with ${calls.length} call(s)`, decodeInner(calls, ctx), {
-      candidates: call.value > 0n ? [contractCandidate(call, ctx)] : [],
+      candidates: [contractCandidate(call, ctx)],
       warnings,
       opaque: cut,
     });

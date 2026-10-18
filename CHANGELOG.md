@@ -14,7 +14,7 @@ Events are matched whichever contract emits them, and each was confirmed in live
 
 Two daily maintenance reviews found these, and all are fixed here:
 - the review of 0.5.0 (2026-10-17): two critical issues in the client, three high, one medium and several low (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`);
-- the review of this release itself, before its publish (2026-10-18): two high and two medium (`guard-0618.test.ts`).
+- the review of this release itself, before its publish (2026-10-18): two high, two medium and four low (`guard-0618.test.ts`).
 
 Client 0.5.0 and older should not be used.
 
@@ -26,6 +26,13 @@ Client 0.5.0 and older should not be used.
   - The Worker reads any transfer through a bridge or message layer it knows as incomplete (v0.6.19).
 - **Medium: a serializer that rewrites the transaction it is handed** passed the read-back. viem hands the serializer the very object it signs, and the read-back compared against that same object. It now compares against a copy taken before the call.
 - **Medium (a regression in 0.5.1): viem before 2.37.11 hashes a serializer's return value without awaiting it.** With those versions, the read-back made every transaction fail on chains that have their own serializer (Base, OP, Celo, zkSync). A synchronous serializer now stays synchronous, and a thenable is adopted as a native promise.
+- **Low:**
+  - A Permit2 witness payee was exempt from its check when the order named it as its swapper, as an address or now as a string. Only the signing account is exempt, and outputs paid to another swapper no longer count as the signer's.
+  - Generic typed data checked its verifying contract only when the message named no other address, so a memo holding a clean address spared a flagged verifying contract. The verifying contract is now always checked.
+  - A Multicall3 selector sent with no value did not name the contract called, which can be any contract answering that selector. It is now checked.
+  - A list of more than 64 numbers in generic typed data was read as unread content. Only content that can hold calldata is marked unread past the reading limits.
+  - A string longer than 2048 characters is read as before, and an address padded with whitespace past that point is still read as the payee.
+  - `scripts/publish-npm.sh` resumes with the MCP when the client is already on the registry.
 
 **Client (signing guard), from the review of 0.5.0 (2026-10-17):**
 - **Critical: Solana authorities are judged as the programs judge them.** The Stake program checks a withdrawal's or an authority change's signature against every signer it collects, the lockup custodian's slot included, and the System program accepts a nonce authority's signature from any account of the instruction. The guard looked at one position: with the victim's key in the custodian slot (or anywhere in a nonce instruction), a stake withdrawal to an attacker or the hand-over of a stake or nonce authority was signed unchecked. The signer's presence now counts, in both Stake layouts.
