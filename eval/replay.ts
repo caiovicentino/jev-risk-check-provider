@@ -2,8 +2,9 @@
 // paid per call; the moment the paid request goes out, copies of its payment go out too, so all
 // verify before anything settles: an exact copy, one with every JSON key in reverse order, and one
 // with the nonce's hex upper-cased plus an extra field (the same signed authorization, spelled
-// differently). Exactly one request may be evaluated and settled. The others must not be: 409
-// payment_already_used from the claim (the exact and the reordered copies must get exactly that),
+// differently). Exactly one request may be evaluated and settled. The others must not be: 409 from
+// the claim, payment_in_progress while the first is evaluated (since v0.6.20) or payment_already_used
+// once it settled (the exact and the reordered copies must get exactly one of those),
 // or a 402 from a facilitator that refuses the re-spelled payload. A copy sent after settlement
 // must be refused as well (the facilitator sees the authorization as used: 402, or the claim: 409).
 //
@@ -64,7 +65,7 @@ async function main(): Promise<void> {
 
   const winners = concurrent.filter((o) => o.status === 200 && o.settled);
   const losers = concurrent.filter((o) => o !== winners[0]);
-  const claimed = (o: Outcome) => o.status === 409 && o.error === "payment_already_used";
+  const claimed = (o: Outcome) => o.status === 409 && (o.error === "payment_already_used" || o.error === "payment_in_progress");
   const pass =
     winners.length === 1 &&
     losers.every((o) => !o.settled && (claimed(o) || o.status === 402)) &&

@@ -225,7 +225,8 @@ export function paymentVersion(header: string | null): number | null {
 
 export type Claim =
   | { claimed: true; settled: () => Promise<void>; release: () => Promise<void>; keep: (kept: KeptResponse) => Promise<void> }
-  | { claimed: false; reason: "duplicate" | "unavailable" | "unidentified" };
+  | { claimed: false; reason: "duplicate"; state: "pending" | "settled" }
+  | { claimed: false; reason: "unavailable" | "unidentified" };
 
 /** What identifies a paid request for a resend: the route and the exact body. */
 export async function requestFingerprint(path: string, body: string): Promise<string> {
@@ -246,7 +247,10 @@ export async function claimPayment(env: WorkerEnv, id: string | null): Promise<C
     stub.fetch(`https://claims/${op}`, { method: "POST", ...(body !== undefined ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
   try {
     const res = await call("claim");
-    if (res.status === 409) return { claimed: false, reason: "duplicate" };
+    if (res.status === 409) {
+      const answer = (await res.json().catch(() => null)) as { state?: unknown } | null;
+      return { claimed: false, reason: "duplicate", state: answer?.state === "pending" ? "pending" : "settled" };
+    }
     if (!res.ok) return { claimed: false, reason: "unavailable" };
   } catch {
     return { claimed: false, reason: "unavailable" };

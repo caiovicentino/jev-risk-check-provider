@@ -243,10 +243,14 @@ export async function admitPayment(env: WorkerEnv, paymentPayload: unknown, requ
   if (!subject) return { ok: false, response: json(402, { error: "payment_unrecognized", detail: "the paying wallet could not be read from the payment; nothing was charged" }) };
   if (screenSubject(subject).status === "listed") return { ok: false, response: json(403, { error: "payer_sanctioned", detail: "the paying wallet is on the OFAC SDN list; nothing was charged" }) };
   const payer = subject.canonical;
+  const id = await paymentIdentity(paymentPayload);
+  // A settled payment resent for the same request, whose verdict reached nobody the first time, gets
+  // that verdict rather than a refusal: its authorization may be about to expire, or its payer busy.
+  const refuse = async (response: Response): Promise<Admission> => ({ ok: false, response: (request !== undefined ? await resendKept(env, id, request, "resent") : null) ?? response });
   const expiry = expiresAt(paymentPayload);
   const now = Math.floor(Date.now() / 1000);
   if (expiry !== null && expiry < now + MIN_VALIDITY_S) {
-    return { ok: false, response: json(402, { error: "authorization_expires_too_soon", detail: `sign an authorization valid for at least ${MIN_VALIDITY_S} s more; nothing was charged` }) };
+    return refuse(json(402, { error: "authorization_expires_too_soon", detail: `sign an authorization valid for at least ${MIN_VALIDITY_S} s more; nothing was charged` }));
   }
   if (expiry !== null && expiry > now + RETENTION_MS / 1000) {
     return { ok: false, response: json(402, { error: "authorization_valid_too_long", detail: "sign an authorization that expires within 24 hours (the challenge asks for maxTimeoutSeconds); nothing was charged" }) };
@@ -254,23 +258,26 @@ export async function admitPayment(env: WorkerEnv, paymentPayload: unknown, requ
   const slot = await acquirePayerSlot(env, payer);
   if (!slot.ok) {
     const detail = slot.reason === "failures" ? "recent payments from this wallet did not settle; retry later" : "too many payments from this wallet are in flight; retry shortly";
-    return { ok: false, response: json(429, { error: slot.reason === "failures" ? "payer_settlement_failures" : "payer_busy", detail }, { "Retry-After": String(slot.retryAfter) }) };
+    return refuse(json(429, { error: slot.reason === "failures" ? "payer_settlement_failures" : "payer_busy", detail }, { "Retry-After": String(slot.retryAfter) }));
   }
-  const id = await paymentIdentity(paymentPayload);
   const claim = await claimPayment(env, id);
   if (!claim.claimed) {
     await slot.done(false);
-    // The same payment resent for the same request, whose verdict reached nobody the first time.
-    if (claim.reason === "duplicate" && request !== undefined) {
-      const resent = await resendKept(env, id, request);
-      if (resent) return { ok: false, response: resent };
+    if (claim.reason === "duplicate") {
+      const answer = await refuse(
+        // In use by a check under way: if that check was the payer's own and its client gave up, its
+        // verdict is kept once it settles, so the same payment sent again shortly receives it. Telling
+        // that client to sign a new payment would charge it twice.
+        claim.state === "pending"
+          ? json(409, { error: "payment_in_progress", detail: "a check paid with this payment is under way; if it was yours and you did not receive it, send this same payment again in a few seconds to receive its verdict (nothing more is charged)" }, { "Retry-After": "5" })
+          : json(409, { error: "payment_already_used", detail: "this payment was already presented; sign a new one" }),
+      );
+      return answer;
     }
     const response =
-      claim.reason === "duplicate"
-        ? json(409, { error: "payment_already_used", detail: "this payment was already presented; sign a new one" })
-        : claim.reason === "unidentified"
-          ? json(402, { error: "payment_unrecognized", detail: "the payment's scheme payload could not be identified; nothing was charged" })
-          : json(503, { error: "payment_claims_unavailable", detail: "no charge: retry shortly" }, { "Retry-After": "5" });
+      claim.reason === "unidentified"
+        ? json(402, { error: "payment_unrecognized", detail: "the payment's scheme payload could not be identified; nothing was charged" })
+        : json(503, { error: "payment_claims_unavailable", detail: "no charge: retry shortly" }, { "Retry-After": "5" });
     return { ok: false, response };
   }
   return {
@@ -297,23 +304,37 @@ export async function admitPayment(env: WorkerEnv, paymentPayload: unknown, requ
  * A facilitator refuses a settled authorization before admission (its nonce is used), so this is
  * asked both for a refused payment and for a duplicate one.
  */
-export async function resendKept(env: WorkerEnv, id: string | null, request: string): Promise<Response | null> {
+export async function resendKept(env: WorkerEnv, id: string | null, request: string, how: "resent" | "resent_unverified"): Promise<Response | null> {
   const kept = await keptVerdict(env, id, request);
   if (!kept) return null;
   console.warn("a resent payment received the verdict it paid for, which its first request never received");
-  if (kept.record) await markDelivered(env, kept.record);
+  if (kept.record) await markDelivered(env, kept.record, how);
   return new Response(kept.body, { status: kept.status, headers: { ...kept.headers, "X-Payment-Delivery": "resent" } });
 }
 
+/**
+ * For a payment the facilitator refused before admission (a settled authorization's nonce is used):
+ * the verdict kept for it and this request, or null. The payer is read and screened as admission
+ * screens it (a wallet listed since its payment receives nothing); the payment itself could not be
+ * verified again, so the record says `resent_unverified`.
+ */
+export async function resendRefused(env: WorkerEnv, paymentPayload: unknown, request: string): Promise<Response | null> {
+  const read = readPayer(paymentPayload);
+  if ("error" in read) return null;
+  const subject = payerSubject(read.payer);
+  if (!subject || screenSubject(subject).status === "listed") return null;
+  return resendKept(env, await paymentIdentity(paymentPayload), request, "resent_unverified");
+}
+
 /** A settlement record whose verdict reached its payer on a resend: it is no longer undelivered. */
-async function markDelivered(env: WorkerEnv, record: string): Promise<void> {
+async function markDelivered(env: WorkerEnv, record: string, how: "resent" | "resent_unverified"): Promise<void> {
   try {
     const raw = await env.RATE?.get(record);
     if (!raw) return;
     const entry = JSON.parse(raw) as Record<string, unknown>;
     if (entry.undelivered !== true) return;
     delete entry.undelivered;
-    entry.delivered = "resent";
+    entry.delivered = how;
     await env.RATE?.put(record, JSON.stringify(entry), { expirationTtl: 400 * 86400 });
   } catch (err) {
     console.error(`settlement record update failed: ${String(err).slice(0, 120)}`);

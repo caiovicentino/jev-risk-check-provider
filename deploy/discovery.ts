@@ -150,7 +150,7 @@ export function openApiDocument(version: string, prices: { minUsd: string; maxUs
     "402": { description: "Payment Required: pay with x402 (the challenge lists every network), or send Authorization: Bearer x402c_… to pay from prepaid credits. Unpaid, a body that would be refused still gets the challenge, with the reason in request_error; it is never charged" },
     "401": { description: "A malformed credit token (Authorization: Bearer x402c_…); nothing is charged" },
     "403": { description: "The paying wallet is on the OFAC SDN list (payer_sanctioned); nothing is charged" },
-    "409": { description: "This payment was already used (payment_already_used): sign a new one" },
+    "409": { description: "This payment was already used (payment_already_used): sign a new one. Or a check paid with it is under way (payment_in_progress, with Retry-After): if it was yours and you did not receive it, send the same payment again shortly to receive its verdict, at no further charge" },
     "413": { description: "Body over 64 KiB or a batch over 25 items; nothing is charged" },
     "422": { description: "Invalid request (with a payment or a credit token): the offending field is named, including an unknown field; nothing is charged" },
     "429": { description: "Rate limited per IP (approximate, per Cloudflare location), a payer with too many payments in flight, or one whose recent payments did not settle; Retry-After says when" },

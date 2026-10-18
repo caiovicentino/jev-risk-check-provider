@@ -11,8 +11,8 @@ import { createContractIntel } from "../src/contract-intel.js";
 import { kitWatchLookup } from "./kit-watch.js";
 import { SOLANA_DEVNET, SOLANA_MAINNET } from "../src/chains.js";
 import { BASE_MAINNET, formatUsd, makePrice, MICRO, MODEL_COST_USD, networkPrice, SIMULATION_PRICE } from "./pricing.js";
-import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, paymentUnavailable, readCapped, recordSettlement, resendKept, settlementReceipt, settlementReused } from "./http-util.js";
-import { decodedPayment, paymentIdentity, paymentVersion, requestFingerprint } from "./payment-claims.js";
+import { admitPayment, allChecked, fetchAdapter, json, payerRefusal, paymentUnavailable, readCapped, recordSettlement, resendRefused, settlementReceipt, settlementReused } from "./http-util.js";
+import { decodedPayment, paymentVersion, requestFingerprint } from "./payment-claims.js";
 import { creditToken, CREDIT_PRICING, packMicro, spendCredits } from "./credits.js";
 import { cdpAuthHeaders, CDP_FACILITATOR_URL, CDP_FEE_USD } from "./cdp.js";
 import { BATCH_DISCOVERY, openApiDocument, REQUEST_EXAMPLE, RISK_CHECK_DISCOVERY, SERVICE_METADATA } from "./discovery.js";
@@ -793,7 +793,7 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
     // A settled payment resent (the facilitator refuses its used nonce): if its verdict reached nobody
     // the first time and this is the same request, that verdict is what it paid for.
     if (payment) {
-      const resent = await resendKept(_env, await paymentIdentity(decodedPayment(payment)), await requestFingerprint(path, text ?? ""));
+      const resent = await resendRefused(_env, decodedPayment(payment), await requestFingerprint(path, text ?? ""));
       if (resent) return resent;
     }
     return instructionsToResponse(result.response);
@@ -854,9 +854,15 @@ export async function handleProtected(request: Request, _env: WorkerEnv, stack: 
         }
         for (const [k, v] of Object.entries(settle.headers)) res.headers.set(k, v);
         // A client that left during its check or while it settled paid for a verdict it never received: the record says so.
-        const undelivered = request.signal?.aborted === true;
+        let undelivered = request.signal?.aborted === true;
         if (undelivered) console.warn(`client left while its payment settled on ${path}: the verdict reached nobody`);
         if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction, ...(undelivered ? { undelivered } : {}) });
+        // Asked again once the record is written: a client that left meanwhile has not received it either.
+        if (!undelivered && request.signal?.aborted === true) {
+          undelivered = true;
+          console.warn(`client left while its settlement was recorded on ${path}: the verdict reached nobody`);
+          if (receipt) await recordSettlement(_env, { path, network: receipt.network, transaction: receipt.transaction, undelivered });
+        }
         // Kept with the payment's claim (a day): the same payment resent for the same request receives it.
         if (undelivered) await admission.keep(res.clone(), receipt ? `st:${receipt.network}:${receipt.transaction}` : undefined);
         return res;

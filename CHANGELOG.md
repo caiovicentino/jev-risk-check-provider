@@ -8,6 +8,11 @@ Since v0.6.18, a client that leaves during its evaluation is charged, because it
 
 - **The verdict is kept.** It is stored with the payment's claim for a day (up to 100 KB). The same payment resent for the same request (same route, same body) receives it as it was produced, with `X-Payment-Delivery: resent` and its settlement receipt. Nothing is evaluated or charged again, and the settlement record then says `delivered: "resent"`.
 - **No cost on other paths.** The kept verdict is looked up only for a payment that was refused or already used, never on the way of a new one. Any other request with that payment is refused as before.
+- **The review of this release** found four low issues, fixed before its deploy:
+  - A resend that arrives while the abandoned check still runs gets `409 payment_in_progress` with `Retry-After: 5`, not "sign a new one", which would charge the client twice.
+  - The kept verdict also comes back past an authorization about to expire or a busy payer.
+  - Past the facilitator's refusal the payer is screened again, and the record says `delivered: "resent_unverified"`.
+  - A client that leaves while its settlement is recorded is caught too, so its verdict is kept.
 - **Credit purchases are unchanged.** A new credit token lost the same way is not kept, because that would store the token itself; it stays the owner's to make right.
 - **`eval/disconnect.ts`** now expects one payment to buy one verdict that reaches the payer, whenever the client leaves.
 - **More bridges read as incomplete.** The review's second round found four more bridges whose simulation came back clear: Polygon's unified bridge, Celer cBridge, Gnosis Chain's AMB (OmniBridge) and zkSync Era's Bridgehub. Their events now also make it `cross_chain`, each confirmed in live logs. The list cannot be complete: a bridge the simulation does not know is still read as an ordinary contract.

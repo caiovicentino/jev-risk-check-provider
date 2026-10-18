@@ -8,7 +8,7 @@ import assert from "node:assert";
 import { generateKeyPairSync } from "node:crypto";
 import { CreditLedger, handleCredits, retryPendingCredits } from "../deploy/credits.js";
 import { buildAccepts, handleProtected, loadKeyPair, type PaymentRoute, type Stack } from "../deploy/protected.js";
-import { claimPayment, KEPT_MAX_BYTES, keptVerdict, PaymentClaim, paymentIdentity } from "../deploy/payment-claims.js";
+import { claimPayment, KEPT_MAX_BYTES, keptVerdict, PaymentClaim, paymentIdentity, requestFingerprint } from "../deploy/payment-claims.js";
 import type { DurableObjectNamespace, DurableObjectState, KVNamespace, WorkerEnv } from "../deploy/runtime.js";
 import { createHandler } from "../src/handler.js";
 import { Provider } from "../src/provider.js";
@@ -643,6 +643,76 @@ test("a verdict is kept only for a settled payment, served only for the same req
   await released.release();
   await released.keep(kept);
   assert.equal(await keptVerdict(env, "kept-4", "r1"), null);
+});
+
+test("a resend while the abandoned check still runs is told to wait, not to pay again; once settled it receives the verdict (2026-10-18 review, R1, R2, R4)", async () => {
+  const kv = memoryKv();
+  const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)), RATE: kv };
+  const settle = { ok: true, tx: "0xc01", settled: 0 };
+  const s = stack(USER, settle);
+  const header = payment(USER, "0x60");
+  const controller = new AbortController();
+  let during: Response | undefined;
+  const first = await handleProtected(new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": header }, body: JSON.stringify({ wallet: WALLET }), signal: controller.signal }), env, s, async (r) => {
+    controller.abort();
+    // The client, having given up, sends the same payment again while the check is still evaluated.
+    during = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header }), env, s, (inner) => createHandler(s.deps)(inner));
+    return createHandler(s.deps)(r);
+  });
+  assert.equal(first.status, 200);
+  const verdict = await first.text();
+  assert.ok(during);
+  assert.deepEqual([during.status, ((await during.json()) as { error?: string }).error, during.headers.get("Retry-After")], [409, "payment_in_progress", "5"]);
+  // R2: the resend comes back with its authorization about to expire (the same authorization, later):
+  // still the verdict it paid for, not a refusal.
+  const late = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": payment(USER, "0x60", String(Math.floor(Date.now() / 1000) + 20)) }), env, s, (inner) => createHandler(s.deps)(inner));
+  assert.deepEqual([late.status, late.headers.get("X-Payment-Delivery"), await late.text()], [200, "resent", verdict]);
+  assert.equal(settle.settled, 1);
+  // R4: a client that leaves while the settlement is recorded has not received its verdict either: it is kept.
+  const leaving = new AbortController();
+  const recording: KVNamespace & { data: Map<string, string> } = {
+    ...kv,
+    data: kv.data,
+    put: async (key: string, value: string, opts?: { expirationTtl?: number }) => {
+      if (key.startsWith("st:")) leaving.abort();
+      return kv.put(key, value, opts);
+    },
+  } as KVNamespace & { data: Map<string, string> };
+  const s2 = stack(USER, { ok: true, tx: "0xc02", settled: 0 });
+  const header2 = payment(USER, "0x61");
+  const paid = await handleProtected(new Request("https://x402check.xyz/v1/risk-check", { method: "POST", headers: { "Content-Type": "application/json", "PAYMENT-SIGNATURE": header2 }, body: JSON.stringify({ wallet: WALLET }), signal: leaving.signal }), { ...env, RATE: recording }, s2, (r) => createHandler(s2.deps)(r));
+  assert.equal(paid.status, 200);
+  assert.equal((JSON.parse(kv.data.get("st:eip155:8453:0xc02") ?? "{}") as { undelivered?: boolean }).undelivered, true);
+  const again = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": header2 }), env, s2, (r) => createHandler(s2.deps)(r));
+  assert.deepEqual([again.status, again.headers.get("X-Payment-Delivery")], [200, "resent"]);
+});
+
+test("a verdict resent past the facilitator's refusal goes only to a payer that still passes the screen, and its record says unverified (2026-10-18 review, R3)", async () => {
+  const kv = memoryKv();
+  const env: WorkerEnv = { PAYMENT_CLAIMS: namespace((st) => new PaymentClaim(st)), RATE: kv };
+  const s = stack(USER, { ok: true, tx: "0xc03", settled: 0 });
+  const refusing = { ...s, http: { ...s.http, processHTTPRequest: async () => ({ type: "payment-error", response: { status: 402, headers: {}, body: { error: "invalid_payment" } } }) } } as unknown as Stack;
+  const body = JSON.stringify({ wallet: WALLET });
+  const keepFor = async (header: string, record?: string) => {
+    const id = await paymentIdentity(JSON.parse(atob(header)) as unknown);
+    const claim = await claimPayment(env, id);
+    assert.ok(claim.claimed);
+    await claim.settled();
+    await claim.keep({ request: await requestFingerprint("/v1/risk-check", body), status: 200, headers: { "content-type": "application/json" }, body: "{\"checked\":true}", ...(record ? { record } : {}) });
+  };
+  // A payer listed on the SDN list since it paid: nothing is served past the refusal.
+  const listed = OFAC_SDN_ADDRESSES.find(([a]) => /^0x[0-9a-fA-F]{40}$/.test(a))?.[0] as string;
+  const fromListed = payment(listed, "0x62");
+  await keepFor(fromListed);
+  assert.equal((await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": fromListed }), env, refusing, (r) => createHandler(refusing.deps)(r))).status, 402);
+  // Another payer receives it, and the record says the payment could not be verified again.
+  await kv.put("st:eip155:8453:0xc03", JSON.stringify({ at: "2026-10-18T00:00:00Z", path: "/v1/risk-check", undelivered: true }));
+  const fromUser = payment(USER, "0x63");
+  await keepFor(fromUser, "st:eip155:8453:0xc03");
+  const served = await handleProtected(req("/v1/risk-check", { wallet: WALLET }, { "PAYMENT-SIGNATURE": fromUser }), env, refusing, (r) => createHandler(refusing.deps)(r));
+  assert.deepEqual([served.status, served.headers.get("X-Payment-Delivery")], [200, "resent"]);
+  const record = JSON.parse(kv.data.get("st:eip155:8453:0xc03") ?? "{}") as { undelivered?: boolean; delivered?: string };
+  assert.deepEqual([record.undelivered, record.delivered], [undefined, "resent_unverified"]);
 });
 
 test("the work handed to waitUntil starts before any state changes: a claim, a debit or a pack is never left half done by a cancelled request", async () => {
