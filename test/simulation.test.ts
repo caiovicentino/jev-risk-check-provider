@@ -176,3 +176,24 @@ test("an event from an L2 to L1 withdrawal contract makes the simulation incompl
     assert.ok((result as { limits?: string[] }).limits?.includes("l1_withdrawal"));
   }
 });
+
+test("an event from a bridge or message layer makes the simulation incomplete, whichever contract emits it (2026-10-18 review)", async () => {
+  // A deposit from Ethereum to an L2 (OP Stack portal, Arbitrum bridge) or a transfer through Across,
+  // CCTP, LayerZero or Wormhole: the recipient on the other chain is never visible to the simulation.
+  for (const topic of [
+    "0xb3813568d9991fc951961fcb4c784893574240a28925604d09fc577c55bb7c32",
+    "0x5e3c1311ea442664e8b1611bfabef659120ea7a0a2cfc0667700bebc69cbffe1",
+    "0x32ed1a409ef04c7b0227189c3a103dc5ac10e775a15b785dcc510201f7c25ad3",
+    "0x0c8c1cbdc5190613ebd485511d4e2812cfa45eecb79d845893331fedad5130a5",
+    "0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f",
+    "0x6eb224fb001ed210e379b335e35efe88672a8ce935d981a6896b27ffdf52a3b2",
+  ]) {
+    const bridge = createSimulator({ fetchImpl: rpcStub([{ address: ROUTER, topics: [topic.toUpperCase().replace("0X", "0x"), t(USER)], data: amt(10n) }]) });
+    const result = await bridge({ from: USER, to: ROUTER, value: "10", data: "0x12345678" }, "eip155:1", { declared: [{ address: ROUTER }] });
+    assert.ok((result.findings ?? []).includes("simulation_incomplete"), `${topic}: ${JSON.stringify(result.findings)}`);
+    assert.ok((result as { limits?: string[] }).limits?.includes("cross_chain"));
+  }
+  const plain = createSimulator({ fetchImpl: rpcStub([{ address: ROUTER, topics: [`0x${"ab".repeat(32)}`, t(USER)], data: amt(10n) }]) });
+  const clear = await plain({ from: USER, to: ROUTER, value: "10", data: "0x12345678" }, "eip155:1", { declared: [{ address: ROUTER }] });
+  assert.ok(!((clear as { limits?: string[] }).limits ?? []).includes("cross_chain"));
+});

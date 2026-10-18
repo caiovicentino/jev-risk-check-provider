@@ -318,6 +318,37 @@ function sameAddress(a: string, b: string): boolean {
   return /^0x/i.test(a) && /^0x/i.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
+/**
+ * The path of a string-typed field (declared types, walked from `type`) whose value is not a
+ * JavaScript string, or null. Types are untrusted: own properties only, bounded depth and width.
+ */
+function nonStringField(types: Record<string, unknown>, type: string, value: unknown, path: string, depth = 0, budget = { left: 100_000 }): string | null {
+  if (depth > 40 || value === undefined || value === null) return null;
+  // Shared references can make a small object a huge tree: past the budget, it is not read.
+  if (--budget.left < 0) return `${path} (too large to read)`;
+  const own = Object.prototype.hasOwnProperty.call(types, type) ? types[type] : undefined;
+  if (Array.isArray(own)) {
+    if (typeof value !== "object") return null;
+    for (const field of own as Array<{ name?: unknown; type?: unknown }>) {
+      if (typeof field?.name !== "string" || typeof field.type !== "string") continue;
+      const child = Object.prototype.hasOwnProperty.call(value, field.name) ? (value as Record<string, unknown>)[field.name] : undefined;
+      const found = nonStringField(types, field.type, child, `${path}.${field.name}`, depth + 1, budget);
+      if (found) return found;
+    }
+    return null;
+  }
+  const array = /^(.+)\[\d*\]$/u.exec(type);
+  if (array) {
+    if (!Array.isArray(value)) return null;
+    for (let index = 0; index < Math.min(value.length, 1024); index += 1) {
+      const found = nonStringField(types, array[1] as string, value[index], `${path}[${index}]`, depth + 1, budget);
+      if (found) return found;
+    }
+    return null;
+  }
+  return type === "string" && typeof value !== "string" ? path : null;
+}
+
 function jsonSafe(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
 }
@@ -587,7 +618,18 @@ export function createGuard(options: GuardOptions = {}) {
       }
     } else if (request.kind === "typed_data") {
       kind = "typed_data";
-      decoded = decodeTypedData(withDomainType(request.typedData), request.from, "eth_signTypedData_v4");
+      // viem hashes a string-typed field given as bytes, a number or anything but a string as its bytes:
+      // read as JSON it would be other text (an address given as bytes escaped the payee check).
+      const td = request.typedData;
+      const typed = withDomainType(td);
+      const odd = nonStringField(typed.types as Record<string, unknown>, String(td.primaryType), td.message, "message") ?? nonStringField(typed.types as Record<string, unknown>, "EIP712Domain", td.domain, "domain");
+      if (odd) {
+        const reason = odd.endsWith(" (too large to read)")
+          ? `the typed data is too large to read (at ${odd.slice(0, -" (too large to read)".length)}), so it is not signed`
+          : `the string field ${odd} is not a string: viem signs its bytes, not the text this guard would read, so it is not signed`;
+        return verdictOf(kind, "typed data this guard cannot read as viem signs it", "not_verified", [reason], [], "malformed");
+      }
+      decoded = decodeTypedData(typed, request.from, "eth_signTypedData_v4");
     } else {
       kind = "message";
       const m = request.message as unknown;
@@ -910,18 +952,23 @@ export function guardAccount<A extends GuardableAccount>(account: A, options: Gu
       // the bytes the key signs: its unsigned output is read back and must be the transaction checked.
       const serializer = opts && typeof opts === "object" ? (opts as { serializer?: unknown }).serializer : undefined;
       if (typeof serializer !== "function") return sign(normalized.tx, opts);
-      const checked = async (tx: unknown, signature?: unknown) => {
-        const out = await (serializer as (t: unknown, s?: unknown) => unknown)(tx, signature);
-        if (signature === undefined) {
-          const mismatch = serializedMismatch(out, normalized.tx);
-          if (mismatch) {
-            return refuse(
-              { action: "not_verified", signed: false, kind: "transaction", summary: "a transaction whose serialization differs from what was checked", reasons: [`${mismatch}: the key would sign something other than what was checked, so it is not signed`], code: "invalid_transaction", checks: [] },
-              options,
-            );
-          }
-        }
-        return out;
+      // Compared with a copy taken now: viem hands the serializer the very object it signs, which a
+      // serializer could rewrite before writing it. Synchronous when the serializer is (viem before
+      // 2.37.11 does not await it), a promise when it returns one.
+      const expected = snapshot(normalized.tx);
+      const verify = (out: unknown, signature: unknown): unknown => {
+        if (signature !== undefined) return out;
+        const mismatch = serializedMismatch(out, expected);
+        if (!mismatch) return out;
+        const verdict: GuardVerdict = { action: "not_verified", signed: false, kind: "transaction", summary: "a transaction whose serialization differs from what was checked", reasons: [`${mismatch}: the key would sign something other than what was checked, so it is not signed`], code: "invalid_transaction", checks: [] };
+        void Promise.resolve(options.onVerdict?.(verdict)).catch(() => undefined);
+        throw new X402CheckBlockedError(verdict);
+      };
+      const checked = (tx: unknown, signature?: unknown): unknown => {
+        const out = (serializer as (t: unknown, s?: unknown) => unknown)(tx, signature);
+        // A thenable is adopted by a native promise (its own then could hand viem other bytes).
+        const thenable = out !== null && (typeof out === "object" || typeof out === "function") && typeof (out as { then?: unknown }).then === "function";
+        return thenable ? Promise.resolve(out).then((value) => verify(value, signature)) : verify(out, signature);
       };
       return sign(normalized.tx, { ...(opts as object), serializer: checked });
     };

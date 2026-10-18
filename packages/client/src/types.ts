@@ -223,7 +223,7 @@ export interface SimulationEvidence {
    * true (a verified forwarder such as a bridge or batch sender) turns that finding into review.
    */
   forwarder_verified?: boolean;
-  /** Why the simulation is incomplete (finding `simulation_incomplete`): "unclassified", "logs_truncated", "flows_truncated". */
+  /** Why the simulation is incomplete (finding `simulation_incomplete`): "unclassified", "logs_truncated", "flows_truncated", "l1_withdrawal", "cross_chain". */
   limits?: string[];
   /** The block whose state the transaction was simulated on (since provider 0.6.1). */
   at_block?: number;

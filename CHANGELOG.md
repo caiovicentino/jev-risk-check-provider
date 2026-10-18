@@ -2,11 +2,32 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## `@x402check/client` 0.5.1 and `@x402check/mcp` 0.3.2 — 2026-10-17
+## v0.6.19 — 2026-10-18: a transfer to another chain is never read as clear
 
-The daily maintenance run's review of 0.5.0 found two critical issues, three high, one medium and several low ones in the client; all are fixed here (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`). Client 0.5.0 and older should not be used.
+The 2026-10-18 maintenance review found that the rule from v0.6.18 covered only withdrawals from an L2 to L1. A deposit from Ethereum to an L2, or a transfer to someone else through a third-party bridge, came back from the simulation `ok` with no finding: the funds sink into the bridge, and the recipient on the other chain is never visible to the simulation. Now any event from a bridge or message layer the simulation knows makes the simulation incomplete (`cross_chain`, review):
+- deposits from Ethereum through the OP Stack's portal and Arbitrum's bridge;
+- Across, Circle CCTP (v1 and v2), LayerZero, Wormhole, Hyperlane, Linea, Scroll, Polygon PoS and Starknet.
 
-**Client (signing guard):**
+Events are matched whichever contract emits them, and each was confirmed in live logs on Ethereum or Base. A bridge the simulation does not know is still read as an ordinary contract (`docs/METHODOLOGY.md`). The signing guard (client 0.5.1) reads and checks the recipients of the bridges its decoders know.
+
+## `@x402check/client` 0.5.1 and `@x402check/mcp` 0.3.2 — 2026-10-18
+
+Two daily maintenance reviews found these, and all are fixed here:
+- the review of 0.5.0 (2026-10-17): two critical issues in the client, three high, one medium and several low (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`);
+- the review of this release itself, before its publish (2026-10-18): two high and two medium (`guard-0618.test.ts`).
+
+Client 0.5.0 and older should not be used.
+
+**Client (signing guard), before the publish (2026-10-18 review):**
+- **High: a string field given as bytes.** viem signs a string-typed field given as a `Uint8Array`, a byte array or a bigint as its bytes, which is the same hash as the text. The guard read it as no address, so a Hyperliquid `usdSend` to an attacker written that way was signed. A string field given as anything but a string now makes the request malformed (`malformed`). A string longer than the decoders read is unread.
+- **High: bridges other than the OP Stack's withdrawals.** A deposit from Ethereum to an L2 (the OP Stack's L1StandardBridge and OptimismPortal, Arbitrum's Inbox and gateway routers) or a transfer through Across or Circle CCTP names its recipient on the other chain only in calldata, so only the bridge was checked.
+  - Their recipients, refund addresses included, are now read and checked, along with the bridge.
+  - A recipient that is not an EVM address, or calldata or a deployment run on the other chain, makes the request unread.
+  - The Worker reads any transfer through a bridge or message layer it knows as incomplete (v0.6.19).
+- **Medium: a serializer that rewrites the transaction it is handed** passed the read-back. viem hands the serializer the very object it signs, and the read-back compared against that same object. It now compares against a copy taken before the call.
+- **Medium (a regression in 0.5.1): viem before 2.37.11 hashes a serializer's return value without awaiting it.** With those versions, the read-back made every transaction fail on chains that have their own serializer (Base, OP, Celo, zkSync). A synchronous serializer now stays synchronous, and a thenable is adopted as a native promise.
+
+**Client (signing guard), from the review of 0.5.0 (2026-10-17):**
 - **Critical: Solana authorities are judged as the programs judge them.** The Stake program checks a withdrawal's or an authority change's signature against every signer it collects, the lockup custodian's slot included, and the System program accepts a nonce authority's signature from any account of the instruction. The guard looked at one position: with the victim's key in the custodian slot (or anywhere in a nonce instruction), a stake withdrawal to an attacker or the hand-over of a stake or nonce authority was signed unchecked. The signer's presence now counts, in both Stake layouts.
 - **Critical: a typed-data number written as `true` or `[1]`** (viem hashes it as 1) was read as missing, which disarmed the local rules (a SafeTx `operation: true` was read as a CALL and signed as a DELEGATECALL). A field the decoders cannot read as its declared type now makes the request malformed (`malformed`), and so does a fixed-size bytes field they cannot read.
 - **High: withdrawals to L1.** A withdrawal through Arbitrum's ArbSys behind Multicall3 was signed with only Multicall3 checked: Multicall3 batches (aggregate, aggregate3, aggregate3Value and relatives) are now decoded call by call. A withdrawal through the OP Stack's L2StandardBridge or L2ToL1MessagePasser on Base names its L1 recipient only in calldata: that recipient is now read and checked.

@@ -1456,55 +1456,137 @@ const CONTROL_FUNCTIONS: Record<string, ControlFunction> = {
   "7eff275e": { name: "changeProxyAdmin(address,address)", words: 2, decode: adminChange("Proxy admin change", 0) },
 };
 
-/** OP Stack predeploys (Base, Optimism and other OP chains) that send funds to an L1 address named in calldata. */
-const OP_STANDARD_BRIDGE = "0x4200000000000000000000000000000000000010";
-const OP_MESSAGE_PASSER = "0x4200000000000000000000000000000000000016";
+/**
+ * Bridge functions that send funds to another chain, to a recipient named in calldata. The simulation
+ * of the source chain sees the funds sink into the bridge, never the recipient: it is read here and
+ * checked. Matched by selector on any contract (each bridge is deployed per chain under the same
+ * functions); the called contract is checked too. Offsets are byte offsets of head words.
+ * - `recipients`: who receives funds on the other chain (or a refund there), an address word or a
+ *   32-byte word (`bytes32`: an EVM recipient has 12 zero bytes; any other is not read).
+ * - `bytesAt`: a bytes argument that, when not empty, is calldata run on the other chain: not read.
+ * - `creationAt`: a bool that deploys a contract on the other chain instead of paying a recipient.
+ */
+type BridgeFunction = {
+  name: string;
+  recipients: ReadonlyArray<{ at: number; bytes32?: true; reason: string }>;
+  bytesAt?: number;
+  creationAt?: number;
+};
+
+const RECEIVES = "receives the bridged funds on the other chain";
+const REFUNDED = "is refunded on the other chain";
+const BRIDGE_FUNCTIONS: Record<string, BridgeFunction> = {
+  // OP Stack standard bridges: L1StandardBridge on Ethereum, L2StandardBridge (0x4200...10) on OP chains.
+  // Their extra data is only reported to the recipient, never run.
+  e11013dd: { name: "bridgeETHTo(address,uint32,bytes)", recipients: [{ at: 0, reason: RECEIVES }] },
+  "9a2ac6d5": { name: "depositETHTo(address,uint32,bytes)", recipients: [{ at: 0, reason: RECEIVES }] },
+  "540abf73": { name: "bridgeERC20To(address,address,address,uint256,uint32,bytes)", recipients: [{ at: 64, reason: RECEIVES }] },
+  "838b2520": { name: "depositERC20To(address,address,address,uint256,uint32,bytes)", recipients: [{ at: 64, reason: RECEIVES }] },
+  a3a79548: { name: "withdrawTo(address,address,uint256,uint32,bytes)", recipients: [{ at: 32, reason: RECEIVES }] },
+  // OP Stack L2ToL1MessagePasser (0x4200...16) and OptimismPortal (Ethereum).
+  c2b3e5ac: { name: "initiateWithdrawal(address,uint256,bytes)", recipients: [{ at: 0, reason: RECEIVES }], bytesAt: 64 },
+  e9e05c42: { name: "depositTransaction(address,uint256,uint64,bool,bytes)", recipients: [{ at: 0, reason: RECEIVES }], creationAt: 96, bytesAt: 128 },
+  // Arbitrum: Inbox retryable tickets (both refund addresses receive value on L2), gateway routers.
+  "679b6ded": {
+    name: "createRetryableTicket(address,uint256,uint256,address,address,uint256,uint256,bytes)",
+    recipients: [{ at: 0, reason: RECEIVES }, { at: 96, reason: REFUNDED }, { at: 128, reason: REFUNDED }],
+    bytesAt: 224,
+  },
+  "6e6e8a6a": {
+    name: "unsafeCreateRetryableTicket(address,uint256,uint256,address,address,uint256,uint256,bytes)",
+    recipients: [{ at: 0, reason: RECEIVES }, { at: 96, reason: REFUNDED }, { at: 128, reason: REFUNDED }],
+    bytesAt: 224,
+  },
+  d2ce7d65: { name: "outboundTransfer(address,address,uint256,uint256,uint256,bytes)", recipients: [{ at: 32, reason: RECEIVES }] },
+  "4fb1a07b": { name: "outboundTransferCustomRefund(address,address,address,uint256,uint256,uint256,bytes)", recipients: [{ at: 32, reason: REFUNDED }, { at: 64, reason: RECEIVES }] },
+  "7b3a3c8b": { name: "outboundTransfer(address,address,uint256,bytes)", recipients: [{ at: 32, reason: RECEIVES }] },
+  // Across SpokePool: the depositor is refunded if the deposit is not filled; a message is run by the recipient.
+  "7b939232": {
+    name: "depositV3(address,address,address,address,uint256,uint256,uint256,address,uint32,uint32,uint32,bytes)",
+    recipients: [{ at: 32, reason: RECEIVES }, { at: 0, reason: REFUNDED }],
+    bytesAt: 352,
+  },
+  "7aef642c": {
+    name: "depositV3Now(address,address,address,address,uint256,uint256,uint256,address,uint32,uint32,bytes)",
+    recipients: [{ at: 32, reason: RECEIVES }, { at: 0, reason: REFUNDED }],
+    bytesAt: 320,
+  },
+  ad5425c6: {
+    name: "deposit(bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint256,bytes32,uint32,uint32,uint32,bytes)",
+    recipients: [{ at: 32, bytes32: true, reason: RECEIVES }, { at: 0, bytes32: true, reason: REFUNDED }],
+    bytesAt: 352,
+  },
+  ea86bd46: {
+    name: "depositNow(bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint256,bytes32,uint32,uint32,bytes)",
+    recipients: [{ at: 32, bytes32: true, reason: RECEIVES }, { at: 0, bytes32: true, reason: REFUNDED }],
+    bytesAt: 320,
+  },
+  // Circle CCTP TokenMessenger (v1) and TokenMessengerV2: USDC is burned here and minted to mintRecipient.
+  "6fd3504e": { name: "depositForBurn(uint256,uint32,bytes32,address)", recipients: [{ at: 64, bytes32: true, reason: RECEIVES }] },
+  f856ddb6: { name: "depositForBurnWithCaller(uint256,uint32,bytes32,address,bytes32)", recipients: [{ at: 64, bytes32: true, reason: RECEIVES }] },
+  "8e0250ee": { name: "depositForBurn(uint256,uint32,bytes32,address,bytes32,uint256,uint32)", recipients: [{ at: 64, bytes32: true, reason: RECEIVES }] },
+  "779b432d": {
+    name: "depositForBurnWithHook(uint256,uint32,bytes32,address,bytes32,uint256,uint32,bytes)",
+    recipients: [{ at: 64, bytes32: true, reason: RECEIVES }],
+    bytesAt: 224,
+  },
+};
 
 /**
- * A withdrawal to L1 through an OP Stack bridge: the simulation sees the funds sink into the bridge
- * or the message passer, never the L1 recipient, so the recipient is read from the calldata and
- * checked. A message passer call that carries calldata for L1 is not read.
+ * A call that sends funds to another chain through a bridge this decoder knows. Its recipients there
+ * are checked; what cannot be read (a recipient outside EVM address form, calldata or a contract
+ * deployment run on the other chain) makes the request unread, never clear.
  *
  * @param call - The call.
  * @param ctx - Decoding context.
  * @returns The decoded action, or undefined when the call is not one.
  */
-function l2Withdrawal(call: InnerCall, ctx: Ctx): Action | undefined {
+function bridgeCall(call: InnerCall, ctx: Ctx): Action | undefined {
   const selector = call.data.slice(0, 8);
+  const fn = BRIDGE_FUNCTIONS[selector];
+  if (!fn) return undefined;
   const args = call.data.slice(8);
   const warnings: string[] = [];
-  const recipientAt = (offset: number) => addressAt(args, offset, warnings);
-  let recipient: string | undefined;
-  let opaque: string[] = [];
-  if (call.to === OP_STANDARD_BRIDGE) {
-    // bridgeETHTo(address _to, uint32, bytes); withdrawTo(address _l2Token, address _to, uint256, uint32, bytes);
-    // bridgeERC20To(address _localToken, address _remoteToken, address _to, uint256, uint32, bytes)
-    if (selector === "e11013dd") recipient = recipientAt(0);
-    else if (selector === "a3a79548") recipient = recipientAt(32);
-    else if (selector === "540abf73") recipient = recipientAt(64);
-    else return undefined;
-  } else if (call.to === OP_MESSAGE_PASSER) {
-    // initiateWithdrawal(address _target, uint256 _gasLimit, bytes _data)
-    if (selector !== "c2b3e5ac") return undefined;
-    recipient = recipientAt(0);
-    const data = bytesAt(args, dynamicAt(args, 64));
-    if (data === undefined || data.length > 0) opaque = [`a withdrawal to L1 that calls ${recipient ?? "an L1 contract"} with calldata, which x402check cannot read`];
-  } else {
-    return undefined;
+  const opaque: string[] = [];
+  const recipients: Array<{ address: string; reason: string }> = [];
+  for (const r of fn.recipients) {
+    const value = word(args, r.at);
+    if (value === undefined) {
+      opaque.push(`the bridge call ${fn.name} is too short to name who receives the funds on the other chain`);
+      continue;
+    }
+    if (r.bytes32 && !/^0{24}/u.test(value)) {
+      opaque.push(`the bridge call ${fn.name} names 0x${value} on the other chain, which is not an EVM address this guard can check`);
+      continue;
+    }
+    const address = wordAddress(value, warnings);
+    if (!recipients.some((x) => x.address === address)) recipients.push({ address, reason: r.reason });
   }
-  if (!recipient) return { ...plainCall(call, ctx, "a malformed L2 to L1 withdrawal"), warnings: ["the withdrawal's L1 recipient could not be decoded"] };
+  if (fn.creationAt !== undefined) {
+    const creation = uintAt(args, fn.creationAt);
+    if (creation === undefined) opaque.push(`the bridge call ${fn.name} is too short to read`);
+    else if (creation !== 0n) opaque.push(`the bridge call ${fn.name} deploys a contract on the other chain, which x402check cannot read`);
+  }
+  if (fn.bytesAt !== undefined) {
+    const data = bytesAt(args, dynamicAt(args, fn.bytesAt));
+    if (data === undefined) opaque.push(`the calldata of the bridge call ${fn.name} could not be read`);
+    else if (data.length > 0) opaque.push(`the bridge call ${fn.name} carries calldata run on the other chain, which x402check cannot read`);
+  }
+  const sends = call.value > 0n ? `, sending ${nativeAmount(call.value, ctx.chain)}` : "";
+  const named = recipients.length > 0 ? `, to ${recipients.map((r) => r.address).join(" and ")} on the other chain` : "";
   return {
-    label: "Withdrawal to L1",
-    summary: `Withdrawal to L1 through ${call.to}${call.value > 0n ? `, sending ${nativeAmount(call.value, ctx.chain)}` : ""}, to the L1 address ${recipient}.`,
+    label: "Bridge transfer",
+    summary: `Bridge transfer to another chain through ${call.to} (${fn.name})${sends}${named}.`,
     candidates: [
-      {
-        address: recipient,
-        role: "recipient",
+      ...recipients.map((r, index) => ({
+        address: r.address,
+        role: "recipient" as const,
         interaction: interaction("native_transfer"),
-        rank: RANK.transfer,
-        reason: "receives the withdrawal on L1",
-        ...(call.value > 0n ? { amountLabel: nativeAmount(call.value, ctx.chain) } : {}),
-      },
+        rank: RANK.transfer - index,
+        reason: r.reason,
+        ...(index === 0 && call.value > 0n ? { amountLabel: nativeAmount(call.value, ctx.chain) } : {}),
+      })),
+      contractCandidate(call, ctx),
     ],
     warnings,
     danger: [],
@@ -1553,8 +1635,8 @@ function decodeCall(call: InnerCall, ctx: Ctx): Action {
     };
   }
   if (call.data.length < 8) return plainCall(call, ctx, `${call.data.length / 2} bytes of non-standard calldata`);
-  const withdrawal = l2Withdrawal(call, ctx);
-  if (withdrawal) return withdrawal;
+  const bridge = bridgeCall(call, ctx);
+  if (bridge) return bridge;
   const selector = call.data.slice(0, 8);
   const args = call.data.slice(8);
   const token = TOKEN_FUNCTIONS[selector] as TokenDecoder | undefined;

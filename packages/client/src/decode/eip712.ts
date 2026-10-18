@@ -268,10 +268,23 @@ function canonBytes(ctx: Context, value: unknown, path: string): string | undefi
   return `0x${hex.toLowerCase()}`;
 }
 
-function canonString(value: unknown): string {
+/**
+ * A string field. viem hashes what it is given as bytes (a Uint8Array as itself, a number as its
+ * hex), so anything but a JavaScript string is read here as nothing like what is signed: unsignable,
+ * never coerced (an address given as bytes once escaped the payee check). A string past MAX_STRING is
+ * not read in full.
+ */
+function canonString(ctx: Context, value: unknown, path: string): string {
   if (value === null || value === undefined) return "";
-  const text = typeof value === "string" ? value : String(value);
-  return text.length > MAX_STRING ? text.slice(0, MAX_STRING) : text;
+  if (typeof value !== "string") {
+    ctx.unsignable.push(path);
+    return "";
+  }
+  if (value.length > MAX_STRING) {
+    ctx.truncated = true;
+    return value.slice(0, MAX_STRING);
+  }
+  return value;
 }
 
 function canonValue(ctx: Context, type: string, value: unknown, path: string, depth: number): CanonValue {
@@ -316,7 +329,7 @@ function canonValue(ctx: Context, type: string, value: unknown, path: string, de
     return undefined;
   }
   if (type.startsWith("int") && !type.includes("[")) return canonInt(ctx, type, value, path);
-  if (type === "string") return canonString(value);
+  if (type === "string") return canonString(ctx, value, path);
   if (type.endsWith("]")) {
     if (!Array.isArray(value)) {
       ctx.unsignable.push(path);

@@ -146,7 +146,13 @@ function detailFor(category: string, evidence: SafeEvidence | undefined): string
       return flows.length > 0 ? flows.slice(0, 3).map((o) => `${movementText(o)} → ${party(o.counterparty, o.counterparty_is_contract)}`).join("; ") : undefined;
     }
     case "simulation_incomplete": {
-      const labels: Record<string, string> = { unclassified: "unclassified recipients or spenders", logs_truncated: "logs truncated", flows_truncated: "flows truncated" };
+      const labels: Record<string, string> = {
+        unclassified: "unclassified recipients or spenders",
+        logs_truncated: "logs truncated",
+        flows_truncated: "flows truncated",
+        l1_withdrawal: "a withdrawal to L1, whose recipient there the simulation cannot see",
+        cross_chain: "funds or a message sent to another chain, whose recipient there the simulation cannot see",
+      };
       const limits = (sim?.limits ?? []).map((l) => labels[l] ?? l.replace(/_+/g, " "));
       return limits.length > 0 ? limits.join(", ") : undefined;
     }

@@ -107,6 +107,27 @@ const L1_WITHDRAWAL_SINKS: ReadonlySet<string> = new Set([
   "0x4200000000000000000000000000000000000010",
   "0x4200000000000000000000000000000000000016",
 ]);
+/**
+ * Events that mean funds or a message leave for another chain, whichever contract emits them (topic0;
+ * each was seen in live logs on Ethereum or Base on 2026-10-18). The recipient there is named only in
+ * calldata or in the message, and the simulation never sees it.
+ */
+const CROSS_CHAIN_EVENTS: ReadonlySet<string> = new Set([
+  "0xb3813568d9991fc951961fcb4c784893574240a28925604d09fc577c55bb7c32", // OP Stack OptimismPortal: TransactionDeposited (every deposit to an OP chain)
+  "0x5e3c1311ea442664e8b1611bfabef659120ea7a0a2cfc0667700bebc69cbffe1", // Arbitrum Bridge: MessageDelivered (every message to an Arbitrum chain)
+  "0xff64905f73a67fb594e0f940a8075a860db489ad991e032f48c81123eb52d60b", // Arbitrum Inbox: InboxMessageDelivered
+  "0x32ed1a409ef04c7b0227189c3a103dc5ac10e775a15b785dcc510201f7c25ad3", // Across SpokePool: FundsDeposited
+  "0xa123dc29aebf7d0c3322c8eeb5b999e859f39937950ed31056532713d0de396f", // Across SpokePool: V3FundsDeposited (earlier deployments)
+  "0x2fa9ca894982930190727e75500a97d8dc500233a5065e0f3126c48fbe0343c0", // Circle CCTP TokenMessenger: DepositForBurn
+  "0x0c8c1cbdc5190613ebd485511d4e2812cfa45eecb79d845893331fedad5130a5", // Circle CCTP TokenMessengerV2: DepositForBurn
+  "0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f", // LayerZero EndpointV2: PacketSent (OFTs, Stargate)
+  "0x6eb224fb001ed210e379b335e35efe88672a8ce935d981a6896b27ffdf52a3b2", // Wormhole core: LogMessagePublished
+  "0x769f711d20c679153d382254f59892613b58a97cc876b249134ac25c80f9c814", // Hyperlane Mailbox: Dispatch
+  "0xe856c2b8bd4eb0027ce32eeaf595c21b0b6b4644b326e5b7bd80a1cf8db72e6c", // Linea MessageService: MessageSent
+  "0x104371f3b442861a2a7b82a070afbbaab748bb13757bf47769e170e37809ec1e", // Scroll messenger: SentMessage
+  "0x103fed9db65eac19c4d870f49ab7520fe03b99f1838e5996caf47e9e43308392", // Polygon PoS StateSender: StateSynced
+  "0xdb80dd488acf86d17c747445b0eabb5d57c541d3bd7b6b87af987858e5066b2b", // Starknet core: LogMessageToL2
+]);
 const PROBE_BATCH = 10; // some public RPCs cap JSON-RPC batches at 10 calls
 // A plausible sender balance (value + 0.1 ETH), not an implausible one a contract could test for.
 const BALANCE_HEADROOM = 10n ** 17n;
@@ -526,6 +547,16 @@ export function createSimulator(opts: { rpc?: Record<string, string>; timeoutMs?
     // incomplete, never clear, whichever contract made the call (2026-10-17 review).
     if (logs.some((log) => typeof (log as { address?: unknown })?.address === "string" && L1_WITHDRAWAL_SINKS.has(((log as { address: string }).address).toLowerCase()))) {
       limits.push("l1_withdrawal");
+    }
+    // The same for any other bridge or message layer it knows, by event (2026-10-18 review): a deposit
+    // from Ethereum to an L2, or a transfer through Across, CCTP, LayerZero, Wormhole or Hyperlane.
+    if (
+      logs.some((log) => {
+        const topics = (log as { topics?: unknown })?.topics;
+        return Array.isArray(topics) && typeof topics[0] === "string" && CROSS_CHAIN_EVENTS.has(topics[0].toLowerCase());
+      })
+    ) {
+      limits.push("cross_chain");
     }
     if (logs.length > MAX_LOGS) {
       logs = logs.slice(0, MAX_LOGS);
