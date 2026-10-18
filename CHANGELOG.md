@@ -10,6 +10,7 @@ Since v0.6.18, a client that leaves during its evaluation is charged, because it
 - **No cost on other paths.** The kept verdict is looked up only for a payment that was refused or already used, never on the way of a new one. Any other request with that payment is refused as before.
 - **Credit purchases are unchanged.** A new credit token lost the same way is not kept, because that would store the token itself; it stays the owner's to make right.
 - **`eval/disconnect.ts`** now expects one payment to buy one verdict that reaches the payer, whenever the client leaves.
+- **More bridges read as incomplete.** The review's second round found four more bridges whose simulation came back clear: Polygon's unified bridge, Celer cBridge, Gnosis Chain's AMB (OmniBridge) and zkSync Era's Bridgehub. Their events now also make it `cross_chain`, each confirmed in live logs. The list cannot be complete: a bridge the simulation does not know is still read as an ordinary contract.
 
 ## v0.6.19 — 2026-10-18: a transfer to another chain is never read as clear
 
@@ -23,7 +24,7 @@ Events are matched whichever contract emits them, and each was confirmed in live
 
 Two daily maintenance reviews found these, and all are fixed here:
 - the review of 0.5.0 (2026-10-17): two critical issues in the client, three high, one medium and several low (`packages/client/test/guard-0617.test.ts`, `solana-custodian-signers.test.ts`, `solana-nonce-signers.test.ts`, `solana-legit-flows.test.ts`);
-- the review of this release itself, before its publish (2026-10-18): two high, two medium and four low (`guard-0618.test.ts`).
+- the review of this release itself, before its publish (2026-10-18, two rounds): two high, three medium and four low (`guard-0618.test.ts`).
 
 Client 0.5.0 and older should not be used.
 
@@ -34,6 +35,7 @@ Client 0.5.0 and older should not be used.
   - A recipient that is not an EVM address, or calldata or a deployment run on the other chain, makes the request unread.
   - The Worker reads any transfer through a bridge or message layer it knows as incomplete (v0.6.19).
 - **Medium: a serializer that rewrites the transaction it is handed** passed the read-back. viem hands the serializer the very object it signs, and the read-back compared against that same object. It now compares against a copy taken before the call.
+- **Medium: a serializer that returns a native promise with its own `then`** passed the read-back too. The checked bytes went to the check while the `then` gave viem a drain to sign. Found by the review's second round. What the promise resolves to is now awaited and verified, and only that value reaches viem.
 - **Medium (a regression in 0.5.1): viem before 2.37.11 hashes a serializer's return value without awaiting it.** With those versions, the read-back made every transaction fail on chains that have their own serializer (Base, OP, Celo, zkSync). A synchronous serializer now stays synchronous, and a thenable is adopted as a native promise.
 - **Low:**
   - A Permit2 witness payee was exempt from its check when the order named it as its swapper, as an address or now as a string. Only the signing account is exempt, and outputs paid to another swapper no longer count as the signer's.

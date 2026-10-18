@@ -187,6 +187,10 @@ test("an event from a bridge or message layer makes the simulation incomplete, w
     "0x0c8c1cbdc5190613ebd485511d4e2812cfa45eecb79d845893331fedad5130a5",
     "0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f",
     "0x6eb224fb001ed210e379b335e35efe88672a8ce935d981a6896b27ffdf52a3b2",
+    "0x501781209a1f8899323b96b4ef08b168df93e0a90c673d1e4cce39366cb62f9b",
+    "0x89d8051e597ab4178a863a5190407b98abfeff406aa8db90c59af76612e58f01",
+    "0x482515ce3d9494a37ce83f18b72b363449458435fafdd7a53ddea7460fe01b58",
+    "0x4531cd5795773d7101c17bdeb9f5ab7f47d7056017506f937083be5d6e77a382",
   ]) {
     const bridge = createSimulator({ fetchImpl: rpcStub([{ address: ROUTER, topics: [topic.toUpperCase().replace("0X", "0x"), t(USER)], data: amt(10n) }]) });
     const result = await bridge({ from: USER, to: ROUTER, value: "10", data: "0x12345678" }, "eip155:1", { declared: [{ address: ROUTER }] });

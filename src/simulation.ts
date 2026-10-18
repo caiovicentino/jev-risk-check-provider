@@ -127,6 +127,10 @@ const CROSS_CHAIN_EVENTS: ReadonlySet<string> = new Set([
   "0x104371f3b442861a2a7b82a070afbbaab748bb13757bf47769e170e37809ec1e", // Scroll messenger: SentMessage
   "0x103fed9db65eac19c4d870f49ab7520fe03b99f1838e5996caf47e9e43308392", // Polygon PoS StateSender: StateSynced
   "0xdb80dd488acf86d17c747445b0eabb5d57c541d3bd7b6b87af987858e5066b2b", // Starknet core: LogMessageToL2
+  "0x501781209a1f8899323b96b4ef08b168df93e0a90c673d1e4cce39366cb62f9b", // Polygon unified bridge (zkEVM, Agglayer): BridgeEvent
+  "0x89d8051e597ab4178a863a5190407b98abfeff406aa8db90c59af76612e58f01", // Celer cBridge: Send
+  "0x482515ce3d9494a37ce83f18b72b363449458435fafdd7a53ddea7460fe01b58", // Gnosis Chain AMB (OmniBridge): UserRequestForAffirmation
+  "0x4531cd5795773d7101c17bdeb9f5ab7f47d7056017506f937083be5d6e77a382", // zkSync Era (Bridgehub, diamond): NewPriorityRequest
 ]);
 const PROBE_BATCH = 10; // some public RPCs cap JSON-RPC batches at 10 calls
 // A plausible sender balance (value + 0.1 ETH), not an implausible one a contract could test for.

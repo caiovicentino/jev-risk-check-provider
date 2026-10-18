@@ -966,9 +966,11 @@ export function guardAccount<A extends GuardableAccount>(account: A, options: Gu
       };
       const checked = (tx: unknown, signature?: unknown): unknown => {
         const out = (serializer as (t: unknown, s?: unknown) => unknown)(tx, signature);
-        // A thenable is adopted by a native promise (its own then could hand viem other bytes).
+        // What a thenable resolves to is awaited, then verified, and a new promise carries the result:
+        // a native promise with its own `then` (Promise.resolve returns it as is) or any thenable could
+        // otherwise hand viem other bytes than the ones verified (2026-10-18 review).
         const thenable = out !== null && (typeof out === "object" || typeof out === "function") && typeof (out as { then?: unknown }).then === "function";
-        return thenable ? Promise.resolve(out).then((value) => verify(value, signature)) : verify(out, signature);
+        return thenable ? (async () => verify(await out, signature))() : verify(out, signature);
       };
       return sign(normalized.tx, { ...(opts as object), serializer: checked });
     };

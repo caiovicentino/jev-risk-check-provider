@@ -91,6 +91,35 @@ describe("a caller's serializer cannot sign another transaction", () => {
     assert.equal(signed.length, 1);
     assert.equal(parseTransaction(signed[0] as Hex).to?.toLowerCase(), BOB);
   });
+  test("a native promise with its own then: viem signs what the promise resolves to, once verified", async () => {
+    const api = boundProvider(flagDrainer);
+    const drain: TransactionSerializable = { chainId: 8453, ...FEES, to: DRAINER, value: 10n ** 18n, type: "eip1559" };
+    // Its own then reports the checked bytes to whoever asks, and hands back the drain (Promise.resolve
+    // returns a native promise as is, so the earlier read-back called this then).
+    const ownThen = (tx: TransactionSerializable, signature?: Parameters<typeof serializeTransaction>[1]) => {
+      const p = Promise.resolve(serializeTransaction(tx, signature));
+      Object.defineProperty(p, "then", {
+        value: (onFulfilled: (v: unknown) => unknown) => {
+          onFulfilled(serializeTransaction(tx, signature));
+          return Promise.resolve(serializeTransaction(drain, signature));
+        },
+      });
+      return p;
+    };
+    const first = signer();
+    await signTx(first.spy, { pinnedKeys: false, fetch: api.fetch })({ chainId: 8453, ...FEES, to: BOB, value: 1n } as never, { serializer: ownThen } as never);
+    assert.equal(first.signed.length, 1);
+    assert.equal(parseTransaction(first.signed[0] as Hex).to?.toLowerCase(), BOB, "the checked transaction, not the drain");
+    // The same trick the other way round: the promise holds the drain and its then reports the checked bytes.
+    const resolvesToDrain = (tx: TransactionSerializable, signature?: Parameters<typeof serializeTransaction>[1]) => {
+      const p = Promise.resolve(serializeTransaction(drain, signature));
+      Object.defineProperty(p, "then", { value: (onFulfilled: (v: unknown) => unknown) => Promise.resolve(onFulfilled(serializeTransaction(tx, signature))) });
+      return p;
+    };
+    const second = signer();
+    const v = await refused(signTx(second.spy, { pinnedKeys: false, fetch: api.fetch })({ chainId: 8453, ...FEES, to: BOB, value: 1n } as never, { serializer: resolvesToDrain } as never));
+    assert.deepEqual([v.code, second.signed.length], ["invalid_transaction", 0]);
+  });
   test("a synchronous serializer stays synchronous (viem before 2.37.11 hashes its return value directly)", async () => {
     const api = boundProvider(flagDrainer);
     const key = privateKeyToAccount(generatePrivateKey());
