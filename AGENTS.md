@@ -125,7 +125,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 | What | Where |
 |---|---|
 | Revenue addresses (`pay_to`) | EVM `0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178`, Solana `Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X` |
-| Probe payer (eval spending) | EVM `0xB48057E647B2572f5eAe241b515fBc58B7cE249E`, $0.047 of USDC on Base on 2026-10-16 (03:44 UTC), and $0.001 of probe credits (one `security:v5` run costs about $0.10: the daily routine runs it weekly once the payer holds $0.15). Its keys are in the owner's `~/.config/paysol/`, read only by `eval/paid-fetch.ts` and the money scripts. |
+| Probe payer (eval spending) | EVM `0xB48057E647B2572f5eAe241b515fBc58B7cE249E`, $0.040 of USDC on Base on 2026-10-19 (after the v0.6.20 disconnect probes), and $0.001 of probe credits (one `security:v5` run costs about $0.10: the daily routine runs it weekly once the payer holds $0.15). Its keys are in the owner's `~/.config/paysol/`, read only by `eval/paid-fetch.ts` and the money scripts. |
 | Facilitators | Coinbase CDP (Base, Polygon, Arbitrum: $0.001 per settlement after 1,000 free a month), PayAI (Sei, and the EVM fallback: gas + 30%; Avalanche when its fee there is below the price), Dexter (Solana, Monad: free). A route that would lose money is never offered. Live routing is in `/status`. |
 
 ### 2.5 Where x402check is listed
@@ -358,7 +358,7 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - v0.6.13 (commit `b0ccd6e`): the race that could take the KV MetaMask list back on a new isolate, PayAI's fee-table cache, more room under the KV limit, and a wider Ethereum scan rotation.
   - v0.6.12 (commit `787c147`): a facilitator outage gives a 503 with `Retry-After`, never a 500 in place of the 402 challenge. v0.6.11 (commit `12ecf83`): dependency updates, `@noble/curves` 2.
   - v0.6.10 (commit `4bfd802`): new isolates take the MetaMask list from KV (`feed:metamask:v1`), as OFAC; before it they checked domains against the list embedded at deploy (16 days behind on 2026-10-15) until their own refresh finished. The daily maintenance routine (`docs/MAINTENANCE.md`) found it on its first run.
-- **Daily maintenance:** a Claude Code session cron in the owner's open session (job `11c03462`, every day at 09:07 in his time zone, created 2026-10-16; each run renews it from day 6, state in `.cache/maintenance/state.json`).
+- **Daily maintenance:** a Claude Code session cron in the owner's open session (job `b7567bca`, every day at 09:07 in his time zone; recreated on 2026-10-19 after the owner restarted his Mac, since a session cron dies with its session; each run renews it from day 6, state in `.cache/maintenance/state.json`).
 - **The day before:** v0.6.9 (2026-10-15, commit `31a6018`), five releases that day:
   - v0.6.5: routing never offers a route that loses money. Avalanche left the 402 challenge (PayAI's fee $0.00574 against a $0.001 price, below Dexter's floor), and Monad moved to Dexter (Permit2). `/status` → `payments` shows `offered` and `reason`.
   - v0.6.6: the kit watch keeps up with floods of EIP-7702 delegations. Authorizations to settled harmless delegates are counted, not kept. A threat's authorizations are evaluated up to a per-run budget (450 on Ethereum, 250 on Base), and the rest wait in a 10,000-item queue retried by cost. Entries are read in bulk.
@@ -383,12 +383,12 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - In production from credits, 4/4 decisions agreed (both legitimate cases revert).
   - Probe credits: `~/.config/paysol/x402check-credit-token` (mode 600; never print it).
 - **Colosseum hackathon:** the owner submitted the project on 2026-10-06 with the answers in `docs/hackathon/submission-form.md` (v0.6.4 facts, Solana first, AI-assisted reviews disclosed, revenue stated honestly). Keep production healthy and the evidence current while it is judged.
-- **Revenue from outside:** $0.042 by 2026-10-15, all from paying monitors and directories on Base, none yet from a customer:
+- **Revenue from outside:** $0.049 by 2026-10-19, all from paying monitors and directories on Base, none yet from a customer:
   - `lumiere-paycheck-prober`: one check and a batch of two on 2026-10-01 ($0.0105);
   - vet402's observatory (`vet402-observatory-l1`, which buys from Bazaar-listed endpoints to check that payment settles and the service delivers): one check on 2026-10-03 and one on 2026-10-12 ($0.007, settled by CDP; we delivered);
   - `cog-x402-audit/2` (cog.xyz): a check and a batch of two on 2026-10-08 ($0.0105);
   - a payer from a Cloudflare Worker in Kazakhstan, a minute after `verdikt-discovery/1` (verdikt.bond) crawled us: three checks on 2026-10-12 ($0.0105);
-  - `nohumans-scout/1.0` (nohumans.directory): one check on 2026-10-15 ($0.0035).
+  - `nohumans-scout/1.0` (nohumans.directory): one check on 2026-10-15 and a batch of two on 2026-10-19 ($0.0105).
 
   Every other payment has come from our own probe wallets. Receipts land in the owner's wallet `0xbF88…0178` (confirmed his on 2026-10-02).
 - **Dependabot (2026-10-15):** production `npm audit` is clean. `sharp` was fixed through wrangler 4.151.0. The `stream-json` alerts (jayson's server code, which `@solana/web3.js` never loads) and the `sprintf-js` alert (the Snap's test tooling, no patch) were dismissed with reasons.
