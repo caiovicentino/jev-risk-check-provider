@@ -128,6 +128,15 @@ Each was re-fetched and handed to the guard as the signature request an agent's 
 - **The cost for an agent:** a transaction that reverts only because it depends on one not yet mined (an approval, then the swap that uses it) is refused until that one is mined, and can then be checked again.
 - **Production** has not been re-run with 0.5.0: the two legitimate transactions it checked revert at the latest block, so 0.5.0 would not sign them.
 
+**A rule measured and not built (2026-10-20).** The weekly run of 2026-10-19 (`eval/guard.ts`, the same cases) gave the same counts: 22/33 executing drainers blocked, 0/59 executing legitimate transactions refused. A generic rule was then measured on the transactions that execute, simulated again at the latest block: assets go to a contract and nothing comes back, so review.
+- It would refuse **none of the 11 drainer transactions still signed:**
+  - 8 move nothing at the latest block;
+  - 3 send ETH straight to the drainer's own address, which simulates as a plain payment. Only a list names that address, and the ScamSniffer feed is off in this evaluation.
+- It would refuse **1 of the 59 legitimate transactions:** a 1inch swap from which nothing comes back to the sender.
+- Contracts that keep assets are already covered: an unverified one is refused (`outflow_to_unverified_contract`), and the verified "SecurityUpdates" kit by its code (Forta fingerprints).
+
+The rule was not built.
+
 **In production** (`eval/guard-production.ts`, `guard-production-report.json`):
 - the guard against `https://x402check.xyz`, paid from prepaid credits ($0.005 per simulated check), agreed with the in-process guard on **4/4** transactions: 2 drainers blocked, 2 legitimate allowed, in 0.6–2.3 s;
 - **both legitimate transactions revert at the latest block** (`simulation_reverted`), so production has not yet exercised a legitimate transaction that executes;
