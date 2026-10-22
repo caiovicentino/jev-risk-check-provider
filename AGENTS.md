@@ -347,7 +347,7 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
 
 ## 5. State as of 2026-10-18 (update when it changes)
 
-- **Production:** v0.6.20 (2026-10-18, commit `52ec765`; `/healthz` names the commit). Each daily maintenance run reviews the previous day's fixes before they ship:
+- **Production:** v0.6.20 (2026-10-18, commit `52ec765`; redeployed on 2026-10-22 from `818709c`, with the embedded OFAC snapshot synced to the 2026-10-21 release, whose addresses are unchanged; `/healthz` names the commit). Each daily maintenance run reviews the previous day's fixes before they ship:
   - v0.6.20: a verdict paid for reaches its payer on a resend. When the client left during its evaluation, the verdict is kept with the payment's claim for a day, and the same payment resent for the same request receives it (`X-Payment-Delivery: resent`), with no second evaluation or charge. Proven in production (`eval/disconnect.ts`, 3 s). Four more bridges read as `cross_chain` (Polygon's unified bridge, Celer, Gnosis Chain's AMB, zkSync Era).
   - v0.6.19 (commit `904d4c2`): any event from a bridge or message layer the simulation knows makes it incomplete (`cross_chain`, review). These are OP Stack and Arbitrum deposits, Across, CCTP, LayerZero, Wormhole, Hyperlane, Linea, Scroll, Polygon PoS and Starknet, each event confirmed in live logs. Before it, a deposit or transfer to someone else on another chain came back from the simulation `ok`.
   - v0.6.18 (2026-10-17, commit `66ff954`): a verdict produced for a client who left is settled, and the settlement is recorded `undelivered`. Withdrawals to L1 make the simulation incomplete (`l1_withdrawal`).
