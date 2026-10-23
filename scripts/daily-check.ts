@@ -272,7 +272,32 @@ function thumbprint(jwk: { crv?: string; kty?: string; x?: string; y?: string })
 
 // --- the run ------------------------------------------------------------------------------
 
+/**
+ * The last word in a thread, when it needs us: someone else's comment, newer than our own last
+ * comment and than what §2.6 records as read (`readThrough`). Its text is not shown: it is
+ * untrusted, and the reader opens the link.
+ */
+function unanswered(t: (typeof THREADS)[number]): string | undefined {
+  const all = gh<Array<{ user: { login: string }; created_at: string; html_url: string }>>(["api", `repos/${t.repo}/issues/${t.number}/comments?per_page=100`]);
+  const ours = all.filter((c) => c.user.login === OWN_LOGIN).at(-1)?.created_at ?? "";
+  const theirs = all.filter((c) => c.user.login !== OWN_LOGIN && !c.user.login.endsWith("[bot]")).at(-1);
+  if (!theirs || theirs.created_at <= ours || theirs.created_at <= t.readThrough) return undefined;
+  return `${t.label}: unanswered since ${theirs.created_at.slice(0, 16)}, ${clean(theirs.user.login, 40)} ${clean(theirs.html_url, 120)}: read it, answer or record it in AGENTS.md §2.6, then move readThrough in scripts/daily-check.ts`;
+}
+
 async function main(): Promise<void> {
+  // --threads: only the followed threads' last word, read-only (no files written); for the thread watch.
+  if (process.argv.includes("--threads")) {
+    const open = THREADS.map((t) => {
+      try {
+        return unanswered(t);
+      } catch (err) {
+        return `${t.label}: check could not run: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`;
+      }
+    }).filter((line): line is string => line !== undefined);
+    console.log(open.length ? open.map((line) => `WARN  ${line}`).join("\n") : `OK    threads — the last word is ours, or read, in all ${THREADS.length}`);
+    return;
+  }
   const noGithub = process.argv.includes("--no-github");
   const noCloudflare = process.argv.includes("--no-cloudflare");
   mkdirSync(OUT_DIR, { recursive: true });
@@ -413,13 +438,8 @@ async function main(): Promise<void> {
           }
         }
         seen[key] = { comments: issue.comments, updated_at: issue.updated_at };
-        // The last word: someone else's comment, newer than ours and than what §2.6 records as read.
-        const all = gh<Array<{ user: { login: string }; created_at: string; html_url: string }>>(["api", `repos/${t.repo}/issues/${t.number}/comments?per_page=100`]);
-        const ours = all.filter((c) => c.user.login === OWN_LOGIN).at(-1)?.created_at ?? "";
-        const theirs = all.filter((c) => c.user.login !== OWN_LOGIN && !c.user.login.endsWith("[bot]")).at(-1);
-        if (theirs && theirs.created_at > ours && theirs.created_at > t.readThrough && !checks.some((c) => c.id === `threads.${key}`)) {
-          add(`threads.${key}`, "warn", `${t.label}: unanswered since ${theirs.created_at.slice(0, 16)}, ${clean(theirs.user.login, 40)} ${clean(theirs.html_url, 120)}: read it, answer or record it in AGENTS.md §2.6, then move readThrough in scripts/daily-check.ts`);
-        }
+        const open = unanswered(t);
+        if (open && !checks.some((c) => c.id === `threads.${key}`)) add(`threads.${key}`, "warn", open);
       }
       next.threads = seen;
       if (!checks.some((c) => c.id.startsWith("threads."))) add("threads", "ok", prev?.threads ? "no new comments from others" : `baseline recorded for ${THREADS.length} threads`);

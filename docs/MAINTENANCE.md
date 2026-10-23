@@ -8,6 +8,7 @@ The lead agent's daily routine for x402check: check production and the repositor
 - **How:** a Claude Code session cron (`CronCreate`).
   - It lives in the owner's open Claude Code session on his Mac, and fires only while that session is idle.
   - It expires after 7 days. Each run renews it from day 6 and records the dates in `.cache/maintenance/state.json` → `cron`.
+  - A second session cron, the **thread watch**, runs `npx tsx scripts/daily-check.ts --threads` every two hours from 08:47 to 22:47. That mode is read-only and writes no files. It reports a followed thread whose last word is someone else's and not yet read, records it, and tells the owner when a maintainer answers. The daily run renews it the same way (`state.json` → `thread_watch`).
   - If the session closes, the routine stops. The next agent the owner talks to sets it up again (`CronCreate`, cron `7 9 * * *`, prompt: "Manutenção diária do x402check: siga docs/MAINTENANCE.md.").
 
 ## The routine
