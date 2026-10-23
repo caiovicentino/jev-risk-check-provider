@@ -388,7 +388,7 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - vet402's observatory (`vet402-observatory-l1`, which buys from Bazaar-listed endpoints to check that payment settles and the service delivers): one check on 2026-10-03 and one on 2026-10-12 ($0.007, settled by CDP; we delivered);
   - `cog-x402-audit/2` (cog.xyz): a check and a batch of two on 2026-10-08 ($0.0105);
   - a payer from a Cloudflare Worker in Kazakhstan, a minute after `verdikt-discovery/1` (verdikt.bond) crawled us: three checks on 2026-10-12 ($0.0105);
-  - `nohumans-scout/1.0` (nohumans.directory): one check on 2026-10-15 and a batch of two on 2026-10-19 ($0.0105).
+  - `nohumans-scout/1.0` (nohumans.directory): one check on 2026-10-15 and a batch of two on 2026-10-19 ($0.0105);
   - `LumiTrustBuyer/1.0` (Lumi, api.lumitrades.io: a trust observatory that test-buys Bazaar listings from its Base wallet and publishes signed receipts): one check on 2026-10-22 ($0.0035).
 
   Every other payment has come from our own probe wallets. Receipts land in the owner's wallet `0xbF88…0178` (confirmed his on 2026-10-02).
