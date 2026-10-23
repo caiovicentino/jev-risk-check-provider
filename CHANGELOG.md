@@ -2,7 +2,7 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## `@x402check/mcp` 0.3.3 — 2026-10-23 (ready; publishing needs the owner's passkey)
+## `@x402check/mcp` 0.3.3 — 2026-10-23 (on npm; tag `mcp-v0.3.3`)
 
 These changes follow the security releases of 2026-10-21: Node.js 22.23.4, 24.22.1 and 26.12.1, Brotli 1.2.1, and, on 2026-10-15, undici 6.29.1.
 
