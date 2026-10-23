@@ -1,6 +1,6 @@
 {
   "name": "@x402check/mcp",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "mcpName": "io.github.caiovicentino/x402check",
   "description": "MCP server for x402check: pre-payment risk checks with verifiable attestations for AI agents, and x402 payments made only after the payee is cleared (right before signing).",
   "license": "MIT",
@@ -49,7 +49,7 @@
     "npm-shrinkwrap.json"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
@@ -69,7 +69,7 @@
     "@x402/evm": "2.28.0",
     "@x402/fetch": "2.28.0",
     "@x402check/client": "file:../client",
-    "undici": "6.29.0",
+    "undici": "6.29.1",
     "viem": "2.57.4",
     "zod": "^4.1.0"
   },

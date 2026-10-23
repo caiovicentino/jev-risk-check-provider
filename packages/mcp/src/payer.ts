@@ -18,7 +18,7 @@ import type { FetchLike } from "@x402check/client";
 import { X402CHECK_PAY_TO } from "@x402check/client/guard";
 import { privateKeyToAccount } from "viem/accounts";
 import { readLimited } from "./body.js";
-import { NonPublicAddressError, publicOnlyFetch, type Resolver } from "./net.js";
+import { NonPublicAddressError, publicOnlyFetch, type Resolver, UnrequestedEncodingError } from "./net.js";
 
 export const DEFAULT_MAX_PAYMENT_USD = 0.05;
 export const DEFAULT_BUDGET_USD = 1;
@@ -55,6 +55,8 @@ export type PaymentRefusalKind =
   | "redirected"
   /** The host name resolves to a non-public address. */
   | "private_address"
+  /** The resource answered in a content coding it was not asked for (only gzip and deflate are). */
+  | "unrequested_encoding"
   /** The call was cancelled before anything was sent with a signature. */
   | "cancelled"
   /** A check's 402 names a payee other than x402check's pay_to. */
@@ -176,6 +178,7 @@ const TEXT = {
   tooLarge: `the resource's 402 response is larger than ${MAX_CHALLENGE_BYTES / 1024} KiB, so it was not read`,
   redirected: "the response came from a redirect (the configured fetch followed it), and redirects are refused",
   privateAddress: "the host name resolves to a private, loopback, link-local or reserved address",
+  unrequestedEncoding: "the resource answered in a content coding it was not asked for (only gzip and deflate are), so its response was not read",
   unreadable: "the x402 payment could not be created from the resource's 402 response",
   checkPayee: "the check's 402 names a payee that is not x402check's pay_to, so it was not paid",
   checkPrice: "the check's 402 asks for more than any check costs, so it was not paid",
@@ -467,6 +470,7 @@ function boundedFetch(inner: typeof globalThis.fetch, state: CallState, bounds: 
         }
         if (reason === TIMED_OUT) throw new Error(`the resource did not answer within ${bounds.timeoutMs} ms`);
         if (!paid && causedBy(err, NonPublicAddressError)) throw refuse(state, "private_address", TEXT.privateAddress);
+        if (!paid && causedBy(err, UnrequestedEncodingError)) throw refuse(state, "unrequested_encoding", TEXT.unrequestedEncoding);
         throw err;
       }
       if (bounds.refuseRedirects && followedRedirect(res, request.url)) {

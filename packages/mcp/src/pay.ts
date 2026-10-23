@@ -324,6 +324,7 @@ const REFUSAL_NEXT: Record<Exclude<PaymentRefusalKind, "not_authorized">, string
   challenge_timeout: "Next: the resource's 402 response did not arrive in time. Nothing was paid.",
   redirected: "Next: the response came from a redirect, and this server does not follow redirects. Nothing was paid.",
   private_address: "Next: pass an https URL on a public host: this host resolves to a private, loopback, link-local or reserved address. Nothing was paid.",
+  unrequested_encoding: "Next: the resource answered in a content coding this server did not ask for (it asks for gzip or deflate only), so the response was not read. Nothing was paid.",
   cancelled: "Next: the call was cancelled before anything was sent with a signature. Nothing was paid.",
   authorization_outstanding:
     "Next: nothing new was signed. Another payment from this server to this payee on this site is under way, or the resource has not accepted an earlier one, which it can still settle until it expires (see the error): do not pay it again by any other means, and check the payer's USDC balance after that time.",

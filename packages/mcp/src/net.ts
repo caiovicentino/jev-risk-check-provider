@@ -4,9 +4,14 @@
 // when it resolves to one: the resource fetch connects through an undici Agent whose DNS lookup
 // refuses any non-public answer, and the connection uses exactly the addresses that lookup
 // checked, so a name cannot be re-pointed (DNS rebinding) between the check and the connect.
+//
+// It also asks a resource for gzip or deflate only, and refuses a response in any other content
+// coding before a byte of it is decoded. A resource is any server, so its compressed body reaches a
+// decoder in the process that holds the payer key: the Brotli decoder of Node.js before 22.23.4,
+// 24.22.1 and 26.12.1 writes out of bounds on a crafted stream (CVE-2026-111497, 2026-10-21).
 import { promises as dns } from "node:dns";
 import { BlockList, isIP, type LookupFunction } from "node:net";
-import { Agent, fetch as undiciFetch } from "undici";
+import { Agent, DecoratorHandler, type Dispatcher, fetch as undiciFetch } from "undici";
 
 // Everything that is not a globally reachable unicast address (IANA special-purpose registries).
 // One list per family: a BlockList holding IPv6 rules also matches IPv4 addresses through their
@@ -103,20 +108,75 @@ export function publicOnlyLookup(resolve: Resolver = systemResolver): LookupFunc
   };
 }
 
+/** The content codings a resource is asked for. */
+export const ACCEPT_ENCODING = "gzip, deflate";
+// What a response may be in: the codings asked for, gzip's legacy alias, and none at all.
+const ACCEPTED_CODINGS = new Set(["gzip", "x-gzip", "deflate", "identity"]);
+
+/** A resource answered in a content coding it was not asked for (Brotli included): none of its body was decoded. */
+export class UnrequestedEncodingError extends Error {
+  override readonly name = "UnrequestedEncodingError";
+  constructor() {
+    super("the resource answered in a content coding it was not asked for, so its body was not decoded");
+  }
+}
+
+/** Whether every content coding a response names (any `Content-Encoding` header, any case) is one asked for. */
+export function codingsAccepted(rawHeaders: ReadonlyArray<Buffer | string>): boolean {
+  const text = (v: Buffer | string | undefined) => (typeof v === "string" ? v : v === undefined ? "" : Buffer.from(v).toString("latin1"));
+  for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
+    if (text(rawHeaders[i]).trim().toLowerCase() !== "content-encoding") continue;
+    for (const coding of text(rawHeaders[i + 1]).split(",")) {
+      const c = coding.trim().toLowerCase();
+      if (c !== "" && !ACCEPTED_CODINGS.has(c)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Refuses a response in a content coding that was not asked for, from its headers, before fetch
+ * sets up a decoder. undici aborts a request whose `onHeaders` throws: fetch then rejects with
+ * the error as its cause, and the connection is closed.
+ */
+class CodingGuard extends DecoratorHandler {
+  readonly #handler: Dispatcher.DispatchHandlers;
+  constructor(handler: Dispatcher.DispatchHandlers) {
+    super(handler);
+    this.#handler = handler;
+  }
+  onHeaders(statusCode: number, headers: Buffer[], resume: () => void, statusText: string): boolean {
+    if (statusCode >= 200 && !codingsAccepted(headers)) throw new UnrequestedEncodingError();
+    return this.#handler.onHeaders?.(statusCode, headers, resume, statusText) ?? true;
+  }
+}
+
+/** The undici interceptor that applies `CodingGuard` to every request. */
+export const refuseUnrequestedCodings: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (options, handler) => dispatch(options, new CodingGuard(handler));
+
 /**
  * The fetch x402check_pay requests resources with when no custom fetch is configured: it connects
  * only to public addresses (host names resolved and pinned, see `publicOnlyLookup`) and never
  * follows a redirect. A host with a non-public address fails with a `NonPublicAddressError` cause.
  */
 export function publicOnlyFetch(resolve?: Resolver): typeof globalThis.fetch {
-  let dispatcher: Agent | undefined;
+  return resourceFetch(() => new Agent({ connect: { lookup: publicOnlyLookup(resolve) } }));
+}
+
+/**
+ * The resource fetch over a dispatcher (`publicOnlyFetch`'s, or a test's): it asks for gzip or
+ * deflate only, refuses any other content coding with an `UnrequestedEncodingError` cause, and
+ * never follows a redirect.
+ */
+export function resourceFetch(makeDispatcher: () => Dispatcher): typeof globalThis.fetch {
+  let dispatcher: Dispatcher | undefined;
   return async (input, init) => {
-    dispatcher ??= new Agent({ connect: { lookup: publicOnlyLookup(resolve) } });
+    dispatcher ??= makeDispatcher().compose(refuseUnrequestedCodings);
     const request = new Request(input, init);
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : Buffer.from(await request.arrayBuffer());
     const res = await undiciFetch(request.url, {
       method: request.method,
-      headers: [...request.headers],
+      headers: [...[...request.headers].filter(([name]) => name !== "accept-encoding"), ["accept-encoding", ACCEPT_ENCODING]],
       ...(body && body.byteLength > 0 ? { body } : {}),
       redirect: "manual",
       signal: request.signal,

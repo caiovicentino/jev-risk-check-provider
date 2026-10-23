@@ -2,6 +2,21 @@
 
 Each release's full notes and evidence are on the [releases page](https://github.com/caiovicentino/jev-risk-check-provider/releases). Measurements are in [docs/EVIDENCE.md](docs/EVIDENCE.md), and every verdict rule is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
+## `@x402check/mcp` 0.3.3 — 2026-10-23 (ready; publishing needs the owner's passkey)
+
+These changes follow the security releases of 2026-10-21: Node.js 22.23.4, 24.22.1 and 26.12.1, Brotli 1.2.1, and, on 2026-10-15, undici 6.29.1.
+
+`x402check_pay` fetches resources from servers it does not know, in the process that holds the payer key. Three changes protect that fetch:
+- **Brotli is never decoded (CVE-2026-111497, high).** The Brotli decoder writes out of bounds on a crafted stream, which permits remote code execution. Node.js bundles that decoder before 22.23.4, 24.22.1 and 26.12.1, and fetch runs it on any response marked `Content-Encoding: br`.
+  - The resource fetch now asks for gzip or deflate only. A response in any other coding is refused from its headers, before fetch creates a decoder: `refused`, `unrequested_encoding`, nothing paid.
+  - This holds on any Node.js version the server runs on.
+  - `test/net.test.ts` runs a real server answering in br, a mixed coding and zstd, and counts the Brotli decoders fetch creates: none. `test/pay-security.test.ts` runs the same case end to end.
+- **undici 6.29.0 → 6.29.1.** A malicious server could crash the process in two ways: more than five content codings with the connection closed early (CVE-2026-109869, high), or a TLS 1.2 renegotiation to another certificate (CVE-2026-87018, high).
+  - The DNS pinning that keeps resource connections on public addresses is not affected by CVE-2026-109383, the TLS options undici's `Agent` dropped: the pinning passes its `lookup` through `connect`, which kept it.
+- **Node.js 22 or later** (`engines`). Node.js 20 reached its end of life on 2026-04-30 and gets no security releases. The README asks for the line's latest security release.
+
+The lockfile also moves `ip-address` to 10.7.4, used through the MCP SDK's `express-rate-limit`. 10.7.2 was open to a moderate denial of service, a quadratic match of IPv6 zone identifiers.
+
 ## `@x402check/client` 0.5.3 and `@x402check/mcp` 0.3.2 — 2026-10-18 (on npm; tags `client-v0.5.3`, `mcp-v0.3.2`; client 0.5.0 deprecated with a security notice)
 
 0.5.1 and 0.5.2 were never published: their fixes ship in 0.5.3, with the follow-ups of the review's third and fourth rounds.

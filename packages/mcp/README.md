@@ -65,7 +65,7 @@ Add the server to `claude_desktop_config.json`:
 
 ### Any other MCP client
 
-Run `npx -y @x402check/mcp`, or `x402check-mcp` after `npm install -g @x402check/mcp`, as a stdio server. The server needs Node ≥ 20.
+Run `npx -y @x402check/mcp`, or `x402check-mcp` after `npm install -g @x402check/mcp`, as a stdio server. The server needs Node.js 22 or later, on its latest security release (22.23.4, 24.22.1 or 26.12.1 or later as of 2026-10-21): it holds a payer key and talks to servers it does not know.
 
 ### From a local checkout
 
@@ -192,6 +192,7 @@ A failed call (402, 422, 413, 503, network error or timeout) also sets `isError:
    - x402 version 2 challenges only: a version 1 challenge is refused as such (`unsupported_x402_version`);
    - a signed authorization is valid for at most 15 minutes: a 402 that asks for longer is refused before anything is checked or signed (`authorization_too_long`);
    - redirects are not followed; a response that shows one was followed is refused, and its body is not shown;
+   - a resource is asked for gzip or deflate only. A response in any other content coding, Brotli included, is refused from its headers before any of it is decoded (`unrequested_encoding`). Node.js's Brotli decoder before 22.23.4, 24.22.1 and 26.12.1 writes out of bounds on a crafted stream (CVE-2026-111497), and a resource can be any server;
    - payment headers cannot be passed in;
    - a request times out after `X402CHECK_TIMEOUT_MS`, and so does reading its body. A 402's body is read at most 64 KiB, within the same time limit; a larger or slower one is refused (`challenge_too_large`, `challenge_timeout`), since x402 version 2 challenges travel in the `PAYMENT-REQUIRED` header;
    - the body is capped at 16 KiB of text and stripped of control, format and line-separator characters, and a binary body is not shown;
@@ -203,7 +204,7 @@ Arguments: `url`, `method` (`GET` by default), `body`, `headers`, `max_usd`, `co
 |---|---|
 | `paid` | x402check cleared the payee, and the payment was signed, sent and accepted: the resource answered with a 2xx and a settlement receipt (`PAYMENT-RESPONSE`) that says `success: true`. |
 | `no_payment_required` | The resource answered without a 402: returned as is, nothing checked or paid. |
-| `refused` | Nothing was sent with a signature. Refusals come from x402check's verdict, the user, `max_usd`, the cap, the budget (the payer's, or the credits' for the check), no payable option, an unsupported x402 version, a too long-lived authorization, an oversized or slow 402, a redirect, a private host, a cancelled call, a bad URL or a missing payer. `error.code` says which. |
+| `refused` | Nothing was sent with a signature. Refusals come from x402check's verdict, the user, `max_usd`, the cap, the budget (the payer's, or the credits' for the check), no payable option, an unsupported x402 version, a too long-lived authorization, an oversized or slow 402, a redirect, a private host, a content coding not asked for, a cancelled call, a bad URL or a missing payer. `error.code` says which. |
 | `payment_rejected` | The payment was sent, but the resource answered 402 again. The signed authorization can still be settled until `payment.valid_until`: do not pay that resource again before then. Until then the server refuses to sign another payment to that payee on that site (`authorization_outstanding`), on any network and for any path, whatever the resource's response says. The same holds after any other answer that does not confirm the payment, after a lost connection once a payment was sent, and while another call's payment to that payee on that site awaits its answer. While one call checks a payee on a site (or asks the user), another call to that payee there is refused before it buys a check of its own. |
 | `failed` | The resource could not be reached, or it answered the payment without accepting it: an error, a redirect (not followed), or a 2xx without a settlement receipt that says `success: true` (no receipt, one that cannot be read, or one that says otherwise). The last two are `payment_unconfirmed`. `payment_sent` says whether a signed payment went out; such a payment may still be settled until `payment.valid_until`, and until then the server signs no new one to that payee on that site. |
 

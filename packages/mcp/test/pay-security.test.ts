@@ -2,9 +2,14 @@
 // followed redirects, planted text, lookalike trust, long-lived authorizations, private hosts.
 // Stubs only: throwaway keys, no network, no money.
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { before, describe, test } from "node:test";
+import { brotliCompressSync } from "node:zlib";
 import { createClient } from "@x402check/client";
+import { Agent } from "undici";
 import { generatePrivateKey } from "viem/accounts";
+import { resourceFetch } from "../src/net.js";
 import { runPay } from "../src/pay.js";
 import { createPayer, PaymentRefused } from "../src/payer.js";
 import { json, makeIssuer, USDC_BASE, ISSUER, type Issuer } from "./helpers.js";
@@ -598,6 +603,43 @@ describe("host names that resolve to private addresses (mcp-9)", () => {
       } finally {
         await s.close();
       }
+    }
+  });
+});
+
+describe("content codings a resource may answer in (CVE-2026-111497)", () => {
+  test("a 402 in Brotli is refused from its headers: nothing decoded, checked or signed", async () => {
+    const asked: Array<string | undefined> = [];
+    const server = createServer((req, res) => {
+      asked.push(req.headers["accept-encoding"]);
+      res.writeHead(402, { "content-type": "application/json", "content-encoding": "br" });
+      res.end(brotliCompressSync(JSON.stringify({ x402Version: 2, accepts: [] })));
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const { port } = server.address() as AddressInfo;
+    const agent = new Agent();
+    // The payer's own resource fetch, over a plain Agent and with the public host pointed at this
+    // loopback server (publicOnlyFetch would refuse it): only the content-coding guard is under test.
+    const guarded = resourceFetch(() => agent);
+    const payer = createPayer({
+      privateKey: generatePrivateKey(),
+      fetch: (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        return guarded(`http://127.0.0.1:${port}${url.pathname}${url.search}`, input instanceof Request ? input : init);
+      },
+    });
+    const w = world(issuer);
+    const s = await session({ fetch: w.fetch, creditToken: TOKEN, payer });
+    try {
+      const r = await call(s.client, "x402check_pay", { url: "https://shop.example/v1/report" });
+      assert.deepEqual([r.structuredContent?.outcome, r.structuredContent?.payment_sent, errorCode(r)], ["refused", false, "unrequested_encoding"]);
+      assert.match(r.text, /Why: the resource answered in a content coding it was not asked for/);
+      assert.deepEqual(asked, ["gzip, deflate"]);
+      assert.equal(w.checks.length, 0, "no check was bought");
+    } finally {
+      await s.close();
+      await agent.close();
+      await new Promise((done) => server.close(done));
     }
   });
 });

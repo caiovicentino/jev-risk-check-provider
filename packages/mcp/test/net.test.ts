@@ -2,8 +2,22 @@
 // and again on the addresses its host name resolves to, with the connection pinned to them.
 import assert from "node:assert/strict";
 import type { LookupAddress } from "node:dns";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, test } from "node:test";
-import { isPublicAddress, NonPublicAddressError, publicOnlyFetch, publicOnlyLookup, type Resolver } from "../src/net.js";
+import zlib, { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
+import { Agent, fetch as undiciFetch } from "undici";
+import {
+  ACCEPT_ENCODING,
+  codingsAccepted,
+  isPublicAddress,
+  NonPublicAddressError,
+  publicOnlyFetch,
+  publicOnlyLookup,
+  type Resolver,
+  resourceFetch,
+  UnrequestedEncodingError,
+} from "../src/net.js";
 import { resourceUrl } from "../src/pay.js";
 
 const PUBLIC = ["8.8.8.8", "1.1.1.1", "93.184.215.14", "100.63.255.255", "100.128.0.1", "172.32.0.1", "192.0.1.1", "223.255.255.255", "2606:4700:4700::1111", "2001:4860:4860::8888", "2a00:1450:4001:82b::200e", "2001:200::1"];
@@ -117,5 +131,77 @@ describe("publicOnlyLookup: the connection gets exactly the addresses checked", 
     });
     await assert.rejects(fetch("https://api.weather.example/v1"), (err: unknown) => err instanceof Error && err.cause instanceof NonPublicAddressError);
     assert.deepEqual(asked, ["api.weather.example"]);
+  });
+});
+
+// CVE-2026-111497 (2026-10-21): the Brotli decoder of Node.js before 22.23.4, 24.22.1 and 26.12.1
+// writes out of bounds on a crafted stream. A resource is any server, so x402check_pay asks for gzip
+// or deflate only and refuses any other coding from the headers, before a decoder exists.
+describe("content codings a resource may answer in", () => {
+  test("codingsAccepted reads every Content-Encoding header, in any case and spacing", () => {
+    const h = (...pairs: string[]) => pairs.map((p) => Buffer.from(p));
+    assert.equal(codingsAccepted(h()), true);
+    assert.equal(codingsAccepted(h("Content-Type", "application/json")), true);
+    assert.equal(codingsAccepted(h("content-encoding", "gzip")), true);
+    assert.equal(codingsAccepted(h("Content-Encoding", " X-GZIP , deflate,, identity ")), true);
+    assert.equal(codingsAccepted(h("Content-Encoding", "")), true);
+    assert.equal(codingsAccepted(h("Content-Encoding", "br")), false);
+    assert.equal(codingsAccepted(h("CONTENT-ENCODING", "GZIP, BR")), false);
+    assert.equal(codingsAccepted(h("Content-Encoding", "gzip", "content-encoding", "br")), false, "a second header counts too");
+    assert.equal(codingsAccepted(h("Content-Encoding", "zstd")), false);
+    assert.equal(codingsAccepted(["content-encoding", "br"]), false, "string headers are read too");
+  });
+
+  test("a resource that answers in Brotli is refused before anything is decoded; gzip, deflate and none are read", async () => {
+    const seen: Array<string | undefined> = [];
+    const body = JSON.stringify({ ok: true });
+    const server = createServer((req, res) => {
+      seen.push(req.headers["accept-encoding"]);
+      const answer: Record<string, [string | undefined, Buffer]> = {
+        "/br": ["br", brotliCompressSync(body)],
+        "/mixed": ["GZIP, br", brotliCompressSync(gzipSync(body))],
+        "/zstd": ["zstd", Buffer.from(body)],
+        "/gzip": ["gzip", gzipSync(body)],
+        "/deflate": ["deflate", deflateSync(body)],
+        "/plain": [undefined, Buffer.from(body)],
+      };
+      const [coding, bytes] = answer[req.url ?? ""] ?? [undefined, Buffer.from("{}")];
+      res.writeHead(402, { "content-type": "application/json", ...(coding ? { "content-encoding": coding } : {}) });
+      res.end(bytes);
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const { port } = server.address() as AddressInfo;
+    // fetch creates its decoders through node:zlib's exports: count the Brotli ones (the property is read-only, not frozen).
+    const decoders = { brotli: 0 };
+    const original = Object.getOwnPropertyDescriptor(zlib, "createBrotliDecompress") as PropertyDescriptor;
+    const agent = new Agent();
+    try {
+      Object.defineProperty(zlib, "createBrotliDecompress", {
+        ...original,
+        value: (...args: Parameters<typeof zlib.createBrotliDecompress>) => {
+          decoders.brotli++;
+          return (original.value as typeof zlib.createBrotliDecompress)(...args);
+        },
+      });
+      // The resource fetch over a plain Agent: publicOnlyFetch's own refuses this loopback server.
+      const fetch = resourceFetch(() => agent);
+      for (const path of ["/br", "/mixed", "/zstd"]) {
+        await assert.rejects(fetch(`http://127.0.0.1:${port}${path}`), (err: unknown) => err instanceof Error && err.cause instanceof UnrequestedEncodingError, path);
+      }
+      assert.equal(decoders.brotli, 0, "no Brotli decoder was created");
+      for (const path of ["/gzip", "/deflate", "/plain"]) {
+        const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers: { "accept-encoding": "br" } });
+        assert.equal(res.status, 402, path);
+        assert.deepEqual(await res.json(), { ok: true }, path);
+      }
+      assert.deepEqual(new Set(seen), new Set([ACCEPT_ENCODING]), "every request asks for gzip or deflate only, whatever the caller set");
+      // The same response through undici's fetch without the guard (a benign stream): the count above means something.
+      assert.deepEqual(await (await undiciFetch(`http://127.0.0.1:${port}/br`, { dispatcher: agent })).json(), { ok: true });
+      assert.equal(decoders.brotli, 1, "the unguarded fetch decoded Brotli");
+    } finally {
+      Object.defineProperty(zlib, "createBrotliDecompress", original);
+      await agent.close();
+      await new Promise((done) => server.close(done));
+    }
   });
 });
