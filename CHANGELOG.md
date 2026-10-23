@@ -7,10 +7,16 @@ Each release's full notes and evidence are on the [releases page](https://github
 These changes follow the security releases of 2026-10-21: Node.js 22.23.4, 24.22.1 and 26.12.1, Brotli 1.2.1, and, on 2026-10-15, undici 6.29.1.
 
 `x402check_pay` fetches resources from servers it does not know, in the process that holds the payer key. Three changes protect that fetch:
-- **Brotli is never decoded (CVE-2026-111497, high).** The Brotli decoder writes out of bounds on a crafted stream, which permits remote code execution. Node.js bundles that decoder before 22.23.4, 24.22.1 and 26.12.1, and fetch runs it on any response marked `Content-Encoding: br`.
+- **Brotli from a resource is never decoded (CVE-2026-111497, high).** The Brotli decoder writes out of bounds on a crafted stream, which permits remote code execution. Node.js bundles that decoder before 22.23.4, 24.22.1 and 26.12.1, and fetch runs it on any response marked `Content-Encoding: br`.
   - The resource fetch now asks for gzip or deflate only. A response in any other coding is refused from its headers, before fetch creates a decoder: `refused`, `unrequested_encoding`, nothing paid.
-  - This holds on any Node.js version the server runs on.
-  - `test/net.test.ts` runs a real server answering in br, a mixed coding and zstd, and counts the Brotli decoders fetch creates: none. `test/pay-security.test.ts` runs the same case end to end.
+  - A response to the paid request in such a coding is not read either. Its receipt goes unread with it, so the outcome is `failed` and `payment_unconfirmed`, and the message says why.
+  - This holds on any Node.js version, for the resources this server fetches itself. Two things are not covered:
+    - a custom `fetch` (`ServerConfig.fetch`, for embedding), which must refuse such codings itself;
+    - x402check's own API and DID document, fetched with Node.js's fetch over TLS from x402check.xyz. These are decoded as the installed Node.js decodes them, so run a patched release.
+  - Tests:
+    - `test/net.test.ts` runs a real server answering in br, a mixed coding and zstd, and counts the Brotli decoders fetch creates: none;
+    - `test/pay-security.test.ts` runs both cases end to end;
+    - an independent review tried obs-fold, duplicate headers, 1xx and 101, redirects, connection reuse and smuggled responses, and found no bypass.
 - **undici 6.29.0 → 6.29.1.** A malicious server could crash the process in two ways: more than five content codings with the connection closed early (CVE-2026-109869, high), or a TLS 1.2 renegotiation to another certificate (CVE-2026-87018, high).
   - The DNS pinning that keeps resource connections on public addresses is not affected by CVE-2026-109383, the TLS options undici's `Agent` dropped: the pinning passes its `lookup` through `connect`, which kept it.
 - **Node.js 22 or later** (`engines`). Node.js 20 reached its end of life on 2026-04-30 and gets no security releases. The README asks for the line's latest security release.

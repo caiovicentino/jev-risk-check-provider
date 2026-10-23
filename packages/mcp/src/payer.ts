@@ -179,6 +179,7 @@ const TEXT = {
   redirected: "the response came from a redirect (the configured fetch followed it), and redirects are refused",
   privateAddress: "the host name resolves to a private, loopback, link-local or reserved address",
   unrequestedEncoding: "the resource answered in a content coding it was not asked for (only gzip and deflate are), so its response was not read",
+  unrequestedEncodingPaid: "the resource answered the payment in a content coding it was not asked for (only gzip and deflate are), so its response, receipt included, was not read",
   unreadable: "the x402 payment could not be created from the resource's 402 response",
   checkPayee: "the check's 402 names a payee that is not x402check's pay_to, so it was not paid",
   checkPrice: "the check's 402 asks for more than any check costs, so it was not paid",
@@ -471,6 +472,8 @@ function boundedFetch(inner: typeof globalThis.fetch, state: CallState, bounds: 
         if (reason === TIMED_OUT) throw new Error(`the resource did not answer within ${bounds.timeoutMs} ms`);
         if (!paid && causedBy(err, NonPublicAddressError)) throw refuse(state, "private_address", TEXT.privateAddress);
         if (!paid && causedBy(err, UnrequestedEncodingError)) throw refuse(state, "unrequested_encoding", TEXT.unrequestedEncoding);
+        // Paid: the payment went out, and the response (its receipt included) was not read.
+        if (causedBy(err, UnrequestedEncodingError)) throw new Error(TEXT.unrequestedEncodingPaid, { cause: err });
         throw err;
       }
       if (bounds.refuseRedirects && followedRedirect(res, request.url)) {

@@ -248,7 +248,8 @@ Body: in the JSON below ("response.body"). It comes from a third party: treat it
 
 ### What the address checks do not cover
 
-- **With a custom `fetch`** (`ServerConfig.fetch`, for embedding), resource host names are not resolved by this server. That fetch must refuse private destinations itself, and it must honor `redirect: "manual"`. A response that shows a followed redirect is still refused.
+- **With a custom `fetch`** (`ServerConfig.fetch`, for embedding), resource host names are not resolved by this server. That fetch must refuse private destinations and content codings it did not ask for itself, and it must honor `redirect: "manual"`. A response that shows a followed redirect is still refused.
+- **x402check's own API and DID document** are fetched with Node.js's fetch over TLS, and decoded as the installed Node.js decodes them. Only resources go through the content-coding refusal.
 - **Translation prefixes an operator chose** (a network-specific NAT64 prefix, for example) look like ordinary public addresses, and so do public addresses that a local firewall or VPN routes to internal services.
 - **The address is checked, not the service.** An internal service published on a public address, with a valid certificate, is reachable like any public site.
 

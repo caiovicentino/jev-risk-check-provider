@@ -85,9 +85,10 @@ export interface ServerConfig {
    * proxies). The payer wraps it. For resources it receives `redirect: "manual"` and MUST honor
    * it: a response that shows a followed redirect (`redirected`, or a `url` other than the one
    * requested) is refused. With a custom fetch, resource host names are not resolved by this
-   * server: refusing hosts that resolve to private addresses is then the fetch's job. Without
-   * one, resources are fetched only from public addresses (host names resolved, connections
-   * pinned to the addresses checked).
+   * server: refusing hosts that resolve to private addresses, and content codings it did not ask
+   * for (Brotli: CVE-2026-111497), is then the fetch's job. Without one, resources are fetched
+   * only from public addresses (host names resolved, connections pinned to the addresses
+   * checked), in gzip, deflate or no coding.
    */
   fetch?: FetchLike | undefined;
   /** Per API call. Default 30000. */

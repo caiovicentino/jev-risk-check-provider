@@ -643,3 +643,37 @@ describe("content codings a resource may answer in (CVE-2026-111497)", () => {
     }
   });
 });
+
+describe("content codings on the paid request (CVE-2026-111497)", () => {
+  test("a paid response in Brotli is not decoded, and the outcome says why the receipt is unknown", async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json", "content-encoding": "br" });
+      res.end(brotliCompressSync(JSON.stringify({ ok: true })));
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const { port } = server.address() as AddressInfo;
+    const agent = new Agent();
+    const guarded = resourceFetch(() => agent);
+    // The 402 comes from the stub merchant; the request that carries the payment goes to the loopback server, guarded.
+    const payer = createPayer({
+      privateKey: generatePrivateKey(),
+      fetch: (input, init) => {
+        const request = new Request(input, init);
+        if (!request.headers.has("payment-signature")) return Promise.resolve(paymentRequired());
+        return guarded(`http://127.0.0.1:${port}${new URL(request.url).pathname}`, request);
+      },
+    });
+    const w = world(issuer);
+    const s = await session({ fetch: w.fetch, creditToken: TOKEN, payer });
+    try {
+      const r = await call(s.client, "x402check_pay", { url: RESOURCE });
+      assert.deepEqual([r.structuredContent?.outcome, r.structuredContent?.payment_sent, errorCode(r)], ["failed", true, "payment_unconfirmed"]);
+      assert.match(r.text, /answered the payment in a content coding it was not asked for/);
+      assert.equal(w.checks.length, 1);
+    } finally {
+      await s.close();
+      await agent.close();
+      await new Promise((done) => server.close(done));
+    }
+  });
+});
