@@ -16,7 +16,7 @@ The lead agent's daily routine for x402check: check production and the repositor
 2. **Check.** `npx tsx scripts/daily-check.ts` takes about a minute, reads only and costs nothing. It writes `.cache/maintenance/<date>.txt` and `.json`, and keeps `state.json` to compare with the next run. Exit status 1 means a `FAIL`. It covers:
    - production: `/healthz`; `/status` (facilitators, offered routes and margins, attestation, model canary, feeds against the published release, kit-watch lag, new gaps, `unbroken_since`, queued reads);
    - the unpaid black box: the 402 challenge against the routes and the price table, 405/422 paths, HTTPS, security headers, the JWKS against the attestation thumbprint, discovery documents;
-   - GitHub: CI on main, the feeds workflow, CodeQL and Dependabot alerts, open PRs, the release of the deployed version, new comments in the AGENTS.md §2.6 threads;
+   - GitHub: CI on main, the feeds workflow, CodeQL and Dependabot alerts, open PRs, the release of the deployed version, new comments in the AGENTS.md §2.6 threads, and any thread whose last comment is someone else's, newer than ours and than its `readThrough` (reported daily until answered or recorded in §2.6);
    - the deployed commit against main, and the embedded OFAC snapshot against the published release;
    - money: new settlements (KV `st:*`), each payer read on-chain, outside payments with the caller's user agent, payments settled for a client who left (`undelivered`: a verdict reaches its payer on a resend of the same payment within a day, and the record then says `delivered: "resent"`; a credit token lost that way is the owner's to make right), and the probe budget;
    - npm versions against the repository.

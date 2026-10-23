@@ -40,15 +40,20 @@ const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a
 const WALLET = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 /** Our own GitHub account: its comments are not news. */
 const OWN_LOGIN = "caiovicentino";
-/** The upstream threads AGENTS.md §2.6 follows. */
-export const THREADS: ReadonlyArray<{ repo: string; number: number; label: string }> = [
-  { repo: "x402-foundation/x402", number: 2300, label: "x402#2300 (trust provider)" },
-  { repo: "x402-foundation/x402", number: 3597, label: "x402#3597 (our issue)" },
-  { repo: "x402-foundation/x402", number: 2422, label: "x402#2422 (risk-check spec)" },
-  { repo: "PayAINetwork/docs", number: 98, label: "PayAI docs#98 (shadow proposal)" },
-  { repo: "solana-foundation/kora", number: 682, label: "kora#682 (fee-payer gate)" },
-  { repo: "romudille-bit/agentpay", number: 9, label: "agentpay#9 (pay_to screen)" },
-  { repo: "romudille-bit/awesome-x402", number: 1, label: "awesome-x402#1 (our listing PR)" },
+/**
+ * The upstream threads AGENTS.md §2.6 follows. `readThrough`: the newest comment from others that
+ * the lead agent has read and recorded in §2.6. A later one that is also newer than our own last
+ * comment is reported every day until it is answered or read (move `readThrough` past it), so a
+ * reply cannot hide behind the first run's baseline (kora#682 waited 17 days that way).
+ */
+export const THREADS: ReadonlyArray<{ repo: string; number: number; label: string; readThrough: string }> = [
+  { repo: "x402-foundation/x402", number: 2300, label: "x402#2300 (trust provider)", readThrough: "2026-10-14T05:55:24Z" },
+  { repo: "x402-foundation/x402", number: 3597, label: "x402#3597 (our issue)", readThrough: "2026-09-29T07:31:38Z" },
+  { repo: "x402-foundation/x402", number: 2422, label: "x402#2422 (risk-check spec)", readThrough: "2026-05-25T16:31:12Z" },
+  { repo: "PayAINetwork/docs", number: 98, label: "PayAI docs#98 (shadow proposal)", readThrough: "2026-09-29T00:00:00Z" },
+  { repo: "solana-foundation/kora", number: 682, label: "kora#682 (fee-payer gate)", readThrough: "2026-10-06T14:48:40Z" },
+  { repo: "romudille-bit/agentpay", number: 9, label: "agentpay#9 (pay_to screen)", readThrough: "2026-10-02T16:04:36Z" },
+  { repo: "romudille-bit/awesome-x402", number: 1, label: "awesome-x402#1 (our listing PR)", readThrough: "2026-10-01T00:00:00Z" },
 ];
 /** EVM RPCs for networks the evaluation tables do not cover (settlement payers only). */
 const EXTRA_RPC: Record<string, readonly string[]> = {
@@ -408,6 +413,13 @@ async function main(): Promise<void> {
           }
         }
         seen[key] = { comments: issue.comments, updated_at: issue.updated_at };
+        // The last word: someone else's comment, newer than ours and than what §2.6 records as read.
+        const all = gh<Array<{ user: { login: string }; created_at: string; html_url: string }>>(["api", `repos/${t.repo}/issues/${t.number}/comments?per_page=100`]);
+        const ours = all.filter((c) => c.user.login === OWN_LOGIN).at(-1)?.created_at ?? "";
+        const theirs = all.filter((c) => c.user.login !== OWN_LOGIN && !c.user.login.endsWith("[bot]")).at(-1);
+        if (theirs && theirs.created_at > ours && theirs.created_at > t.readThrough && !checks.some((c) => c.id === `threads.${key}`)) {
+          add(`threads.${key}`, "warn", `${t.label}: unanswered since ${theirs.created_at.slice(0, 16)}, ${clean(theirs.user.login, 40)} ${clean(theirs.html_url, 120)}: read it, answer or record it in AGENTS.md §2.6, then move readThrough in scripts/daily-check.ts`);
+        }
       }
       next.threads = seen;
       if (!checks.some((c) => c.id.startsWith("threads."))) add("threads", "ok", prev?.threads ? "no new comments from others" : `baseline recorded for ${THREADS.length} threads`);
