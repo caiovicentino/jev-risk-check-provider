@@ -348,7 +348,7 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
 
 ## 5. State as of 2026-10-18 (update when it changes)
 
-- **Production:** v0.6.20 (2026-10-18, commit `52ec765`; redeployed on 2026-10-22 from `818709c`, with the embedded OFAC snapshot synced to the 2026-10-21 release, whose addresses are unchanged; `/healthz` names the commit). Each daily maintenance run reviews the previous day's fixes before they ship:
+- **Production:** v0.6.20 (2026-10-18, commit `52ec765`; redeployed on 2026-10-22 from `818709c`, with the embedded OFAC snapshot synced to the 2026-10-21 release, whose addresses are unchanged, and on 2026-10-24 from `2149201`, with zod 4.6.7 in the lockfile; `/healthz` names the commit). Each daily maintenance run reviews the previous day's fixes before they ship:
   - v0.6.20: a verdict paid for reaches its payer on a resend. When the client left during its evaluation, the verdict is kept with the payment's claim for a day, and the same payment resent for the same request receives it (`X-Payment-Delivery: resent`), with no second evaluation or charge. Proven in production (`eval/disconnect.ts`, 3 s). Four more bridges read as `cross_chain` (Polygon's unified bridge, Celer, Gnosis Chain's AMB, zkSync Era).
   - v0.6.19 (commit `904d4c2`): any event from a bridge or message layer the simulation knows makes it incomplete (`cross_chain`, review). These are OP Stack and Arbitrum deposits, Across, CCTP, LayerZero, Wormhole, Hyperlane, Linea, Scroll, Polygon PoS and Starknet, each event confirmed in live logs. Before it, a deposit or transfer to someone else on another chain came back from the simulation `ok`.
   - v0.6.18 (2026-10-17, commit `66ff954`): a verdict produced for a client who left is settled, and the settlement is recorded `undelivered`. Withdrawals to L1 make the simulation incomplete (`l1_withdrawal`).
@@ -394,9 +394,9 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - In production from credits, 4/4 decisions agreed (both legitimate cases revert).
   - Probe credits: `~/.config/paysol/x402check-credit-token` (mode 600; never print it).
 - **Colosseum hackathon:** the owner submitted the project on 2026-10-06 with the answers in `docs/hackathon/submission-form.md` (v0.6.4 facts, Solana first, AI-assisted reviews disclosed, revenue stated honestly). Keep production healthy and the evidence current while it is judged.
-- **Revenue from outside:** $0.0525 by 2026-10-23, all from paying monitors and directories on Base, none yet from a customer:
+- **Revenue from outside:** $0.0560 by 2026-10-24, all from paying monitors and directories on Base, none yet from a customer:
   - `lumiere-paycheck-prober`: one check and a batch of two on 2026-10-01 ($0.0105);
-  - vet402's observatory (`vet402-observatory-l1`, which buys from Bazaar-listed endpoints to check that payment settles and the service delivers): one check on 2026-10-03 and one on 2026-10-12 ($0.007, settled by CDP; we delivered);
+  - vet402's observatory (`vet402-observatory-l1`, which buys from Bazaar-listed endpoints to check that payment settles and the service delivers): one check each on 2026-10-03, 2026-10-12 and 2026-10-23 ($0.0105, settled by CDP; we delivered);
   - `cog-x402-audit/2` (cog.xyz): a check and a batch of two on 2026-10-08 ($0.0105);
   - a payer from a Cloudflare Worker in Kazakhstan, a minute after `verdikt-discovery/1` (verdikt.bond) crawled us: three checks on 2026-10-12 ($0.0105);
   - `nohumans-scout/1.0` (nohumans.directory): one check on 2026-10-15 and a batch of two on 2026-10-19 ($0.0105);
