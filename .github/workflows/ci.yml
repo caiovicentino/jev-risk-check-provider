@@ -29,7 +29,8 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm test
       - name: production dependency audit
-        run: npm audit --omit=dev --audit-level=high
+        # High and critical findings fail, except advisories accepted for exact paths with a reason (scripts/audit-gate.mjs).
+        run: node scripts/audit-gate.mjs
   worker-bundle:
     # Builds the production Worker bundle the way a deploy does, without uploading it:
     # `wrangler deploy --dry-run` needs no Cloudflare credentials. A bundling error (a
@@ -120,4 +121,4 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - name: production dependency audit (what npm users install)
-        run: npm audit --omit=dev --audit-level=high
+        run: node ../../scripts/audit-gate.mjs
