@@ -8,6 +8,11 @@ Each release's full notes and evidence are on the [releases page](https://github
 - **The Worker's lockfile:** zod 4.6.7.
 - **Development tooling:** the root `overrides` hold undici at 7.30.1 (GHSA-xjj6-f33q-929c, high). Before this, miniflare, wrangler's local runtime, pinned 7.29.1. The Snap's tooling moves to fast-uri 3.1.9 and body-parser 2.4.0.
 - **CI:** the production dependency audit is `scripts/audit-gate.mjs`. It fails on any high or critical finding, except an advisory accepted for exact install paths with a reason and a review date. That covers the zod 3 copies that `@x402/core` and `@x402/evm` require, since no zod 3 release fixes this advisory.
+- **The audit gate, hardened (2026-10-25 review):**
+  - It audits even when run through a symlinked path: its main-module guard compares real paths. Before, it exited 0 without auditing.
+  - An acceptance names the versions installed at its paths, read from the lockfile.
+  - A moderate or low advisory never needs an acceptance, even on an accepted path.
+  - A cycle among covered packages passes.
 
 ## `@x402check/mcp` 0.3.3 — 2026-10-23 (on npm; tag `mcp-v0.3.3`)
 
