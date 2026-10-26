@@ -97,4 +97,6 @@ test("CI runs the gate, not a bare npm audit, in the root and in every package",
   assert.doesNotMatch(ci, /npm audit --omit=dev --audit-level/);
   assert.match(ci, /run: node scripts\/audit-gate\.mjs/);
   assert.match(ci, /run: node \.\.\/\.\.\/scripts\/audit-gate\.mjs/);
+  // An offline npm (.npmrc or npm_config_offline) would return an empty report with no error.
+  assert.match(readFileSync(new URL("../scripts/audit-gate.mjs", import.meta.url), "utf8"), /"--offline=false"/);
 });

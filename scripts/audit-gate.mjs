@@ -87,7 +87,8 @@ const realpath = (p) => {
 if (process.argv[1] && realpath(fileURLToPath(import.meta.url)) === realpath(process.argv[1])) {
   let raw;
   try {
-    raw = execFileSync("npm", ["audit", "--omit=dev", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 });
+    // --offline=false: an offline npm (.npmrc or npm_config_offline) returns an empty report with no error.
+    raw = execFileSync("npm", ["audit", "--omit=dev", "--json", "--offline=false"], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 });
   } catch (err) {
     // npm audit exits non-zero whenever it finds anything; its JSON report is still on stdout.
     raw = err.stdout;

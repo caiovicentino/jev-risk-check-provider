@@ -518,14 +518,17 @@ async function main(): Promise<void> {
           continue;
         }
         const pay: OutsidePayment = { key, at: rec.at ?? "", network, path: rec.path ?? "", payer: who.payer, micro: rec.micro ?? who.micro, ...(rec.undelivered ? { undelivered: true } : {}) };
-        // Who called: the analytics rows of that path, around the settlement record's time. Any request
-        // source: a payer can call from another zone's Worker (requestSource "edgeWorkerFetch").
+        // Who called: the paid POSTs to that path around the settlement record's time, from any request
+        // source (a payer can call from another zone's Worker: "edgeWorkerFetch"). More than one candidate
+        // is reported as ambiguous rather than credited to the first.
         if (zone && pay.at) {
           const t = Date.parse(pay.at);
-          const q = `query($z:String!,$a:Time!,$b:Time!,$p:String!){viewer{zones(filter:{zoneTag:$z}){httpRequestsAdaptiveGroups(limit:5,filter:{datetime_geq:$a,datetime_lt:$b,clientRequestPath:$p,edgeResponseStatus:200}){count dimensions{userAgent clientCountryName requestSource}}}}}`;
-          const g = await cf<{ data?: { viewer?: { zones?: Array<{ httpRequestsAdaptiveGroups?: Array<{ dimensions: { userAgent: string; clientCountryName: string; requestSource: string } }> }> } } }>(token, "/graphql", { method: "POST", body: JSON.stringify({ query: q, variables: { z: zone, a: new Date(t - 120_000).toISOString(), b: new Date(t + 30_000).toISOString(), p: pay.path } }) }).catch(() => null);
-          const row = g?.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups?.[0]?.dimensions;
-          if (row) Object.assign(pay, { ua: row.userAgent.slice(0, 80), country: row.clientCountryName, ...(row.requestSource === "edgeWorkerFetch" ? { worker: true } : {}) });
+          const q = `query($z:String!,$a:Time!,$b:Time!,$p:String!){viewer{zones(filter:{zoneTag:$z}){httpRequestsAdaptiveGroups(limit:5,filter:{datetime_geq:$a,datetime_lt:$b,clientRequestPath:$p,clientRequestHTTPMethodName:"POST",edgeResponseStatus:200}){count dimensions{userAgent clientCountryName requestSource}}}}}`;
+          const g = await cf<{ data?: { viewer?: { zones?: Array<{ httpRequestsAdaptiveGroups?: Array<{ count: number; dimensions: { userAgent: string; clientCountryName: string; requestSource: string } }> }> } } }>(token, "/graphql", { method: "POST", body: JSON.stringify({ query: q, variables: { z: zone, a: new Date(t - 120_000).toISOString(), b: new Date(t + 30_000).toISOString(), p: pay.path } }) }).catch(() => null);
+          const rows = g?.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups ?? [];
+          const row = rows[0]?.dimensions;
+          if (rows.length === 1 && rows[0]?.count === 1 && row) Object.assign(pay, { ua: row.userAgent.slice(0, 80), country: row.clientCountryName, ...(row.requestSource === "edgeWorkerFetch" ? { worker: true } : {}) });
+          else if (rows.length > 0) pay.ua = `ambiguous: ${rows.reduce((n, r) => n + r.count, 0)} paid calls (${rows.map((r) => r.dimensions.userAgent.slice(0, 30)).join(" | ")})`.slice(0, 120);
         }
         found.push(pay);
       }
