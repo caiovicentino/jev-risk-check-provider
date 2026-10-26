@@ -126,7 +126,7 @@ Plain HTTP is never served: pages get a 301 to HTTPS and API calls a 403. Every 
 |---|---|
 | Revenue addresses (`pay_to`) | EVM `0xbF88b1F49B5e8Ec386289341c4a5ee00bB0E0178`, Solana `Bofhoe2ye2adNQwZJtLepeKrBZq8CtHzRwPJXgWDH69X` |
 | Probe payer (eval spending) | EVM `0xB48057E647B2572f5eAe241b515fBc58B7cE249E`, $0.040 of USDC on Base on 2026-10-19 (after the v0.6.20 disconnect probes), and $0.001 of probe credits (one `security:v5` run costs about $0.10: the daily routine runs it weekly once the payer holds $0.15). Its keys are in the owner's `~/.config/paysol/`, read only by `eval/paid-fetch.ts` and the money scripts. |
-| Facilitators | Coinbase CDP (Base, Polygon, Arbitrum: $0.001 per settlement after 1,000 free a month; it added Monad, where that fee exceeds the $0.001 price), PayAI (Sei, and the EVM fallback: gas + 30%), Dexter (Solana and Avalanche, free; on Monad it set a $0.0022 floor, above our price). On 2026-10-24 Avalanche was offered again through Dexter (Permit2), and Monad was not offered (`unprofitable`) until its price is raised, which is the owner's decision. A route that would lose money is never offered. Live routing is in `/status`. |
+| Facilitators | Coinbase CDP (Base, Polygon, Arbitrum: $0.001 per settlement after 1,000 free a month; it added Monad, where that fee exceeds the $0.001 price), PayAI (Sei, and the EVM fallback: gas + 30%), Dexter (Solana and Monad, free, with a floor per network). Dexter's routes move from day to day. On 2026-10-24 it served Avalanche (Permit2) but set a $0.0022 floor on Monad, so Monad was not offered. On 2026-10-26 Monad was back through Dexter at a 93% margin (floor about $0.0002), while Avalanche was not offered: Dexter no longer routed it, and PayAI's fee there, $0.0055, is above the $0.001 price. Raising a network's price to bring it back is the owner's decision. A route that would lose money is never offered. Live routing is in `/status`. |
 
 ### 2.5 Where x402check is listed
 
@@ -394,11 +394,11 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - In production from credits, 4/4 decisions agreed (both legitimate cases revert).
   - Probe credits: `~/.config/paysol/x402check-credit-token` (mode 600; never print it).
 - **Colosseum hackathon:** the owner submitted the project on 2026-10-06 with the answers in `docs/hackathon/submission-form.md` (v0.6.4 facts, Solana first, AI-assisted reviews disclosed, revenue stated honestly). Keep production healthy and the evidence current while it is judged.
-- **Revenue from outside:** $0.0560 by 2026-10-24, all from paying monitors and directories on Base, none yet from a customer:
+- **Revenue from outside:** $0.0580 by 2026-10-26, all from paying monitors and directories, none yet from a customer:
   - `lumiere-paycheck-prober`: one check and a batch of two on 2026-10-01 ($0.0105);
   - vet402's observatory (`vet402-observatory-l1`, which buys from Bazaar-listed endpoints to check that payment settles and the service delivers): one check each on 2026-10-03, 2026-10-12 and 2026-10-23 ($0.0105, settled by CDP; we delivered);
   - `cog-x402-audit/2` (cog.xyz): a check and a batch of two on 2026-10-08 ($0.0105);
-  - a payer from a Cloudflare Worker in Kazakhstan, a minute after `verdikt-discovery/1` (verdikt.bond) crawled us: three checks on 2026-10-12 ($0.0105);
+  - verdikt.bond, by its pattern: a payer calling from another zone's Cloudflare Worker in Kazakhstan, right after `verdikt-discovery/1` crawled us. Three checks on Base on 2026-10-12 ($0.0105), and on 2026-10-26 the first outside payment on Solana: one check ($0.002, through Dexter). The Solana wallet `EQiAcdJC…FgW9` pays many x402 sellers, about every half hour. Until 2026-10-26 the daily check looked only at requests from browsers and direct clients, so it missed callers that are Workers; it now reports them;
   - `nohumans-scout/1.0` (nohumans.directory): one check on 2026-10-15 and a batch of two on 2026-10-19 ($0.0105);
   - `LumiTrustBuyer/1.0` (Lumi, api.lumitrades.io: a trust observatory that test-buys Bazaar listings from its Base wallet and publishes signed receipts): one check on 2026-10-22 ($0.0035).
 

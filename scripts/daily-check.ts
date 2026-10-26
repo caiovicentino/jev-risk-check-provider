@@ -80,7 +80,7 @@ export type Status = {
   attestation: { ok: boolean; kid: string; thumbprint: string | null; reason?: string };
   model: { canary: { ok: boolean; stale: boolean; at: string } | null };
 };
-export type OutsidePayment = { key: string; at: string; network: string; path: string; payer: string; micro: number; ua?: string; country?: string; undelivered?: boolean };
+export type OutsidePayment = { key: string; at: string; network: string; path: string; payer: string; micro: number; ua?: string; country?: string; worker?: boolean; undelivered?: boolean };
 export type State = {
   at: string;
   kit_watch?: Record<string, { gaps: number; unbroken_since?: number }>;
@@ -518,13 +518,14 @@ async function main(): Promise<void> {
           continue;
         }
         const pay: OutsidePayment = { key, at: rec.at ?? "", network, path: rec.path ?? "", payer: who.payer, micro: rec.micro ?? who.micro, ...(rec.undelivered ? { undelivered: true } : {}) };
-        // Who called: the analytics rows of that path, around the settlement record's time.
+        // Who called: the analytics rows of that path, around the settlement record's time. Any request
+        // source: a payer can call from another zone's Worker (requestSource "edgeWorkerFetch").
         if (zone && pay.at) {
           const t = Date.parse(pay.at);
-          const q = `query($z:String!,$a:Time!,$b:Time!,$p:String!){viewer{zones(filter:{zoneTag:$z}){httpRequestsAdaptiveGroups(limit:5,filter:{datetime_geq:$a,datetime_lt:$b,clientRequestPath:$p,edgeResponseStatus:200,requestSource:"eyeball"}){count dimensions{userAgent clientCountryName}}}}}`;
-          const g = await cf<{ data?: { viewer?: { zones?: Array<{ httpRequestsAdaptiveGroups?: Array<{ dimensions: { userAgent: string; clientCountryName: string } }> }> } } }>(token, "/graphql", { method: "POST", body: JSON.stringify({ query: q, variables: { z: zone, a: new Date(t - 120_000).toISOString(), b: new Date(t + 30_000).toISOString(), p: pay.path } }) }).catch(() => null);
+          const q = `query($z:String!,$a:Time!,$b:Time!,$p:String!){viewer{zones(filter:{zoneTag:$z}){httpRequestsAdaptiveGroups(limit:5,filter:{datetime_geq:$a,datetime_lt:$b,clientRequestPath:$p,edgeResponseStatus:200}){count dimensions{userAgent clientCountryName requestSource}}}}}`;
+          const g = await cf<{ data?: { viewer?: { zones?: Array<{ httpRequestsAdaptiveGroups?: Array<{ dimensions: { userAgent: string; clientCountryName: string; requestSource: string } }> }> } } }>(token, "/graphql", { method: "POST", body: JSON.stringify({ query: q, variables: { z: zone, a: new Date(t - 120_000).toISOString(), b: new Date(t + 30_000).toISOString(), p: pay.path } }) }).catch(() => null);
           const row = g?.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups?.[0]?.dimensions;
-          if (row) Object.assign(pay, { ua: row.userAgent.slice(0, 80), country: row.clientCountryName });
+          if (row) Object.assign(pay, { ua: row.userAgent.slice(0, 80), country: row.clientCountryName, ...(row.requestSource === "edgeWorkerFetch" ? { worker: true } : {}) });
         }
         found.push(pay);
       }
@@ -533,7 +534,7 @@ async function main(): Promise<void> {
       next.settlements_seen = keys.filter((k) => !unresolvedKeys.has(k));
       const unresolved = unresolvedKeys.size;
       const total = outside.reduce((s, p) => s + p.micro, 0) / 1e6;
-      const fmt = (p: OutsidePayment) => `$${(p.micro / 1e6).toFixed(4)} ${short(p.network)} ${p.path} ${p.at.slice(0, 16)} from ${p.payer.slice(0, 10)}… ${p.ua ?? "(no user agent found)"}${p.country ? ` [${p.country}]` : ""}${p.undelivered ? " UNDELIVERED" : ""}`;
+      const fmt = (p: OutsidePayment) => `$${(p.micro / 1e6).toFixed(4)} ${short(p.network)} ${p.path} ${p.at.slice(0, 16)} from ${p.payer.slice(0, 10)}… ${p.ua ?? "(no user agent found)"}${p.country ? ` [${p.country}]` : ""}${p.worker ? " (from a Cloudflare Worker)" : ""}${p.undelivered ? " UNDELIVERED" : ""}`;
       // A payment that settled for a client who had left: a verdict, or a new credit token, reached nobody.
       const undelivered = found.filter((p) => p.undelivered);
       if (undelivered.length) add("revenue.undelivered", "warn", `${undelivered.length} payment(s) settled for a client who left, so what it paid for reached nobody: ${undelivered.map(fmt).join("; ")} (a verdict reaches its payer if the same payment is resent for the same request within a day; a new credit token on /v1/credits is the owner's to make right)`);
