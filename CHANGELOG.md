@@ -13,6 +13,7 @@ Each release's full notes and evidence are on the [releases page](https://github
   - An acceptance names the versions installed at its paths, read from the lockfile.
   - A moderate or low advisory never needs an acceptance, even on an accepted path.
   - A cycle among covered packages passes.
+  - It runs `npm audit --offline=false` (2026-10-26 review): an offline npm returns an empty report with no error.
 
 ## `@x402check/mcp` 0.3.3 — 2026-10-23 (on npm; tag `mcp-v0.3.3`)
 
