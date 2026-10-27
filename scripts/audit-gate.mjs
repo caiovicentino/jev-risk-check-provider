@@ -3,8 +3,8 @@
 // (AGENTS.md §2.1). It runs `npm audit --omit=dev` and fails on any high or critical finding,
 // except an advisory accepted below. An acceptance names the exact install paths it covers, the
 // versions installed there, and why. The same advisory on any other path or at any other version
-// still fails, as does any other high or critical advisory, and so does an acceptance past its
-// review date. A package flagged only through accepted or lesser findings (`via` names another
+// still fails, as does any other high or critical advisory, an acceptance past its review date,
+// and an audit that failed or gave a report in a format it does not read. A package flagged only through accepted or lesser findings (`via` names another
 // package) is covered by them.
 //
 //   node scripts/audit-gate.mjs        (from the directory to audit)
@@ -100,8 +100,13 @@ if (process.argv[1] && realpath(fileURLToPath(import.meta.url)) === realpath(pro
     console.error("audit-gate: npm audit did not produce a JSON report");
     process.exit(1);
   }
-  if (report.error) {
+  if (report?.error) {
     console.error(`audit-gate: npm audit failed: ${JSON.stringify(report.error).slice(0, 300)}`);
+    process.exit(1);
+  }
+  // Only the format this gate reads: any other report (a future npm's) would have no `vulnerabilities` and pass.
+  if (report?.auditReportVersion !== 2 || typeof report.vulnerabilities !== "object" || report.vulnerabilities === null) {
+    console.error(`audit-gate: unexpected npm audit report (auditReportVersion ${JSON.stringify(report?.auditReportVersion)}); update the gate to read it`);
     process.exit(1);
   }
   let failed;

@@ -14,6 +14,7 @@ Each release's full notes and evidence are on the [releases page](https://github
   - A moderate or low advisory never needs an acceptance, even on an accepted path.
   - A cycle among covered packages passes.
   - It runs `npm audit --offline=false` (2026-10-26 review): an offline npm returns an empty report with no error.
+  - It reads only npm's report format 2 (2026-10-27 review). A report in any other format, such as a future npm's, has no `vulnerabilities` to read; before, the gate passed it.
 
 ## `@x402check/mcp` 0.3.3 — 2026-10-23 (on npm; tag `mcp-v0.3.3`)
 

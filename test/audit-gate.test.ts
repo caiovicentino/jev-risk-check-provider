@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,29 @@ test("run through a symlink, the gate still audits: it never exits 0 without a r
     const run = spawnSync(process.execPath, [link], { cwd: dir, encoding: "utf8" });
     assert.equal(run.status, 1, run.stdout + run.stderr);
     assert.match(run.stderr, /audit-gate: npm audit failed: .*ENOLOCK/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a report in a format the gate does not read fails: it never passes on an empty reading", () => {
+  const dir = mkdtempSync(join(tmpdir(), "audit-gate-"));
+  try {
+    // An npm on PATH that prints a given report, the way a future npm with another format would.
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    const gate = fileURLToPath(new URL("../scripts/audit-gate.mjs", import.meta.url));
+    const run = (report: string) => {
+      writeFileSync(join(bin, "npm"), `#!/bin/sh\necho '${report}'\n`, { mode: 0o755 });
+      return spawnSync(process.execPath, [gate], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    };
+    for (const report of ['{"auditReportVersion":3,"advisories":{}}', "{}", "null", '{"auditReportVersion":2}']) {
+      const r = run(report);
+      assert.equal(r.status, 1, `${report}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /audit-gate: unexpected npm audit report/, report);
+    }
+    const ok = run('{"auditReportVersion":2,"vulnerabilities":{},"metadata":{"vulnerabilities":{"total":0}}}');
+    assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
