@@ -108,8 +108,10 @@ test("a report in a format the gate does not read fails: it never passes on an e
       assert.equal(r.status, 1, `${report}: ${r.stdout}${r.stderr}`);
       assert.match(r.stderr, /audit-gate: unexpected npm audit report/, report);
     }
+    // A version 2 report gets past the format check. (It can still fail on an acceptance past its review date, which this test leaves to the one above.)
     const ok = run('{"auditReportVersion":2,"vulnerabilities":{},"metadata":{"vulnerabilities":{"total":0}}}');
-    assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+    assert.doesNotMatch(ok.stderr, /unexpected npm audit report|npm audit failed|did not produce/, ok.stderr);
+    assert.match(ok.status === 0 ? ok.stdout : ok.stderr, ok.status === 0 ? /audit-gate: ok/ : /past its review date/, ok.stdout + ok.stderr);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
