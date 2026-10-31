@@ -36,7 +36,7 @@ Every verdict is an **ES256 attestation**. It states which checks the provider a
 | Assets parked in an unverified contract | simulation + Blockscout source verification | nothing in return, contract source not verified → **55** |
 | Drainer-kit code | logic-code fingerprints of contracts listed by Forta (embedded) and ScamSniffer (runtime) | the subject, or a contract in the simulated transaction, runs a listed drainer's code → **30** |
 | Address-poisoning look-alike | **kit watch** (our own scan of every Ethereum and Base block) | the wallet delegates (EIP-7702) to an address-poisoning executor → **20** (`address_poisoning`) |
-| Compromised wallet | kit watch | the wallet delegates to a labelled sweeper family → **20** (`compromised_wallet`); to code that forwards what it receives, with no label → **40** (`auto_forwarding_wallet`) |
+| Compromised wallet | kit watch | the wallet delegates to a labelled sweeper family → **20** (`compromised_wallet`); to a small forwarder (at most 1,024 bytes of code) that passes on what it receives, with no label → **40** (`auto_forwarding_wallet`) |
 | Drainer operator | kit watch | the address deployed drainer-kit code → **30** (`drainer_operator`). A forwarder's destinations are not flagged (v0.6.0): whoever deploys a forwarder chooses them |
 | Unverified spender | Blockscout source verification | approval or permit to an unverified contract → **75** and at least `medium` (review) |
 | Injected / manipulated intent | Jev typed questions over `context` (what the agent acted on) | model penalties and caps |
