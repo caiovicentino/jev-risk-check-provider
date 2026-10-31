@@ -38,6 +38,9 @@ export type Family = {
   /** Where the label comes from: forta, scamsniffer, exposure:<who>, explorer:blockscout, behaviour:auto-forward. */
   sources: string[];
   first_seen?: string;
+  /** A learned forwarder family's code (since v0.6.21; older ones take it from a verdict, `backfillFamilies`). */
+  bytes?: number;
+  code_kind?: string;
 };
 export type Registry = { updated_at: string; families: Family[] };
 
@@ -116,6 +119,69 @@ export function forwardingGeneralizes(verdict: Pick<DelegateVerdict, "bytes" | "
 }
 
 /**
+ * A forwarding verdict that does not generalize by what it records: one reached before v0.6.0,
+ * which recorded no code, or one for code that rule excludes. It flags no one until its code is
+ * read again (`settleForwarder`).
+ */
+export function unsettledForwarder(verdict: DelegateVerdict | undefined): boolean {
+  return verdict?.class === "forwarder" && !forwardingGeneralizes(verdict);
+}
+
+/**
+ * Such a verdict, settled by the delegate's code as read now: kept, with its code, when forwarding
+ * generalizes to it; otherwise "not forwarding", re-probed as usual (a probe that sees forwarding
+ * flags the probed account alone).
+ */
+export function settleForwarder(verdict: DelegateVerdict, f: Pick<CodeFacts, "kind" | "bytes">, nowS: number): DelegateVerdict {
+  const code = { bytes: f.bytes, code_kind: f.kind };
+  if (forwardingGeneralizes(code)) return { ...verdict, ...code };
+  return { class: "not_forwarding", at: nowS, probes: verdict.probes ?? 1, ...code, ...(verdict.family ? { family: verdict.family } : {}) };
+}
+
+/**
+ * Whether a read of a forwarder's code can settle its verdict. Deployed code cannot vanish (EIP-6780),
+ * so no code, a 7702 designator or a malformed answer (read as empty "tiny" code) is a bad read: the
+ * verdict waits for another.
+ */
+export function settles(f: Pick<CodeFacts, "kind" | "bytes">): boolean {
+  return f.kind !== "none" && f.kind !== "delegated" && f.bytes > 0;
+}
+
+/** Settles up to `max` unsettled forwarding verdicts by reading their code; an unreadable one waits. */
+export async function settleForwarders(delegates: Map<string, DelegateVerdict>, call: BatchCall, nowS: number, max = 50): Promise<number> {
+  const due = [...delegates].filter(([, v]) => unsettledForwarder(v)).slice(0, max);
+  if (!due.length) return 0;
+  const codes = await call(due.map(([d]) => ({ method: "eth_getCode", params: [d, "latest"] }))).catch(() => [] as unknown[]);
+  let settled = 0;
+  due.forEach(([d, v], i) => {
+    const f = typeof codes[i] === "string" ? codeFacts(codes[i] as string) : undefined;
+    if (!f || !settles(f)) return;
+    delegates.set(d, settleForwarder(v, f, nowS));
+    settled++;
+  });
+  return settled;
+}
+
+/**
+ * Learned forwarder families from before v0.6.21 recorded no code: each takes it from a verdict on
+ * one of its delegates that did. A learned family is logic code (it has a fingerprint), so only a
+ * verdict on logic code speaks for it: a proxy running that code carries the family id with its own
+ * code. Until then it generalizes to no one. Returns whether any changed.
+ */
+export function backfillFamilies(learned: Family[], verdicts: Iterable<DelegateVerdict>): boolean {
+  const code = new Map<string, { bytes: number; code_kind: string }>();
+  for (const v of verdicts) if (v.family && v.bytes !== undefined && v.code_kind === "logic") code.set(v.family, { bytes: v.bytes, code_kind: v.code_kind });
+  let changed = false;
+  for (const f of learned) {
+    const known = f.class === "forwarder" && f.code_kind === undefined ? code.get(f.id) : undefined;
+    if (!known) continue;
+    Object.assign(f, known);
+    changed = true;
+  }
+  return changed;
+}
+
+/**
  * Authorizations a scan keeps for evaluation (a memory bound: past it they are counted as holes).
  * An authorization whose delegate needs no evaluation per authorization (a revocation, or a delegate
  * already judged not a threat with no re-probe due) is counted but not kept, and never reaches the
@@ -125,6 +191,8 @@ export const MAX_AUTHORIZATIONS_PER_SCAN = 5000;
 /** A delegate judged not a threat is re-probed this long after its last probe, up to this many probes in all. */
 const REPROBE_AFTER_S = 6 * 3600;
 const MAX_PROBES_PER_DELEGATE = 3;
+/** A probe looks for an account still delegated among a delegate's first authorizations in a scan. */
+export const PROBE_CANDIDATES = 4;
 
 export type Creation = { address: string; deployer: string; tx: string; block: number };
 export type Authorization = {
@@ -195,14 +263,15 @@ export function authorizationKey(a: RawAuthorization): string {
 /**
  * What a scan evaluates: its blocks' top-level creations and EIP-7702 authorizations, and the
  * blocks' times. It is small, so each block body can be dropped as soon as it has been added.
- * Authorizations to a settled delegate are only counted (`settled`). Past the per-scan bound the
- * others are not evaluated: they are counted (`dropped`, up to block `droppedBlock`) and become
- * holes in the signed coverage, never a silent omission.
+ * Authorizations to a settled delegate, and those past a sampled delegate's probe candidates, are
+ * only counted (`settled`). Past the per-scan bound the others are not evaluated: they are counted
+ * (`dropped`, up to block `droppedBlock`) and become holes in the signed coverage, never a silent
+ * omission.
  */
-export type Activity = { blocks: number; creations: Creation[]; authorizations: Authorization[]; blockTime: Map<number, number>; seen: Set<string>; settled: number; dropped: number; droppedBlock: number };
+export type Activity = { blocks: number; creations: Creation[]; authorizations: Authorization[]; blockTime: Map<number, number>; seen: Set<string>; sampled: Map<string, number>; settled: number; dropped: number; droppedBlock: number };
 
 export function newActivity(): Activity {
-  return { blocks: 0, creations: [], authorizations: [], blockTime: new Map(), seen: new Set(), settled: 0, dropped: 0, droppedBlock: -1 };
+  return { blocks: 0, creations: [], authorizations: [], blockTime: new Map(), seen: new Set(), sampled: new Map(), settled: 0, dropped: 0, droppedBlock: -1 };
 }
 
 /** A verdict that is not a threat but is re-checked: forwarding behaviour is probed a few times, hours apart. */
@@ -224,7 +293,20 @@ export function settledDelegates(delegates: ReadonlyMap<string, DelegateVerdict>
   };
 }
 
-export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: WatchChain, settled?: (delegate: string) => boolean): Activity {
+/**
+ * Delegates judged not a threat whose re-probe is due but can flag only the probed account: their
+ * code cannot change (it is neither absent nor a 7702 designator) and cannot generalize to a
+ * forwarding family. A scan keeps only their probe candidates; their other authorizations are
+ * counted, as a settled delegate's are. A verdict that does not record its code is never sampled.
+ */
+export function sampledDelegates(delegates: ReadonlyMap<string, DelegateVerdict>, nowS: number): (delegate: string) => boolean {
+  return (delegate) => {
+    const v = delegates.get(delegate);
+    return !!v && reprobeDue(v, nowS) && v.bytes !== undefined && v.code_kind !== undefined && v.code_kind !== "none" && v.code_kind !== "delegated" && !forwardingGeneralizes(v);
+  };
+}
+
+export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: WatchChain, settled?: (delegate: string) => boolean, sampled?: (delegate: string) => boolean): Activity {
   for (const b of blocks) {
     const found = blockActivity(b, chain);
     act.creations.push(...found.creations);
@@ -235,6 +317,14 @@ export function addBlocks(act: Activity, blocks: readonly RawBlock[], chain: Wat
       if (settled?.(a.delegate)) {
         act.settled++;
         continue;
+      }
+      if (sampled?.(a.delegate)) {
+        const n = act.sampled.get(a.delegate) ?? 0;
+        if (n >= PROBE_CANDIDATES) {
+          act.settled++;
+          continue;
+        }
+        act.sampled.set(a.delegate, n + 1);
       }
       if (act.authorizations.length >= MAX_AUTHORIZATIONS_PER_SCAN) {
         act.dropped++;
@@ -392,7 +482,7 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
   };
 
   // --- new contracts: kit families, and delegates deployed before their first use ---
-  const needCode = (d: string) => d !== ZERO && (!deps.delegates.has(d) || reprobeDue(deps.delegates.get(d), now()));
+  const needCode = (d: string) => d !== ZERO && (!deps.delegates.has(d) || reprobeDue(deps.delegates.get(d), now()) || unsettledForwarder(deps.delegates.get(d)));
   const codeTargets = [...new Set([...creations.map((c) => c.address), ...authorizations.map((a) => a.delegate).filter(needCode)])];
   const facts = new Map<string, CodeFacts>();
   for (let i = 0; i < codeTargets.length; i += 50) {
@@ -419,7 +509,9 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
     // A new poisoner or sweeper deployment is known before anyone delegates to it, and replaces a
     // verdict of "not a threat" given while the address had other code, or none.
     const prior = deps.delegates.get(c.address)?.class;
-    if (family.class !== "drainer_kit" && (prior === undefined || prior === "not_forwarding" || prior === "unprobed")) deps.delegates.set(c.address, { class: family.class, family: family.id, at: t, bytes: f.bytes });
+    // A forwarder family is known on sight only for code forwarding generalizes to (one learned before v0.6.0 may not be).
+    const known = family.class !== "drainer_kit" && (family.class !== "forwarder" || forwardingGeneralizes({ bytes: f.bytes, code_kind: f.kind }));
+    if (known && (prior === undefined || prior === "not_forwarding" || prior === "unprobed")) deps.delegates.set(c.address, { class: family.class, family: family.id, at: t, bytes: f.bytes, code_kind: f.kind });
     // Behaviour-only families describe what a delegate does, not who deployed it.
     if (family.class === "forwarder") continue;
     stats.kit_contracts++;
@@ -448,10 +540,22 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
         continue;
       }
       stats.delegates_new++;
-      const family = f && !isGuarded(f) ? familyOf(deps.families, f) : undefined;
+      const matched = f && !isGuarded(f) ? familyOf(deps.families, f) : undefined;
+      // A forwarder family is known on sight only for code forwarding generalizes to: other code is probed.
+      const family = matched?.class === "forwarder" && !forwardingGeneralizes({ bytes: f.bytes, code_kind: f.kind }) ? undefined : matched;
       verdict = family ? { class: family.class, family: family.id, at: now(), bytes: f.bytes, code_kind: f.kind } : { class: "unprobed", at: now(), bytes: f.bytes, code_kind: f.kind };
       // Code that cannot run as a delegate (empty, a 7702 designator itself) is not a threat.
       if (!family && (f.kind === "none" || f.kind === "delegated")) verdict = { class: "not_forwarding", at: now(), bytes: f.bytes, code_kind: f.kind, probes: MAX_PROBES_PER_DELEGATE };
+      deps.delegates.set(delegate, verdict);
+    }
+    if (unsettledForwarder(verdict)) {
+      const f = facts.get(delegate);
+      // Its code could not be read (or not well): the old verdict flags no one, and its authorizations wait for the read.
+      if (!f || !settles(f)) {
+        deferAll();
+        continue;
+      }
+      verdict = settleForwarder(verdict, f, now());
       deps.delegates.set(delegate, verdict);
     }
     const unprobed = verdict.class === "unprobed";
@@ -481,7 +585,7 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
             // known on sight); code with no logic fingerprint is known by the delegate's address.
             let id = `fwd-at-${delegate.slice(2, 14)}`;
             if (f.fingerprint) {
-              const family: Family = { id: `fwd-${f.fingerprint.slice(0, 12)}`, class: "forwarder", exact: [f.fingerprint], skeleton: [], sources: ["behaviour:auto-forward"], first_seen: new Date(now() * 1000).toISOString() };
+              const family: Family = { id: `fwd-${f.fingerprint.slice(0, 12)}`, class: "forwarder", exact: [f.fingerprint], skeleton: [], sources: ["behaviour:auto-forward"], first_seen: new Date(now() * 1000).toISOString(), bytes: f.bytes, code_kind: f.kind };
               learned.push(family);
               deps.families.exact.set(f.fingerprint, family);
               id = family.id;
@@ -548,7 +652,7 @@ export async function scanActivity(act: Activity, deps: ScanDeps, queuedAt: (ite
  */
 async function firstDelegatedAuthority(auths: Authorization[], delegate: string, call: BatchCall): Promise<{ address: string; auth: Authorization } | null | "unread"> {
   const candidates: Array<{ address: string; auth: Authorization }> = [];
-  for (const auth of auths.slice(0, 4)) {
+  for (const auth of auths.slice(0, PROBE_CANDIDATES)) {
     const address = await signerOf(auth);
     if (address) candidates.push({ address, auth });
   }
@@ -557,6 +661,21 @@ async function firstDelegatedAuthority(auths: Authorization[], delegate: string,
   const designator = `0xef0100${delegate.slice(2)}`;
   const found = candidates.find((_, i) => typeof codes[i] === "string" && (codes[i] as string).toLowerCase() === designator);
   return found ?? (candidates.some((_, i) => typeof codes[i] !== "string") ? "unread" : null);
+}
+
+/** A forwarding entry for the probed account's own behaviour (its delegate's code does not generalize): it always counts. */
+export function ownForwarding(entry: Pick<WatchEntry, "f">): boolean {
+  return entry.f.startsWith("fwd-acct-");
+}
+
+/**
+ * Whether a new entry replaces the one an address holds: a stronger kind, and among forwarding
+ * entries one from another delegate (an account delegates to one at a time) or the probed account's
+ * own in place of a shared one, which counts only while its delegate's verdict generalizes.
+ */
+export function replacesEntry(old: WatchEntry, entry: WatchEntry): boolean {
+  if (KIND_RANK[entry.k] !== KIND_RANK[old.k]) return KIND_RANK[entry.k] > KIND_RANK[old.k];
+  return entry.k === "forwarding_delegation" && old.k === "forwarding_delegation" && !ownForwarding(old) && (ownForwarding(entry) || entry.d !== old.d);
 }
 
 /** Merges a scan's entries into one per address, keeping the earliest sighting and the strongest kind. */
@@ -632,7 +751,8 @@ export function kindForCode(family: Family, facts: Pick<CodeFacts, "kind">): Wat
   if (facts.kind === "delegated") {
     if (family.class === "poisoner") return "poisoner_delegation";
     if (family.class === "sweeper") return "sweeper_delegation";
-    if (family.class === "forwarder") return "forwarding_delegation";
+    // Like a delegate's verdict, a forwarder family generalizes only to small forwarders (one without its code to none).
+    if (family.class === "forwarder") return forwardingGeneralizes(family) ? "forwarding_delegation" : null;
     return "drainer_kit_contract";
   }
   // A behaviour-learned delegate says nothing about contracts that share its code.

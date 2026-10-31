@@ -14,7 +14,7 @@ import { GRANTING_INTERACTIONS, type Answer, type Evidence, type KitWatchEvidenc
 
 export const PROVIDER_DID_PREFIX = "did:web:";
 export const ATTESTATION_TTL_MS = 60 * 60 * 1000;
-export const PROVIDER_VERSION = "0.6.20";
+export const PROVIDER_VERSION = "0.6.21";
 
 export type ProviderConfig = {
   host: string;
@@ -250,8 +250,9 @@ async function kitWatchEvidence(
   const family = families && onchain.code ? runningFamily(families, onchain.code) : undefined;
   const kind = family && onchain.code ? kindForCode(family, onchain.code) : null;
   if (family && kind && !hits.some((h) => h.kind === kind)) hits.push({ address: subject, role: "subject", kind, family: family.id, via: "code" });
-  // A delegate the scan classified by behaviour or address (no logic fingerprint to match).
-  if (!family && onchain.code?.kind === "delegated" && onchain.code.delegate && kw.delegate) {
+  // A delegate the scan classified by behaviour or address (no logic fingerprint to match), or whose
+  // family says nothing by code (a forwarder family that has not recorded its code).
+  if (!kind && onchain.code?.kind === "delegated" && onchain.code.delegate && kw.delegate) {
     const verdict = await kw.delegate(network, onchain.code.delegate.toLowerCase()).catch(() => {
       failed = true;
       return undefined;

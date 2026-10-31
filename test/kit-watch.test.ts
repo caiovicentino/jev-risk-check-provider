@@ -144,7 +144,8 @@ test("scan: poisoner and sweeper delegations, a learned forwarder, a kit deploym
 });
 
 test("code families: what running them makes an address", () => {
-  const index = indexFamilies({ updated_at: "", families: [fam("p", "poisoner", POISONER, true), fam("f", "forwarder", SWEEPER_CODE, false), fam("k", "drainer_kit", DRAINER, true)] });
+  const small = { bytes: codeFacts(SWEEPER_CODE).bytes, code_kind: "logic" };
+  const index = indexFamilies({ updated_at: "", families: [fam("p", "poisoner", POISONER, true), { ...fam("f", "forwarder", SWEEPER_CODE, false), ...small }, fam("k", "drainer_kit", DRAINER, true)] });
   const delegated = (code: string) => {
     const f = codeFacts(code);
     return { kind: "delegated" as const, bytes: 23, delegate: "0x01", implementation_fingerprint: f.fingerprint as string, implementation_skeleton: f.skeleton as string };
@@ -153,6 +154,12 @@ test("code families: what running them makes an address", () => {
   assert.equal(kindForCode(runningFamily(index, delegated(SWEEPER_CODE)) as Family, { kind: "delegated" }), "forwarding_delegation");
   assert.equal(kindForCode(runningFamily(index, codeFacts(kitCode(0x61, 55, "0000"))) as Family, { kind: "logic" }), "drainer_kit_contract");
   assert.equal(kindForCode(runningFamily(index, codeFacts(SWEEPER_CODE)) as Family, { kind: "logic" }), null);
+  // A forwarder family generalizes like a delegate's verdict: only to small forwarders, and one learned
+  // before its code was recorded (before v0.6.21, until backfillFamilies) to no one.
+  const forwarder = fam("f", "forwarder", SWEEPER_CODE, false);
+  assert.equal(kindForCode(forwarder, { kind: "delegated" }), null, "no code recorded");
+  assert.equal(kindForCode({ ...forwarder, bytes: 6027, code_kind: "logic" }, { kind: "delegated" }), null, "larger code");
+  assert.equal(kindForCode({ ...forwarder, ...small }, { kind: "delegated" }), "forwarding_delegation");
 });
 
 // --- provider ---------------------------------------------------------------------
@@ -208,10 +215,18 @@ test("provider: a wallet delegated to a sweeper family is caught by its code eve
   assert.ok(e.result.categories?.includes("compromised_wallet"));
   assert.deepEqual(e.result.evidence?.kit_watch?.hits?.map((h) => [h.kind, h.via]), [["sweeper_delegation", "code"]]);
   // A behaviour-learned forwarder reads like an undisclosed recipient (40), not a listed scam.
-  const fwd = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: lookup({}, [{ ...sweeper, class: "forwarder", id: "fwd-s" }]) }).evaluate(valid({ wallet: PAYEE, chain: "eip155:8453" }));
+  const fwd = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: lookup({}, [{ ...sweeper, class: "forwarder", id: "fwd-s", bytes: f.bytes, code_kind: "logic" }]) }).evaluate(valid({ wallet: PAYEE, chain: "eip155:8453" }));
   assert.ok((fwd.result.score as number) <= 40 && (fwd.result.score as number) > 20, String(fwd.result.score));
   assert.ok(fwd.result.categories?.includes("auto_forwarding_wallet"));
   assert.ok(!fwd.result.categories?.includes("compromised_wallet"));
+  // A forwarder family learned before its code was recorded flags no one by code; its delegate's
+  // verdict still speaks when it generalizes.
+  const old = { ...sweeper, class: "forwarder" as const, id: "fwd-s" };
+  const legacy = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: lookup({}, [old]) }).evaluate(valid({ wallet: PAYEE, chain: "eip155:8453" }));
+  assert.equal(legacy.result.evidence?.kit_watch?.hits, undefined);
+  const small: KitWatchLookup = { ...lookup({}, [old]), delegate: async () => ({ class: "forwarder", family: "fwd-s", at: 1, bytes: f.bytes, code_kind: "logic" }) };
+  const byVerdict = await new Provider({ host: "x402check.xyz", keyPair: generateKeyPair("k"), jev, onchain, kitWatch: small }).evaluate(valid({ wallet: PAYEE, chain: "eip155:8453" }));
+  assert.deepEqual(byVerdict.result.evidence?.kit_watch?.hits?.map((h) => [h.kind, h.via]), [["forwarding_delegation", "code"]]);
 });
 
 test("provider: a delegate the scan classified without a code family (tiny forwarder) still flags its wallets", async () => {

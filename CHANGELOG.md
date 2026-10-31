@@ -16,6 +16,27 @@ Each release's full notes and evidence are on the [releases page](https://github
   - It runs `npm audit --offline=false` (2026-10-26 review): an offline npm returns an empty report with no error.
   - It reads only npm's report format 2 (2026-10-27 review). A report in any other format, such as a future npm's, has no `vulnerabilities` to read; before, the gate passed it.
 
+## v0.6.21 — 2026-10-31: forwarding verdicts from before v0.6.0 follow its rule
+
+The 2026-10-31 maintenance run investigated a new coverage hole on Base: 713 authorizations, in one 20-second segment at 19:15 UTC on 2026-10-30. About 10,400 EIP-7702 authorizations arrived in 25 blocks, to three delegates. What it found is larger than the hole.
+
+- **Old forwarding verdicts flagged every account on large code.** Since v0.6.0, forwarding seen on one account generalizes to every account on the same delegate only when the delegate is a small forwarder (at most 1,024 bytes of code): a proxy or a larger contract can forward for one account and not for others. Verdicts reached before that rule recorded no code, and the scan kept flagging every account that delegated to them. A learned family from that time did the same on sight, and at evaluation time it matched any wallet delegated to its code.
+  - Production held 104 such verdicts: 44 on Ethereum, 40 on Base. Their code, read on 2026-10-31: 79 are larger than 1,024 bytes (75 logic contracts, 2 proxies, 2 NFT contracts), and 5 are small forwarders.
+  - In a sample of 3,000 watch entries, 805 of the 1,104 `forwarding_delegation` entries came from those verdicts. One of the delegates in the 2026-10-30 flood was one of them (6,027 bytes), with 4,000 authorizations.
+  - Such an entry capped a verdict at 40 (`auto_forwarding_wallet`) for a wallet the rule says nothing about.
+- **The fix:**
+  - Each cron run settles up to 50 such verdicts by reading the delegate's code. A small forwarder keeps its verdict, now with its code recorded. Any other code becomes "not forwarding" and is re-probed as usual, so a probe that sees forwarding flags only the probed account. An unreadable delegate keeps its old verdict, which flags no one.
+  - The scan settles one the same way when its authorizations appear. A forwarder family is known on sight only for code that the rule covers; other code is probed like any new delegate.
+  - At evaluation time, a forwarding entry recorded for every account on a delegate counts only while that delegate's verdict generalizes. Nothing is deleted: entries from verdicts settled as "not forwarding" stop counting. The probed account's own entry (`fwd-acct-`) always counts.
+  - Learned families record their code. Older families take it from a settled verdict on logic code, and until then they match no one by code. The wallet's delegate verdict is still consulted then.
+  - What this gives up: the one to three accounts an old probe actually saw forwarding were never recorded apart from the rest, so they stop counting too. Each settled delegate is re-probed after six hours, as usual, and a probe that sees an account forward records that account's own entry.
+- **The review of this release** found four issues, each fixed before its deploy:
+  - The probed account's own entry was never written over an old shared one of the same rank, so a re-probe that saw an account forward could leave it unflagged. Now the account's own entry replaces a shared one, and so does an entry from another delegate (an account delegates to one at a time).
+  - A read of no code, a 7702 designator or a malformed answer could settle a verdict and give a family the wrong code. Deployed code cannot vanish (EIP-6780), so such a read waits for another.
+  - New entries could be invisible for up to six minutes, until an isolate's cached copy of the verdicts expired. A verdict missing from a copy more than a minute old is now read again.
+  - A failed read of the verdicts failed the whole lookup. Now the entries are kept, as before this release.
+- **Fewer holes in floods.** A delegate already judged "not forwarding", whose re-probe is due but can flag only the probed account, now keeps only the four authorizations the probe reads. Before, its authorizations counted against the per-scan bound of 5,000. In the 2026-10-30 flood, one such delegate had 3,201 authorizations.
+
 ## `@x402check/mcp` 0.3.3 — 2026-10-23 (on npm; tag `mcp-v0.3.3`)
 
 These changes follow the security releases of 2026-10-21: Node.js 22.23.4, 24.22.1 and 26.12.1, Brotli 1.2.1, and, on 2026-10-15, undici 6.29.1.

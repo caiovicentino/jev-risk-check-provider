@@ -1,4 +1,4 @@
-import { addBlocks, authorizationKey, EOA_KINDS, indexFamilies, KIND_RANK, newActivity, rescanPending, scanActivity, settledDelegates, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchCoverage, type KitWatchLookup, type PendingRead, type Registry, type ScanDeps, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
+import { addBlocks, authorizationKey, backfillFamilies, EOA_KINDS, indexFamilies, KIND_RANK, kindForDelegate, newActivity, ownForwarding, replacesEntry, rescanPending, sampledDelegates, scanActivity, settledDelegates, settleForwarders, WATCH_CHAINS, type DelegateVerdict, type Family, type FamilyIndex, type KitWatchCoverage, type KitWatchLookup, type PendingRead, type Registry, type ScanDeps, type ScanResult, type WatchChain, type WatchEntry } from "../src/kit-watch.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
 import type { WorkerEnv } from "./runtime.js";
 
@@ -151,10 +151,10 @@ const blockOf = (p: PendingRead) => (p.creation ?? p.authorization)?.block ?? -1
 /** What a run reads for a chain before scanning it, in the run's one round of KV reads. */
 type ChainInputs = { delegatesRaw: string | null; queueRaw: string | null };
 
-/** One chain: queued reads, then cursor → scan → watchlist, delegates, learned families. */
-async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyIndex, stats: KitWatchStats, inputs: ChainInputs, opts: { fetchImpl?: typeof fetch | undefined; now: number }): Promise<Family[]> {
+/** One chain: queued reads, then cursor → scan → watchlist, delegates, learned families. Returns those families and the chain's verdicts. */
+async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyIndex, stats: KitWatchStats, inputs: ChainInputs, opts: { fetchImpl?: typeof fetch | undefined; now: number }): Promise<{ learned: Family[]; verdicts: Iterable<DelegateVerdict> }> {
   const kv = env.RATE;
-  if (!kv) return [];
+  if (!kv) return { learned: [], verdicts: [] };
   const plan = PLAN[chain];
   const prev: ChainStats = stats.chains[chain] ?? { cursor: 0, head: 0, last_run: "", scanned_blocks: 0, flagged: {}, delegates: 0, gaps: [] };
   // The block batch starts where the last run's measurement left it.
@@ -188,8 +188,12 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   const delegates = new Map(Object.entries(inputs.delegatesRaw ? (JSON.parse(inputs.delegatesRaw) as Record<string, DelegateVerdict>) : {}));
   const delegatesBefore = JSON.stringify([...delegates]);
   const deps: ScanDeps = { chain, call: rpc.call, simulate: rpc.simulate, families, delegates, maxProbes: 6, now: () => nowS, budget: { evaluations: plan.evaluations } };
-  // Authorizations to a delegate with a settled, harmless verdict are counted, never kept.
+  // Forwarding verdicts that do not generalize by what they record (before v0.6.0 no code was recorded) are settled a few a run.
+  await settleForwarders(delegates, rpc.call, nowS);
+  // Authorizations to a delegate with a settled, harmless verdict are counted, never kept; of one
+  // whose re-probe can flag only the probed account, only the probe's candidates are kept.
   const settled = settledDelegates(delegates, nowS);
+  const sampled = sampledDelegates(delegates, nowS);
   const learned: Family[] = [];
   const entries: ScanResult["entries"] = [];
 
@@ -234,7 +238,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     const act = newActivity();
     try {
       // Each batch's block bodies are dropped once its activity is taken: full blocks are large.
-      await rpc.eachBlocks(n, end, (blocks) => void addBlocks(act, blocks, chain, settled));
+      await rpc.eachBlocks(n, end, (blocks) => void addBlocks(act, blocks, chain, settled, sampled));
     } catch (err) {
       blockError = String(err).slice(0, 300);
       break;
@@ -298,13 +302,15 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     for (const [address, entry] of chunk) {
       const raw = olds.get(KW.address(address)) ?? null;
       const old = raw ? (JSON.parse(raw) as WatchEntry) : null;
-      if (old && KIND_RANK[old.k] >= KIND_RANK[entry.k]) continue;
+      if (old && !replacesEntry(old, entry)) continue;
       const left = DAILY_WRITE_BUDGET - otherWrites - writes;
       if (runWrites >= plan.writes || left <= 0 || (left <= RESERVED_WRITES && KIND_RANK[entry.k] < RESERVED_MIN_RANK)) {
         drop(entry);
         continue;
       }
-      puts.push(kv.put(KW.address(address), JSON.stringify(old ? { ...entry, t: Math.min(old.t, entry.t) } : entry), { expirationTtl: WATCH_TTL_S }));
+      // First seen carries over, except from another delegate's entry (another delegation).
+      const carried = old && !(old.k === entry.k && old.d !== entry.d);
+      puts.push(kv.put(KW.address(address), JSON.stringify(carried ? { ...entry, t: Math.min(old.t, entry.t) } : entry), { expirationTtl: WATCH_TTL_S }));
       writes++;
       runWrites++;
       prev.flagged[entry.k] = (prev.flagged[entry.k] ?? 0) + 1;
@@ -349,7 +355,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     console.error(`kit watch ${chain}: scanned to ${done.cursor} of ${to}; ${blockError}`);
     done.error = blockError;
   } else delete done.error;
-  return learned;
+  return { learned, verdicts: delegates.values() };
 }
 
 /** The cron: both chains, bounded work per run; a lease held for the whole run keeps runs apart. */
@@ -377,10 +383,13 @@ export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fet
     const learned: Family[] = learnedRaw ? (JSON.parse(learnedRaw) as Family[]) : [];
     const families = indexFamilies({ updated_at: registry.updated_at, families: [...registry.families, ...learned] });
     const newlyLearned: Family[] = [];
+    const verdicts: DelegateVerdict[] = [];
     for (const [i, chain] of WATCH_CHAINS.entries()) {
       try {
         const inputs = { delegatesRaw: chainRaw[2 * i] ?? null, queueRaw: chainRaw[2 * i + 1] ?? null };
-        newlyLearned.push(...(await scanChain(env, chain, families, stats, inputs, { fetchImpl: opts.fetchImpl, now })));
+        const scanned = await scanChain(env, chain, families, stats, inputs, { fetchImpl: opts.fetchImpl, now });
+        newlyLearned.push(...scanned.learned);
+        verdicts.push(...scanned.verdicts);
       } catch (err) {
         console.error(`kit watch ${chain} failed: ${String(err).slice(0, 200)}`);
         const prev = stats.chains[chain];
@@ -389,7 +398,9 @@ export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fet
       }
     }
     const fresh = newlyLearned.filter((f, i) => !learned.some((l) => l.id === f.id) && newlyLearned.findIndex((x) => x.id === f.id) === i);
-    if (fresh.length) await kv.put(KW.learned, JSON.stringify([...learned, ...fresh]));
+    // Learned forwarder families from before v0.6.21 take their code from a verdict that recorded it.
+    const backfilled = backfillFamilies(learned, verdicts);
+    if (fresh.length || backfilled) await kv.put(KW.learned, JSON.stringify([...learned, ...fresh]));
   } finally {
     // The run is always recorded, so /status can tell a stalled watch from a quiet one, and the
     // lease is released with it (no extra write): the next run may start at once.
@@ -401,6 +412,8 @@ export async function runKitWatch(env: WorkerEnv, opts: { fetchImpl?: typeof fet
 }
 
 const FAMILY_TTL_MS = 5 * 60 * 1000;
+/** How old a cached copy of the verdicts may be when one an entry names is missing from it. */
+const FRESH_DELEGATES_MS = 60 * 1000;
 /** Addresses one evaluation may look up in the watch (a bulk read takes at most 100 keys). */
 const LOOKUP_MAX = 100;
 let familyCache: { at: number; value: Promise<{ index: FamilyIndex; asOf: string; coverage: KitWatchCoverage }> } | null = null;
@@ -494,9 +507,9 @@ export function kitWatchLookup(env: WorkerEnv): KitWatchLookup | null {
     value.catch(() => (familyCache = null));
     return value;
   };
-  const delegates = (chain: WatchChain) => {
+  const delegates = (chain: WatchChain, maxAgeMs = FAMILY_TTL_MS) => {
     const hit = delegateCache.get(chain);
-    if (hit && Date.now() - hit.at < FAMILY_TTL_MS) return hit.value;
+    if (hit && Date.now() - hit.at < maxAgeMs) return hit.value;
     const value = readJson<Record<string, DelegateVerdict>>(env, KW.delegates(chain), {});
     value.catch(() => delegateCache.delete(chain));
     delegateCache.set(chain, { at: Date.now(), value });
@@ -526,6 +539,20 @@ export function kitWatchLookup(env: WorkerEnv): KitWatchLookup | null {
         // Who controls an EOA holds on every chain; a contract is only itself where it was seen.
         if (EOA_KINDS.has(entry.k) || entry.c === network) out.set(a, entry);
       });
+      // A forwarding entry recorded for every account on a delegate holds only while that delegate's
+      // verdict generalizes: entries from a verdict reached before v0.6.0's rule, or settled since as
+      // not forwarding, flag no one. The probed account's own entry (`fwd-acct-`) always holds.
+      // A verdict missing from a cached copy may be newer than it (learned in the same run as the
+      // entry): the verdicts are read again once, if the copy is older than a minute. A failed read
+      // keeps the entries (as before v0.6.21) rather than failing the whole lookup.
+      const shared = [...out].filter(([, e]) => e.k === "forwarding_delegation" && e.d && !ownForwarding(e));
+      for (const c of new Set(shared.map(([, e]) => e.c))) {
+        const onChain = shared.filter(([, e]) => e.c === c);
+        let verdicts = await delegates(c).catch(() => null);
+        if (verdicts && onChain.some(([, e]) => !verdicts?.[e.d as string])) verdicts = await delegates(c, FRESH_DELEGATES_MS).catch(() => verdicts);
+        if (!verdicts) continue;
+        for (const [a, e] of onChain) if (kindForDelegate(verdicts[e.d as string]) !== "forwarding_delegation") out.delete(a);
+      }
       return out;
     },
   };

@@ -7,8 +7,8 @@ import assert from "node:assert";
 import { privateKeyToAccount } from "viem/accounts";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
-import { addBlocks, indexFamilies, MAX_AUTHORIZATIONS_PER_SCAN, mergeEntries, newActivity, rescanPending, scanActivity, scanBlocks, settledDelegates, type DelegateVerdict, type Family, type PendingRead, type RawAuthorization, type RawBlock, type ScanDeps, type SimulateCall, type WatchEntry } from "../src/kit-watch.js";
-import { COVERAGE_V, coverageOf, DAILY_WRITE_BUDGET, kitWatchStatus, KW, LEASE_MS, LEGACY_DROPPED_READS, PENDING_MAX, runKitWatch, type ChainStats, type KitWatchStats } from "../deploy/kit-watch.js";
+import { addBlocks, backfillFamilies, indexFamilies, MAX_AUTHORIZATIONS_PER_SCAN, mergeEntries, newActivity, PROBE_CANDIDATES, replacesEntry, rescanPending, sampledDelegates, scanActivity, scanBlocks, settledDelegates, settleForwarders, type DelegateVerdict, type Family, type PendingRead, type RawAuthorization, type RawBlock, type ScanDeps, type SimulateCall, type WatchEntry } from "../src/kit-watch.js";
+import { COVERAGE_V, coverageOf, DAILY_WRITE_BUDGET, kitWatchLookup, kitWatchStatus, KW, LEASE_MS, LEGACY_DROPPED_READS, PENDING_MAX, runKitWatch, type ChainStats, type KitWatchStats } from "../deploy/kit-watch.js";
 import type { KVNamespace } from "../deploy/runtime.js";
 
 const hex20 = (n: number) => n.toString(16).padStart(40, "0");
@@ -631,4 +631,204 @@ test("a delegate that had no code is classified again: its verdict expires after
   assert.equal(after[dEmpty], undefined, "a day-old no-code verdict expires: the delegate is read again when seen");
   assert.equal(after[dOld]?.class, "not_forwarding", "a delegate with code keeps its verdict for 30 days");
   assert.deepEqual([after[KIT_ADDRESS]?.class, after[KIT_ADDRESS]?.family], ["sweeper", "sweeper-k"], "a sweeper deployed at the address replaces the old verdict");
+});
+
+// --- v0.6.21: forwarding generalizes only to small forwarders, old verdicts included --------
+
+const LARGE_FWD = `0x6080604052${"63aabbccdd14".repeat(200)}00`; // 1,206 bytes of logic
+const SMALL_FWD = `0x6080604052${"63aabbccdd16".repeat(20)}00`; // 126 bytes of logic
+const designator = (d: string) => `0xef0100${d.slice(2)}`;
+// Public test keys (Hardhat accounts 2 and 3).
+const second = privateKeyToAccount("0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a");
+const third = privateKeyToAccount("0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6");
+async function authBy(account: typeof signer, delegate: string): Promise<RawAuthorization> {
+  const a = await account.signAuthorization({ address: delegate as `0x${string}`, chainId: 1, nonce: 0 });
+  return { chainId: "0x1", address: delegate, nonce: "0x0", yParity: `0x${(a.yParity ?? 0).toString(16)}`, r: a.r, s: a.s };
+}
+const legacyForwarder = (family: string): DelegateVerdict => ({ class: "forwarder", family, at: 1, probes: 1 });
+
+test("scan: a forwarding verdict from before v0.6.0 (no code recorded) is settled by its code: larger code flags no one, a small forwarder keeps flagging", async () => {
+  const [dLarge, dSmall, dDark] = [addr(0x610), addr(0x611), addr(0x612)];
+  const [me, you, them] = [signer, second, third].map((a) => a.address.toLowerCase()) as [string, string, string];
+  const block: RawBlock = { number: "0x60", timestamp: "0x7200", transactions: [{ hash: "0xf6", from: addr(0x777), to: addr(0x777), nonce: "0x0", type: "0x4", authorizationList: [await authBy(signer, dLarge), await authBy(second, dSmall), await authBy(third, dDark)] }] };
+  const code: Record<string, string> = { [dLarge]: LARGE_FWD, [dSmall]: SMALL_FWD, [me]: designator(dLarge), [you]: designator(dSmall), [them]: designator(dDark) };
+  // dDark's code cannot be read.
+  const call = async (reqs: Reads) => reqs.map((r) => (r.method === "eth_getCode" && r.params[0] !== dDark ? (code[r.params[0] as string] ?? "0x") : undefined));
+  const delegates = new Map<string, DelegateVerdict>([[dLarge, legacyForwarder("fwd-at-large")], [dSmall, legacyForwarder("fwd-at-small")], [dDark, legacyForwarder("fwd-at-dark")]]);
+  const res = await scanBlocks([block], { chain: "eip155:1", call, simulate: noSim, families: indexFamilies(null), delegates, now: () => 5000 });
+  assert.deepEqual([...mergeEntries(res.entries).keys()], [you], "only the small forwarder's account is flagged");
+  assert.deepEqual(delegates.get(dLarge), { class: "not_forwarding", at: 5000, probes: 1, bytes: 1206, code_kind: "logic", family: "fwd-at-large" });
+  assert.deepEqual(delegates.get(dSmall), { ...legacyForwarder("fwd-at-small"), bytes: 126, code_kind: "logic" });
+  // An unreadable delegate keeps its old verdict, which flags no one, and its authorization waits.
+  assert.deepEqual(delegates.get(dDark), legacyForwarder("fwd-at-dark"));
+  assert.deepEqual(res.pending.map((p) => p.authorization?.delegate), [dDark]);
+});
+
+test("cron: old forwarding verdicts are settled a few a run, by their code; an unreadable one waits", async () => {
+  const [d1, d2, d3, d4, d5] = [0x621, 0x622, 0x623, 0x624, 0x625].map(addr) as [string, string, string, string, string];
+  const settledSmall: DelegateVerdict = { class: "forwarder", family: "fwd-x", at: 1, bytes: 126, code_kind: "logic" };
+  const benign: DelegateVerdict = { class: "not_forwarding", at: 1, probes: 3, bytes: 4000, code_kind: "logic" };
+  const delegates = new Map<string, DelegateVerdict>([[d1, legacyForwarder("f1")], [d2, legacyForwarder("f2")], [d3, legacyForwarder("f3")], [d4, settledSmall], [d5, benign]]);
+  const reads: string[][] = [];
+  const call = async (reqs: Reads) => {
+    reads.push(reqs.map((r) => r.params[0] as string));
+    return reqs.map((r) => (r.params[0] === d2 ? undefined : r.params[0] === d1 ? LARGE_FWD : SMALL_FWD));
+  };
+  assert.equal(await settleForwarders(delegates, call, 7000, 2), 1);
+  assert.equal(delegates.get(d1)?.class, "not_forwarding");
+  assert.deepEqual(delegates.get(d2), legacyForwarder("f2"), "unreadable: unchanged, and tried again next run");
+  assert.equal(await settleForwarders(delegates, call, 7000), 1);
+  assert.deepEqual(delegates.get(d3), { ...legacyForwarder("f3"), bytes: 126, code_kind: "logic" });
+  assert.deepEqual(reads, [[d1, d2], [d2, d3]], "settled verdicts and the others are never read");
+  assert.deepEqual([delegates.get(d4), delegates.get(d5)], [settledSmall, benign]);
+  // Deployed code cannot vanish: no code, a designator or a malformed answer is a bad read, and waits.
+  // A proxy's own code never generalizes.
+  for (const [code, after] of [["0x", "forwarder"], [designator(d1), "forwarder"], ["0xzz", "forwarder"], [`0x363d3d373d3d3d363d73${"ab".repeat(20)}5af43d82803e903d91602b57fd5bf3`, "not_forwarding"]] as const) {
+    const one = new Map<string, DelegateVerdict>([[d1, legacyForwarder("f1")]]);
+    await settleForwarders(one, async (reqs: Reads) => reqs.map(() => code), 7000);
+    assert.equal(one.get(d1)?.class, after, code.slice(0, 12));
+  }
+});
+
+test("scan: a forwarder family is known on sight only for code forwarding generalizes to; other code is probed like any delegate", async () => {
+  const fp = (code: string) => codeFacts(code).fingerprint as string;
+  const learned = (id: string, code: string, recorded: boolean): Family => ({ id, class: "forwarder", exact: [fp(code)], skeleton: [], sources: ["behaviour:auto-forward"], ...(recorded ? { bytes: codeFacts(code).bytes, code_kind: "logic" } : {}) });
+  const dNew = addr(0x630);
+  const me = signer.address.toLowerCase();
+  const block = async (): Promise<RawBlock> => ({ number: "0x61", timestamp: "0x7300", transactions: [{ hash: "0xf7", from: DEPLOYER, to: null, nonce: "0x0" }, { hash: "0xf8", from: addr(0x777), to: addr(0x777), nonce: "0x0", type: "0x4", authorizationList: [await authBy(signer, dNew)] }] });
+  for (const recorded of [false, true]) {
+    // A family learned before v0.6.0 for larger code: a new delegate and a new deployment running it.
+    const families = indexFamilies({ updated_at: "", families: [learned("fwd-large", LARGE_FWD, recorded)] });
+    const delegates = new Map<string, DelegateVerdict>();
+    const call = reading({ [dNew]: LARGE_FWD, [KIT_ADDRESS]: LARGE_FWD, [me]: designator(dNew) });
+    const res = await scanBlocks([await block()], { chain: "eip155:1", call, simulate: noSim, families, delegates, now: () => 6000 });
+    assert.equal(res.entries.length, 0, `recorded ${recorded}`);
+    assert.equal(delegates.get(dNew)?.class, "unprobed", "probed (no simulation here: it waits), never a forwarder by family");
+    assert.equal(delegates.get(KIT_ADDRESS), undefined, "a deployment of it is no forwarder either");
+  }
+  // A small forwarder's family is known on sight, with its code recorded.
+  const families = indexFamilies({ updated_at: "", families: [learned("fwd-small", SMALL_FWD, true)] });
+  const delegates = new Map<string, DelegateVerdict>();
+  const res = await scanBlocks([await block()], { chain: "eip155:1", call: reading({ [dNew]: SMALL_FWD, [KIT_ADDRESS]: SMALL_FWD, [me]: designator(dNew) }), simulate: noSim, families, delegates, now: () => 6000 });
+  assert.deepEqual([...mergeEntries(res.entries).keys()], [me]);
+  assert.deepEqual([delegates.get(dNew)?.class, delegates.get(dNew)?.code_kind, delegates.get(KIT_ADDRESS)?.code_kind], ["forwarder", "logic", "logic"]);
+});
+
+test("families: a learned forwarder family without its code takes it from a settled verdict", () => {
+  const fam = (id: string, extra: Partial<Family> = {}): Family => ({ id, class: "forwarder", exact: [`fp-${id}`], skeleton: [], sources: ["behaviour:auto-forward"], ...extra });
+  const learned = [fam("fwd-a"), fam("fwd-b", { bytes: 126, code_kind: "logic" }), fam("fwd-c")];
+  const verdicts: DelegateVerdict[] = [{ class: "not_forwarding", at: 1, probes: 1, bytes: 1206, code_kind: "logic", family: "fwd-a" }, { class: "forwarder", family: "fwd-c", at: 1 }];
+  assert.equal(backfillFamilies(learned, verdicts), true);
+  assert.deepEqual(learned, [fam("fwd-a", { bytes: 1206, code_kind: "logic" }), fam("fwd-b", { bytes: 126, code_kind: "logic" }), fam("fwd-c")], "fwd-c: no verdict recorded its code yet");
+  assert.equal(backfillFamilies(learned, verdicts), false);
+  // A proxy running a family's code carries its id with its own code: it never speaks for the family.
+  const proxied = [fam("fwd-p")];
+  assert.equal(backfillFamilies(proxied, [{ class: "not_forwarding", at: 1, probes: 1, bytes: 45, code_kind: "delegating", family: "fwd-p" }]), false);
+  assert.deepEqual(proxied, [fam("fwd-p")]);
+});
+
+test("entries: the probed account's own forwarding entry, or one from another delegate, replaces a shared one of the same rank", () => {
+  const e = (f: string, d: string, k: WatchEntry["k"] = "forwarding_delegation"): WatchEntry => ({ k, c: "eip155:8453", f, t: 1, d });
+  const shared = e("fwd-at-large", addr(0x680));
+  assert.equal(replacesEntry(shared, e("fwd-acct-000000000680", addr(0x680))), true, "the re-probe of the same delegate saw this account forward");
+  assert.equal(replacesEntry(shared, e("fwd-small", addr(0x681))), true, "the account delegates elsewhere now");
+  assert.equal(replacesEntry(shared, e("fwd-at-large", addr(0x680))), false, "the same evidence again");
+  assert.equal(replacesEntry(e("fwd-acct-000000000680", addr(0x680)), e("fwd-small", addr(0x681))), false, "the account's own entry always counts: it stays");
+  assert.equal(replacesEntry(shared, e("sweeper-k", addr(0x682), "sweeper_delegation")), true, "a stronger kind");
+  assert.equal(replacesEntry(e("sweeper-k", addr(0x682), "sweeper_delegation"), shared), false, "a weaker kind");
+  assert.equal(replacesEntry(e("poisoner-x", addr(0x683), "poisoner_delegation"), e("poisoner-y", addr(0x684), "poisoner_delegation")), false, "other kinds keep the first sighting");
+});
+
+test("lookup: a forwarding entry holds only while its delegate's verdict generalizes; the probed account's own entry always does", async () => {
+  const kv = memoryKv();
+  const [dOld, dSettled, dSmall, dGone] = [0x641, 0x642, 0x643, 0x644].map(addr) as [string, string, string, string];
+  kv.data.set(KW.delegates("eip155:8453"), JSON.stringify({ [dOld]: legacyForwarder("fwd-at-old"), [dSettled]: { class: "not_forwarding", at: 1, probes: 1, bytes: 1206, code_kind: "logic" }, [dSmall]: { class: "forwarder", family: "fwd-s", at: 1, bytes: 126, code_kind: "logic" } }));
+  const entry = (k: WatchEntry["k"], d: string, f = "fwd-x"): WatchEntry => ({ k, c: "eip155:8453", f, t: 1, d });
+  const entries: Record<string, WatchEntry> = {
+    [addr(0x651)]: entry("forwarding_delegation", dOld),
+    [addr(0x652)]: entry("forwarding_delegation", dSettled),
+    [addr(0x653)]: entry("forwarding_delegation", dSmall),
+    [addr(0x654)]: entry("forwarding_delegation", dGone),
+    [addr(0x655)]: entry("forwarding_delegation", dSettled, "fwd-acct-0000000006"),
+    [addr(0x656)]: entry("sweeper_delegation", dOld, "sweeper-k"),
+  };
+  for (const [a, e] of Object.entries(entries)) kv.data.set(KW.address(a), JSON.stringify(e));
+  const found = await kitWatchLookup({ RATE: kv })?.addresses(Object.keys(entries), "eip155:1");
+  assert.deepEqual([...(found?.keys() ?? [])].sort(), [addr(0x653), addr(0x655), addr(0x656)]);
+});
+
+test("lookup: a verdict missing from a cached copy is read again once the copy is a minute old; a failed read keeps the entries", async () => {
+  const realNow = Date.now;
+  const base = realNow() + 3_600_000; // past any copy cached by earlier tests
+  let now = base;
+  Date.now = () => now;
+  try {
+    const kv = memoryKv();
+    const dNew = addr(0x690);
+    const fresh: WatchEntry = { k: "forwarding_delegation", c: "eip155:8453", f: "fwd-n", t: 1, d: dNew };
+    kv.data.set(KW.address(addr(0x691)), JSON.stringify(fresh));
+    kv.data.set(KW.delegates("eip155:8453"), JSON.stringify({}));
+    const look = () => kitWatchLookup({ RATE: kv })?.addresses([addr(0x691)], "eip155:8453");
+    assert.equal((await look())?.size, 0, "no verdict: the entry does not count");
+    // The cron learns the forwarder and records the entry in the same run.
+    kv.data.set(KW.delegates("eip155:8453"), JSON.stringify({ [dNew]: { class: "forwarder", family: "fwd-n", at: 1, bytes: 126, code_kind: "logic" } }));
+    now = base + 30_000;
+    assert.equal((await look())?.size, 0, "a copy under a minute old is used as it is");
+    now = base + 90_000;
+    assert.equal((await look())?.size, 1, "read again: it counts");
+
+    // The verdicts cannot be read: the shared entry is kept, and so is the rest of the lookup.
+    now = base + 3_600_000;
+    const down = memoryKv();
+    down.data.set(KW.address(addr(0x691)), JSON.stringify(fresh));
+    down.data.set(KW.address(addr(0x692)), JSON.stringify({ k: "poisoner_delegation", c: "eip155:8453", f: "poisoner-x", t: 1, d: addr(0x693) }));
+    const get = down.get;
+    down.get = (async (key: string | string[], ...rest: unknown[]) => {
+      if (key === KW.delegates("eip155:8453")) throw new Error("kv down");
+      return (get as (...a: unknown[]) => unknown)(key, ...rest);
+    }) as KVNamespace["get"];
+    const kept = await kitWatchLookup({ RATE: down })?.addresses([addr(0x691), addr(0x692)], "eip155:8453");
+    assert.deepEqual([...(kept?.keys() ?? [])].sort(), [addr(0x691), addr(0x692)]);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("cron: an old forwarding verdict is settled on the next run, and its learned family takes its code", async () => {
+  const kv = seeded();
+  const dLarge = addr(0x660);
+  const family: Family = { id: "fwd-large", class: "forwarder", exact: [codeFacts(LARGE_FWD).fingerprint as string], skeleton: [], sources: ["behaviour:auto-forward"] };
+  kv.data.set(KW.learned, JSON.stringify([family]));
+  kv.data.set(KW.delegates("eip155:1"), JSON.stringify({ [dLarge]: legacyForwarder("fwd-large") }));
+  const fetchImpl = chainStub({ code: (a) => (a === dLarge ? LARGE_FWD : "0x") });
+  await runKitWatch({ RATE: kv }, { fetchImpl, now: T });
+  const verdict = (JSON.parse(kv.data.get(KW.delegates("eip155:1")) as string) as Record<string, DelegateVerdict>)[dLarge];
+  assert.deepEqual([verdict?.class, verdict?.bytes, verdict?.code_kind], ["not_forwarding", 1206, "logic"]);
+  assert.deepEqual(JSON.parse(kv.data.get(KW.learned) as string), [{ ...family, bytes: 1206, code_kind: "logic" }]);
+  // Nothing left to record: the next run writes no families.
+  const writes = kv.puts.filter((k) => k === KW.learned).length;
+  await runKitWatch({ RATE: kv }, { fetchImpl, now: T + 60_000 });
+  assert.equal(kv.puts.filter((k) => k === KW.learned).length, writes);
+});
+
+test("scan: of a delegate whose re-probe can flag only the probed account, only the probe's candidates are kept (the 2026-10-30 Base flood)", () => {
+  const [benign, threat] = [addr(0x670), addr(0x671)];
+  const nowS = 10_000_000;
+  const due: DelegateVerdict = { class: "not_forwarding", at: nowS - 7 * 3600, probes: 1, bytes: 4292, code_kind: "logic" };
+  const delegates = new Map<string, DelegateVerdict>([[benign, due], [threat, { class: "forwarder", family: "fwd-t", at: 1, bytes: 126, code_kind: "logic" }]]);
+  const tuples = (d: string, n: number, salt: number): RawAuthorization[] => Array.from({ length: n }, (_, i) => ({ chainId: "0x1", address: d, nonce: `0x${i.toString(16)}`, yParity: "0x0", r: `0x${(i + salt).toString(16).padStart(64, "0")}`, s: `0x${"22".repeat(32)}` }));
+  const block: RawBlock = { number: "0x70", timestamp: "0x7400", transactions: [{ hash: "0xf9", from: addr(0x777), to: addr(0x777), nonce: "0x0", type: "0x4", authorizationList: [...tuples(benign, MAX_AUTHORIZATIONS_PER_SCAN, 1), ...tuples(threat, 800, 1_000_000)] }] };
+  const act = addBlocks(newActivity(), [block], "eip155:1", settledDelegates(delegates, nowS), sampledDelegates(delegates, nowS));
+  assert.deepEqual([act.authorizations.length, act.settled, act.dropped], [PROBE_CANDIDATES + 800, MAX_AUTHORIZATIONS_PER_SCAN - PROBE_CANDIDATES, 0]);
+  // Before, the benign delegate's authorizations filled the bound and the threat's 800 were holes.
+  assert.equal(addBlocks(newActivity(), [block], "eip155:1", settledDelegates(delegates, nowS)).dropped, 800);
+  const sampled = (v: DelegateVerdict) => sampledDelegates(new Map([[benign, v]]), nowS)(benign);
+  assert.equal(sampled(due), true);
+  assert.equal(sampled({ ...due, code_kind: "delegating", bytes: 45 }), true, "a proxy never generalizes");
+  assert.equal(sampled({ ...due, bytes: 900 }), false, "small code: a re-probe may make it a forwarder for all its accounts");
+  const { code_kind: _kind, ...unrecorded } = due;
+  assert.equal(sampled(unrecorded), false, "code not recorded");
+  assert.equal(sampled({ ...due, code_kind: "none", bytes: 0 }), false, "code may yet be deployed");
+  assert.equal(sampled({ ...due, at: nowS - 60 }), false, "no re-probe due: settled instead");
+  assert.equal(sampled({ class: "unprobed", at: nowS, bytes: 4292, code_kind: "logic" }), false);
 });
