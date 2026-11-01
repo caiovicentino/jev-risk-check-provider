@@ -96,7 +96,7 @@ The same API reaches everyone who moves value: x402 facilitators and resource se
   - A paid `x402check_pay` run against a third-party resource: so far the one real payment went to x402check itself.
   - The kit watch's lead time over the public lists; factory (CREATE2) deployments; more chains.
   - A continuous facilitator shadow: a weekly report, and an inline, log-only integration.
-  - Agent-framework integrations. **Built on 2026-11-01:** `@x402check/ai-sdk` (an AI SDK 7 tool-approval policy and a tool) and `@x402check/agentkit` (a guarded AgentKit EVM wallet and an action provider). **ElizaOS waits:** its community registry closed on 2026-09-23, and no wallet plugin offers a hook before signing, so a plugin could check only the agent's intent, not what is signed.
+  - Agent-framework integrations. **On npm since 2026-11-01:** `@x402check/ai-sdk` (an AI SDK 7 tool-approval policy and a tool) and `@x402check/agentkit` (a guarded AgentKit EVM wallet and an action provider). **ElizaOS waits:** its community registry closed on 2026-09-23, and no wallet plugin offers a hook before signing, so a plugin could check only the agent's intent, not what is signed.
   - A Snap that pays from credits; then publish it and seek allowlisting.
   - KMS custody for the attestation key; AP2 `RiskPayload`.
   - A published latency distribution (p50/p95, credits and per call).
