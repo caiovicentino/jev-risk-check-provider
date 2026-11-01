@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { AgentKit, EvmWalletProvider, type Network } from "@coinbase/agentkit";
+import { AgentKit, EvmWalletProvider, x402ActionProvider, type Network } from "@coinbase/agentkit";
 import { privateKeyToAccount } from "viem/accounts";
 import { verifyTypedData, type Hex, type TransactionRequest } from "viem";
 import type { RiskCheckRequest } from "@x402check/client";
@@ -274,3 +274,58 @@ test("malformed amounts and transactions for another chain refuse with the guard
   assert.deepEqual(wallet.calls, []);
   assert.equal(verdicts.length, 2);
 });
+
+const SELLER = "https://seller.example/data";
+
+/** A seller that charges in x402 v2: a 402 with `PAYMENT-REQUIRED`, then 200 for a request that carries `PAYMENT-SIGNATURE`. */
+async function withSeller<T>(payTo: string, run: (paid: string[]) => Promise<T>): Promise<T> {
+  const accepts = [{ scheme: "exact", network: "eip155:8453", asset: USDC_BASE, amount: "3500", payTo, maxTimeoutSeconds: 60, extra: { name: "USD Coin", version: "2" } }];
+  const required = { x402Version: 2, resource: { url: SELLER, description: "data", mimeType: "application/json" }, accepts };
+  const paid: string[] = [];
+  const previous = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    if (request.url !== SELLER) return previous(input, init);
+    const signature = request.headers.get("payment-signature");
+    if (!signature) return new Response("{}", { status: 402, headers: { "content-type": "application/json", "payment-required": btoa(JSON.stringify(required)) } });
+    paid.push(signature);
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  try {
+    return await run(paid);
+  } finally {
+    globalThis.fetch = previous;
+  }
+}
+
+/** The one-shot action answers `success: true`, the retry `status: "success"`. */
+const succeeded = (result: { success?: unknown; status?: unknown }) => result.success === true || result.status === "success";
+
+for (const name of ["make_http_request_with_x402", "retry_http_request_with_x402"]) {
+  test(`AgentKit's own x402 action ${name} pays through the guard: a clean payee is paid, a drainer is refused before the key signs`, async () => {
+    for (const payTo of [PAYEE, DRAINER]) {
+      const { wallet, guarded, verdicts } = setup();
+      const agentkit = await AgentKit.from({ walletProvider: guarded, actionProviders: [x402ActionProvider()] });
+      const action = agentkit.getActions().find((a) => a.name.endsWith(`_${name}`));
+      assert.ok(action, name);
+      const args = { url: SELLER, method: "GET", selectedPaymentOption: { scheme: "exact", network: "eip155:8453", asset: USDC_BASE, amount: "3500", payTo } };
+      const { result, paid } = await withSeller(payTo, async (paid) => ({ result: JSON.parse(await action.invoke(args)), paid }));
+      assert.equal(verdicts.length, 1, "one check, before signing");
+      if (payTo === PAYEE) {
+        assert.equal(verdicts[0]!.action, "allow");
+        assert.ok(succeeded(result), JSON.stringify(result));
+        assert.deepEqual(wallet.calls, ["signTypedData"]);
+        assert.equal(paid.length, 1);
+        // The authorization the seller received pays the payee that was checked.
+        const sent = JSON.parse(atob(paid[0]!)) as { payload: { authorization: { to: string; value: string } } };
+        assert.equal(sent.payload.authorization.to.toLowerCase(), PAYEE);
+        assert.equal(sent.payload.authorization.value, "3500");
+      } else {
+        assert.equal(verdicts[0]!.action, "block");
+        assert.ok(!succeeded(result), JSON.stringify(result));
+        assert.deepEqual(wallet.calls, [], "the key never signed");
+        assert.deepEqual(paid, [], "the seller received no payment");
+      }
+    }
+  });
+}
