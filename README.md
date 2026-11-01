@@ -333,6 +333,16 @@ Both packages are on npm:
 - [`@x402check/client`](https://www.npmjs.com/package/@x402check/client);
 - [`@x402check/mcp`](https://www.npmjs.com/package/@x402check/mcp).
 
+### Agent frameworks
+
+These two are built and tested in this repository, and are not yet on npm:
+
+- **[`@x402check/ai-sdk`](packages/ai-sdk)** is for the Vercel AI SDK 7. `x402checkApproval` is a `toolApproval` policy: before a tool that moves money runs, the counterparty its input names is checked.
+  - `allow` approves the call, `warn` waits for the user, and `block` or a check that fails denies it.
+  - The check reads the content that led the agent to the call, so an injected instruction in a tool result counts against it.
+  - `x402checkTool` lets the model check an address on its own.
+- **[`@x402check/agentkit`](packages/agentkit)** is for Coinbase AgentKit. `guardWalletProvider` wraps the agent's EVM wallet, so AgentKit's x402 payments, transfers and approvals are signed only after a verified `allow`. `x402checkActionProvider` adds a `check_counterparty` action.
+
 The MCP server is also in the official [MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.caiovicentino/x402check) as `io.github.caiovicentino/x402check`.
 
 **Discovery:** agents and their developers can find x402check in three catalogs.

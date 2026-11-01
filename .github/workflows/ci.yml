@@ -99,7 +99,8 @@ jobs:
       contents: read
     strategy:
       matrix:
-        pkg: [client, mcp]
+        # ai-sdk and agentkit take the client from npm; their tests reuse its test helpers from this checkout.
+        pkg: [client, mcp, ai-sdk, agentkit]
     defaults:
       run:
         working-directory: packages/${{ matrix.pkg }}

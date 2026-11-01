@@ -4,6 +4,18 @@ Each release's full notes and evidence are on the [releases page](https://github
 
 ## Unreleased
 
+- **Agent-framework integrations** (new packages, not yet on npm):
+  - **`@x402check/ai-sdk` 0.1.0, for the Vercel AI SDK 7.**
+    - `x402checkApproval` is a `toolApproval` policy for `generateText` and `streamText`. For each value-moving tool, a mapper names the counterparties in its input. The verdict decides: `allow` → approved, `warn` → user-approval (or denied), `block` and `not_verified` → denied, each with x402check's reasons.
+    - The check's `context` is the latest user message and the tool results after it, plus the call itself. `context: false` sends nothing from the conversation.
+    - An approval replay reuses the same call's verdict for five minutes, so it is not charged twice; a failed check is never reused.
+    - `x402checkTool` lets the model check an address on its own.
+  - **`@x402check/agentkit` 0.1.0, for Coinbase AgentKit** (0.10.4 to below 0.12).
+    - `guardWalletProvider` wraps an `EvmWalletProvider` in a Proxy. Every signature goes through the client's `guardAccount`, so AgentKit's x402 payments, which sign typed data through `toSigner()`, are checked as payments.
+    - `sendTransaction` and `nativeTransfer` are simulated and checked first, and `sendTransaction` sends the checked copy. Raw hash signing, and any other member that signs or sends, refuse.
+    - `x402checkActionProvider` adds one action, `check_counterparty`. It overrides `getActions`, so it uses no decorators and sends no AgentKit telemetry. Its zod is the one AgentKit loads.
+  - **Both** verify each attestation against its request with x402check's key pinned, and fail closed.
+- **Dependencies (2026-11-01):** Dependabot's monthly updates: `ai` 7.0.153, `tldts` 7.4.19, `viem` 2.57.11, `@modelcontextprotocol/sdk` 1.32.2 and `wrangler` 4.152.0. The root lockfile was rebuilt locally, because Dependabot's left out jayson's nested `utf-8-validate`. Production was redeployed from `6520146`.
 - **The MCP's lockfile:** zod 4.6.7 (GHSA-mrhx-c7xc-m3w5), body-parser 2.4.0 (GHSA-27r3-jxmh-p828) and fast-uri 3.1.9. The published 0.3.3 pins the earlier versions in its shrinkwrap. Over stdio the server never starts the SDK's express server, and every input it validates is size-bounded.
 - **The Worker's lockfile:** zod 4.6.7.
 - **Development tooling:** the root `overrides` hold undici at 7.30.1 (GHSA-xjj6-f33q-929c, high). Before this, miniflare, wrangler's local runtime, pinned 7.29.1. The Snap's tooling moves to fast-uri 3.1.9 and body-parser 2.4.0.

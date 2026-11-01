@@ -1,0 +1,64 @@
+{
+  "name": "@x402check/agentkit",
+  "version": "0.1.0",
+  "description": "x402check for Coinbase AgentKit: a wallet-provider guard that screens every signature and transaction before the key signs (x402 payments, transfers, approvals), and an action provider the agent calls to check a counterparty. Signed, paid verdicts; no free tier.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "tsx --test test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caiovicentino/jev-risk-check-provider.git",
+    "directory": "packages/agentkit"
+  },
+  "homepage": "https://x402check.xyz",
+  "bugs": "https://github.com/caiovicentino/jev-risk-check-provider/issues",
+  "keywords": [
+    "agentkit",
+    "coinbase",
+    "cdp",
+    "x402",
+    "x402check",
+    "risk-check",
+    "ai-agents",
+    "wallet",
+    "signing-guard"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@x402check/client": "^0.5.3"
+  },
+  "devDependencies": {
+    "@coinbase/agentkit": "^0.10.4",
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "viem": "^2.57.11"
+  },
+  "peerDependencies": {
+    "@coinbase/agentkit": ">=0.10.4 <0.12"
+  }
+}
