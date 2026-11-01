@@ -46,7 +46,7 @@
     "tsx": "^4.19.0",
     "tweetnacl": "^1.0.3",
     "typescript": "^5.7.0",
-    "wrangler": "4.151.0"
+    "wrangler": "4.152.0"
   },
   "dependencies": {
     "@noble/curves": "2.4.0",
