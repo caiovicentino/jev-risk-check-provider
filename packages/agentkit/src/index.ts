@@ -10,9 +10,15 @@ export { X402CheckBlockedError } from "@x402check/client/guard";
 export type { GuardOptions, GuardVerdict } from "@x402check/client/guard";
 
 const MAX_CONTEXT = 4096;
-/** Members that sign or send. On a guarded wallet, any such member not intercepted below refuses. */
-const SIGNING_METHOD = /^(sign|send|execute|transfer|write|approve|permit|swap|withdraw|deploy)/i;
 const INTERCEPTED = new Set(["sign", "signMessage", "signTypedData", "signTransaction", "sendTransaction", "nativeTransfer"]);
+/**
+ * The wallet's members that only read. Everything else a wallet exposes (gasless transfers, trades,
+ * a CDP client, a smart account or its owner) could sign or send without a check, so on a guarded
+ * wallet it refuses, unless `options.passthrough` names it.
+ */
+const READ_ONLY = new Set(["getAddress", "getNetwork", "getName", "getBalance", "getPublicClient", "readContract", "waitForTransactionReceipt"]);
+const HEX = /^0x[0-9a-fA-F]*$/;
+const INTEGER = /^\d+$/;
 
 /**
  * The same AgentKit EVM wallet, with x402check between it and every signature: AgentKit's x402
@@ -20,8 +26,9 @@ const INTERCEPTED = new Set(["sign", "signMessage", "signTypedData", "signTransa
  * are decoded, checked and verified before the key signs; anything but a verified allow throws
  * `X402CheckBlockedError` and nothing is signed or sent. Pass it to `AgentKit.from`.
  *
- * Not covered: work the wallet's backend does on its own, such as a CDP server wallet's
- * `getClient()` swaps, which sign inside CDP.
+ * Only the members that read pass through as they are. Any other member (a gasless transfer, a
+ * trade, `getClient()`, a smart account) refuses, or throws when it is a property, unless
+ * `options.passthrough` names it: then it is reachable, unchecked.
  */
 export function guardWalletProvider<W extends EvmWalletProvider>(wallet: W, options: GuardOptions = {}): W {
   if (!(wallet instanceof EvmWalletProvider)) throw new TypeError("guardWalletProvider takes an AgentKit EvmWalletProvider (Solana: guardSolanaSigner from @x402check/client/guard)");
@@ -36,7 +43,8 @@ export function guardWalletProvider<W extends EvmWalletProvider>(wallet: W, opti
     {
       address,
       sign: ({ hash }: { hash: `0x${string}` }) => wallet.sign(hash),
-      signMessage: ({ message }: { message: string | Uint8Array }) => wallet.signMessage(message),
+      // The wallet gets the caller's message unchanged; the guard read it the way the wallet signs it.
+      signMessage: ({ message }: { message: string | Uint8Array | { raw: string | Uint8Array } }) => wallet.signMessage(typeof message === "object" && !(message instanceof Uint8Array) ? message.raw : message),
       signTypedData: (typedData: unknown) => wallet.signTypedData(typedData),
       signTransaction: (transaction: Parameters<W["signTransaction"]>[0]) => wallet.signTransaction(transaction),
     },
@@ -45,6 +53,11 @@ export function guardWalletProvider<W extends EvmWalletProvider>(wallet: W, opti
 
   /** Checks a transaction the wallet will sign and send itself; returns the checked copy, which is what gets sent. */
   async function checked(transaction: unknown): Promise<Parameters<W["sendTransaction"]>[0]> {
+    const asked = transaction && typeof transaction === "object" ? (transaction as { chainId?: unknown }).chainId : undefined;
+    // The wallet sends on its own network, whatever the transaction says: a check on another chain would not match it.
+    if (asked !== undefined && chainId !== undefined && Number(asked) !== chainId) {
+      await refuseMalformed("transaction", `a transaction for chain ${String(asked)}`, `the wallet sends on chain ${chainId}, so a transaction for chain ${String(asked)} would not be what was checked`, options);
+    }
     let copy: unknown;
     const probe = guardAccount(
       {
@@ -62,48 +75,88 @@ export function guardWalletProvider<W extends EvmWalletProvider>(wallet: W, opti
 
   const intercepted: Record<string, (...args: never[]) => Promise<unknown>> = {
     sign: (hash: `0x${string}`) => account.sign({ hash }),
-    signMessage: (message: string | Uint8Array) => account.signMessage({ message }),
+    // AgentKit's viem-based wallets sign a hex string as raw bytes, so the guard reads it as bytes
+    // (a 32-byte hash, or any opaque binary, is refused like sign(hash)).
+    signMessage: (message: string | Uint8Array) => account.signMessage({ message: typeof message === "string" && HEX.test(message) ? { raw: message } : message }),
     signTypedData: (typedData: unknown) => account.signTypedData(typedData),
     signTransaction: (transaction: unknown) => account.signTransaction(transaction as Parameters<W["signTransaction"]>[0]),
     sendTransaction: async (transaction: unknown) => wallet.sendTransaction(await checked(transaction)),
     nativeTransfer: async (to: string, value: string) => {
+      if (typeof value !== "string" || !INTEGER.test(value)) {
+        await refuseMalformed("transaction", `a native transfer of ${String(value)}`, "the amount must be an integer in wei, as AgentKit's nativeTransfer takes it", options);
+      }
       await checked({ to, value: BigInt(value), ...(chainId !== undefined ? { chainId } : {}) });
       return wallet.nativeTransfer(to, value);
     },
   };
   const passthrough = new Set(options.passthrough ?? []);
+  const base = [EvmWalletProvider.prototype, WalletProvider.prototype] as unknown as Record<PropertyKey, unknown>[];
 
   const guarded: W = new Proxy(wallet, {
     get(target, prop) {
       if (typeof prop === "string" && INTERCEPTED.has(prop)) return intercepted[prop];
       const value: unknown = Reflect.get(target, prop, target);
-      if (typeof value !== "function") return value;
       // Base-class helpers (toSigner, toEip1193Provider…) run on the guarded wallet, so they sign through it.
-      if (value === (EvmWalletProvider.prototype as unknown as Record<PropertyKey, unknown>)[prop] || value === (WalletProvider.prototype as unknown as Record<PropertyKey, unknown>)[prop]) {
+      if (typeof value === "function" && base.some((proto) => proto[prop] === value)) {
         return (...args: unknown[]) => (value as (...a: unknown[]) => unknown).apply(guarded, args);
       }
-      if (typeof prop === "string" && SIGNING_METHOD.test(prop) && !passthrough.has(prop)) {
-        return () => refuseUnguarded(prop, options);
+      const open = typeof prop === "symbol" || prop === "constructor" || READ_ONLY.has(prop) || passthrough.has(prop);
+      if (typeof value === "function") {
+        // The wallet's own members run on the wallet itself (private fields need the real instance).
+        if (open) return (value as (...a: unknown[]) => unknown).bind(target);
+        return () => refuseUnguarded(String(prop), options);
       }
-      // The wallet's own members, on the wallet itself (private fields need the real instance).
-      return (value as (...a: unknown[]) => unknown).bind(target);
+      // A field holding an object (a smart account, an owner account, a client) could sign: not reachable.
+      if (value !== null && typeof value === "object" && !open) throw unguardedError(String(prop), options);
+      return value;
     },
   });
   return guarded;
 }
 
-async function refuseUnguarded(name: string, options: GuardOptions): Promise<never> {
-  const verdict: GuardVerdict = {
+function unguardedVerdict(name: string, call = false): GuardVerdict {
+  const shown = call ? `${name}()` : name;
+  return {
     action: "block",
     signed: false,
     kind: "unguarded_method",
-    summary: `${name}() is not checked by the x402check guard`,
-    reasons: [`${name} signs or sends without a check, so the guarded wallet refuses it (options.passthrough: ["${name}"] lets it through, unchecked)`],
+    summary: `${shown} is not checked by the x402check guard`,
+    reasons: [`${shown} could sign or send without a check, so the guarded wallet does not expose it (options.passthrough: ["${name}"] makes it reachable, unchecked)`],
     code: "unguarded_method",
     checks: [],
   };
+}
+
+function unguardedError(name: string, options: GuardOptions): X402CheckBlockedError {
+  const verdict = unguardedVerdict(name);
+  void Promise.resolve(options.onVerdict?.(verdict)).catch(() => undefined);
+  return new X402CheckBlockedError(verdict);
+}
+
+async function refuseMalformed(kind: "transaction", summary: string, reason: string, options: GuardOptions): Promise<never> {
+  const verdict: GuardVerdict = { action: "not_verified", signed: false, kind, summary, reasons: [reason], code: "invalid_transaction", checks: [] };
   await Promise.resolve(options.onVerdict?.(verdict)).catch(() => undefined);
   throw new X402CheckBlockedError(verdict);
+}
+
+async function refuseUnguarded(name: string, options: GuardOptions): Promise<never> {
+  const verdict = unguardedVerdict(name, true);
+  await Promise.resolve(options.onVerdict?.(verdict)).catch(() => undefined);
+  throw new X402CheckBlockedError(verdict);
+}
+
+/** Lone UTF-16 surrogates (a cut through an emoji) make the body invalid UTF-8, which the API refuses. */
+function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+}
+
+/** Keeps the end (the most recent content), never splitting a character. */
+export function fitTail(text: string, max: number): string {
+  const clean = wellFormed(text);
+  if (clean.length <= max) return clean;
+  let tail = clean.slice(clean.length - (max - 1));
+  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+  return `…${tail}`;
 }
 
 /** The CAIP-2 id of an AgentKit network: "eip155:<chainId>", or a known Solana cluster. */
@@ -169,7 +222,7 @@ export class X402checkActionProvider extends ActionProvider<WalletProvider> {
             wallet: args.address.trim(),
             ...(chain ? { chain } : {}),
             ...(args.domain ? { domain: args.domain.trim() } : {}),
-            ...(args.context ? { context: args.context.length > MAX_CONTEXT ? `…${args.context.slice(args.context.length - MAX_CONTEXT + 1)}` : args.context } : {}),
+            ...(args.context ? { context: fitTail(args.context, MAX_CONTEXT) } : {}),
             ...(args.interaction ? { interaction: { type: args.interaction as InteractionType } } : {}),
           };
           const screening = await this.#screen([request]);

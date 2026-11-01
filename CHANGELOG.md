@@ -15,6 +15,15 @@ Each release's full notes and evidence are on the [releases page](https://github
     - `sendTransaction` and `nativeTransfer` are simulated and checked first, and `sendTransaction` sends the checked copy. Raw hash signing, and any other member that signs or sends, refuse.
     - `x402checkActionProvider` adds one action, `check_counterparty`. It overrides `getActions`, so it uses no decorators and sends no AgentKit telemetry. Its zod is the one AgentKit loads.
   - **Both** verify each attestation against its request with x402check's key pinned, and fail closed.
+  - **An independent review before the first publish found 7 problems, 4 of them high.** All are fixed, each with a test that fails on the code before its fix:
+    - **The policy dropped every tool's own `needsApproval`.** With a policy, the AI SDK never reads it. The policy now does, and the stricter answer wins.
+    - **AgentKit wallets exposed signing outside the guard.** The Proxy let through every member whose name did not look like signing: the legacy CDP wallet's `gaslessERC20Transfer` (AgentKit's own ERC-20 action sent USDC to a blocked address unchecked), and a smart wallet's `ownerAccount` and `smartAccount`. Now only members that read pass; any other method refuses, and an object field throws.
+    - **`signMessage` of a hex string signed a raw hash.** AgentKit's viem wallets sign a hex string as raw bytes, and the guard read it as text. It now reads it as bytes, so a 32-byte hash is refused like `sign(hash)`.
+    - **A tool without `execute` ran in the browser although it was denied.** The AI SDK hands such a call to the client before it asks any policy. This cannot be fixed on the server: the policy denies it with a reason, and the README states the limit, along with provider-executed tools and `result.toolCalls`.
+    - **A cut through an emoji refused the check.** It made the body invalid UTF-8, so every value-moving call in a long chat with emoji was denied. Every cut now keeps characters whole. The same fix is in `@x402check/client`'s guard for its `context` option, and ships with the next client release.
+    - **`nativeTransfer("0.1")`** threw a `SyntaxError`; it is now a refusal reported to `onVerdict`. A transaction for a chain other than the wallet's is refused.
+    - **`maxFeeWei` cannot cap `sendTransaction`,** because the wallet sets its own fees; this is documented.
+    - **Peer and engine ranges** are the tested ones: `ai` 7.0.153 or later, and Node.js 22.12 or later.
 - **Dependencies (2026-11-01):** Dependabot's monthly updates: `ai` 7.0.153, `tldts` 7.4.19, `viem` 2.57.11, `@modelcontextprotocol/sdk` 1.32.2 and `wrangler` 4.152.0. The root lockfile was rebuilt locally, because Dependabot's left out jayson's nested `utf-8-validate`. Production was redeployed from `6520146`.
 - **The MCP's lockfile:** zod 4.6.7 (GHSA-mrhx-c7xc-m3w5), body-parser 2.4.0 (GHSA-27r3-jxmh-p828) and fast-uri 3.1.9. The published 0.3.3 pins the earlier versions in its shrinkwrap. Over stdio the server never starts the SDK's express server, and every input it validates is size-bounded.
 - **The Worker's lockfile:** zod 4.6.7.

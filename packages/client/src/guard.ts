@@ -208,6 +208,17 @@ export type SigningRequest =
 
 const SEVERITY: Record<Action, number> = { allow: 0, warn: 1, block: 2, not_verified: 3 };
 const MAX_CONTEXT = 4096;
+
+/**
+ * The first `max` UTF-16 units, never ending inside a character, with lone surrogates replaced:
+ * the API refuses a body that is not valid UTF-8, so a cut through an emoji would refuse the check.
+ */
+function cut(text: string, max: number): string {
+  const clean = text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+  if (clean.length <= max) return clean;
+  const head = clean.slice(0, max);
+  return /[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head;
+}
 /** Counterparties checked for one Solana transaction (a batch); more is refused, never partly checked. */
 const MAX_SOLANA_CHECKS = 5;
 const DEFAULT_MAX_SOLANA_FEE_LAMPORTS = 10_000_000n;
@@ -468,7 +479,7 @@ export function createGuard(options: GuardOptions = {}) {
   /** Adds the agent's own context in front of the decoded description (the request is then bound as sent). */
   function withAgentContext(body: RiskCheckBody): RiskCheckRequest {
     const extra = agentContext();
-    const context = extra ? `${extra.slice(0, MAX_CONTEXT - 200)}\n\nAbout to sign: ${body.context}`.slice(0, MAX_CONTEXT) : body.context;
+    const context = extra ? cut(`${cut(extra, MAX_CONTEXT - 200)}\n\nAbout to sign: ${body.context}`, MAX_CONTEXT) : body.context;
     return { ...(body as RiskCheckRequest), context };
   }
 

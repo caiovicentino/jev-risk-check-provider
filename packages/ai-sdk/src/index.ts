@@ -49,6 +49,8 @@ export interface ApprovalOptions<TOOLS extends ToolSet> extends X402checkOptions
 export type X402checkApproval = (options: {
   toolCall: { toolName: string; toolCallId: string; input: unknown };
   messages: ModelMessage[];
+  tools?: Record<string, unknown> | undefined;
+  toolsContext?: unknown;
 }) => Promise<ApprovalDecision>;
 
 /**
@@ -56,6 +58,8 @@ export type X402checkApproval = (options: {
  * `tools` runs, x402check screens the counterparties its input names. allow → approved (it
  * runs) · warn → user-approval (or denied, per `onWarn`) · block or not_verified → denied. Each
  * reason is recorded on the approval. A check that fails or cannot be verified denies the call.
+ * A tool's own `needsApproval` still applies (the AI SDK reads it only when no policy is given):
+ * the stricter answer wins. Only tools that run on the server (with `execute`) are held back.
  *
  * ```ts
  * await generateText({ model, tools, prompt, toolApproval: x402checkApproval({ creditToken, tools: {
@@ -83,15 +87,23 @@ export function x402checkApproval<TOOLS extends ToolSet>(options: ApprovalOption
     return screening;
   }
 
-  return async ({ toolCall, messages }) => {
-    const mapper = Object.prototype.hasOwnProperty.call(mappers, toolCall.toolName) ? mappers[toolCall.toolName] : undefined;
-    if (!mapper) return { type: "not-applicable" };
+  return async ({ toolCall, messages, tools, toolsContext }) => {
+    const definition = own(tools, toolCall.toolName) as { execute?: unknown; needsApproval?: unknown } | undefined;
+    // With a policy the AI SDK never reads the tool's own needsApproval, so the policy does.
+    const own_ = await ownApproval(definition, toolCall, messages, own(toolsContext, toolCall.toolName));
+    const mapper = own(mappers, toolCall.toolName) as Counterparties<unknown> | undefined;
+    if (!mapper) return own_;
+    if (definition && typeof definition.execute !== "function") {
+      // The AI SDK hands a tool without execute to the client (useChat's onToolCall) before it asks
+      // any policy: an approval cannot hold it back. Deny it, so the misuse shows; see the README.
+      return { type: "denied", reason: `x402check: "${toolCall.toolName}" has no execute, so it runs outside the server and toolApproval cannot hold it back; check it where it runs` };
+    }
     let screening: Screening;
     try {
       const named = await mapper(toolCall.input, { toolName: toolCall.toolName, toolCallId: toolCall.toolCallId });
-      if (named === undefined) return { type: "not-applicable" };
+      if (named === undefined) return own_;
       const list = (Array.isArray(named) ? [...named] : [named]) as RiskCheckRequest[];
-      if (list.length === 0) return { type: "not-applicable" };
+      if (list.length === 0) return own_;
       // `context: false` sends nothing of the conversation, not even the call's input.
       const shared =
         options.context === false
@@ -102,10 +114,29 @@ export function x402checkApproval<TOOLS extends ToolSet>(options: ApprovalOption
     } catch (err) {
       screening = { action: "not_verified", reasons: [`x402check could not screen this call: ${err instanceof Error ? err.message : String(err)}`], checks: [] };
     }
-    const status = statusOf(screening, onWarn);
+    const screened = statusOf(screening, onWarn);
+    // The stricter answer wins: an allow on a tool that asks for approval still asks.
+    const status: ApprovalDecision = screened.type === "approved" && own_.type === "user-approval" ? { type: "user-approval", reason: `${screened.reason}; ${own_.reason}` } : screened;
     if (options.onVerdict) await options.onVerdict({ toolName: toolCall.toolName, toolCallId: toolCall.toolCallId, screening, status });
     return status;
   };
+}
+
+function own(record: unknown, key: string): unknown {
+  return record !== null && typeof record === "object" && Object.prototype.hasOwnProperty.call(record, key) ? (record as Record<string, unknown>)[key] : undefined;
+}
+
+/** The tool's own needsApproval, as the AI SDK reads it when no policy is given. */
+async function ownApproval(
+  definition: { needsApproval?: unknown } | undefined,
+  toolCall: { toolCallId: string; input: unknown },
+  messages: ModelMessage[],
+  context: unknown,
+): Promise<ApprovalDecision> {
+  const needs = definition?.needsApproval;
+  if (needs == null) return { type: "not-applicable" };
+  const required = typeof needs === "function" ? await (needs as (input: unknown, o: object) => unknown)(toolCall.input, { toolCallId: toolCall.toolCallId, messages, context }) : needs;
+  return required ? { type: "user-approval", reason: "the tool asks for approval (needsApproval)" } : { type: "not-applicable" };
 }
 
 function statusOf(screening: Screening, onWarn: "user-approval" | "denied"): ApprovalDecision {
@@ -174,13 +205,26 @@ function outputText(output: unknown): string {
   return "";
 }
 
-/** Keeps the end: the most recent content matters most. */
+/** Lone UTF-16 surrogates (a cut through an emoji) make the body invalid UTF-8, which the API refuses. */
+function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+}
+
+/** Keeps the end (the most recent content matters most), never splitting a character. */
 function fitTail(text: string, max: number): string {
-  return text.length <= max ? text : `…${text.slice(text.length - (max - 1))}`;
+  const clean = wellFormed(text);
+  if (clean.length <= max) return clean;
+  let tail = clean.slice(clean.length - (max - 1));
+  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+  return `…${tail}`;
 }
 
 function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  const clean = wellFormed(text);
+  if (clean.length <= max) return clean;
+  let head = clean.slice(0, max - 1);
+  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+  return `${head}…`;
 }
 
 function safeJson(value: unknown): string {

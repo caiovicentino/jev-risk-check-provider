@@ -271,3 +271,77 @@ test("defaultContext: the latest user message and the tool results after it, mos
   assert.ok(long && long.length <= 4096 - 700 && long.endsWith("END"));
   assert.equal(defaultContext([]), undefined);
 });
+
+test("a tool's own needsApproval still applies under the policy, and the stricter answer wins", async () => {
+  const provider = boundProvider(() => LOW);
+  const ran: string[] = [];
+  const tools = {
+    ...walletTools(ran),
+    deleteFile: tool({
+      description: "Delete a file",
+      inputSchema: jsonSchema<{ path: string }>({ type: "object", properties: { path: { type: "string" } }, required: ["path"] }),
+      needsApproval: true,
+      execute: async () => {
+        ran.push("deleteFile");
+        return { ok: true };
+      },
+    }),
+    sendWithConfirm: tool({
+      description: "Send USDC, always confirmed",
+      inputSchema: jsonSchema<{ to: string }>({ type: "object", properties: { to: { type: "string" } }, required: ["to"] }),
+      needsApproval: async (input: { to: string }) => input.to === PAYEE,
+      execute: async () => {
+        ran.push("sendWithConfirm");
+        return { ok: true };
+      },
+    }),
+  };
+  const policy = x402checkApproval<typeof tools>({ fetch: provider.fetch, creditToken: TOKEN, pinnedKeys: false, tools: { sendWithConfirm: transfer, sendUsdc: () => undefined } });
+  const ask = (toolName: string, input: unknown) =>
+    generateText({ model: modelCalling([{ toolName, input }]), tools, prompt: "go", toolApproval: policy }).then((r) => approvalParts(r).requests[0]);
+  // Not mapped: the tool's needsApproval holds it for the user, unchecked.
+  assert.match((await ask("deleteFile", { path: "/" }))?.reason ?? "", /needsApproval/);
+  // Mapped and allowed, but the tool asks: the user still decides.
+  assert.match((await ask("sendWithConfirm", { to: PAYEE }))?.reason ?? "", /^x402check: allow.*needsApproval/);
+  assert.deepEqual(ran, []);
+  // Its needsApproval says no: x402check's allow runs it.
+  await generateText({ model: modelCalling([{ toolName: "sendWithConfirm", input: { to: OTHER } }]), tools, prompt: "go", toolApproval: policy });
+  assert.deepEqual(ran, ["sendWithConfirm"]);
+});
+
+test("a mapped tool without execute (run by the client) is denied: an approval cannot hold it back", async () => {
+  const provider = boundProvider(() => LOW);
+  const tools = {
+    sendFromBrowser: tool({
+      description: "The browser wallet sends USDC",
+      inputSchema: jsonSchema<{ to: string }>({ type: "object", properties: { to: { type: "string" } }, required: ["to"] }),
+      outputSchema: jsonSchema<{ tx: string }>({ type: "object", properties: { tx: { type: "string" } }, required: ["tx"] }),
+    }),
+  };
+  const result = await generateText({
+    model: modelCalling([{ toolName: "sendFromBrowser", input: { to: PAYEE } }]),
+    tools,
+    prompt: "pay",
+    toolApproval: x402checkApproval<typeof tools>({ fetch: provider.fetch, creditToken: TOKEN, pinnedKeys: false, tools: { sendFromBrowser: transfer } }),
+  });
+  const { responses } = approvalParts(result);
+  assert.equal(responses[0]?.approved, false);
+  assert.match(responses[0]?.reason ?? "", /has no execute/);
+  assert.equal(provider.calls.length, 0);
+});
+
+test("long content cut at the API's limit never splits a character (the API refuses invalid UTF-8)", async () => {
+  const provider = boundProvider(() => LOW);
+  const approve = x402checkApproval({ fetch: provider.fetch, creditToken: TOKEN, pinnedKeys: false, tools: { sendUsdc: transfer } });
+  for (const pad of ["", "x"]) {
+    const messages = [{ role: "user" as const, content: pad + "💸".repeat(3000) }];
+    const status = await approve({ toolCall: { toolName: "sendUsdc", toolCallId: `e${pad}`, input: { to: PAYEE, note: "🚀".repeat(400) } }, messages });
+    assert.equal(status.type, "approved");
+  }
+  for (const request of provider.seen) {
+    const context = request.context ?? "";
+    assert.ok(context.length <= 4096);
+    assert.equal(Buffer.from(context, "utf8").toString("utf8"), context, "well-formed UTF-16");
+    assert.doesNotMatch(context, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  }
+});

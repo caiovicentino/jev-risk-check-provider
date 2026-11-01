@@ -51,12 +51,20 @@ When the agent pays an x402 resource, transfers tokens or approves a spender, th
 |---|---|
 | `signTypedData` (x402 EIP-3009 / Permit2, permits, orders) | typed data, decoded: payee, spender, amount and asset are bound |
 | `signTransaction`, `sendTransaction`, `nativeTransfer` | a transaction, simulated before signing; `sendTransaction` sends the checked copy |
-| `signMessage` | a message, decoded and checked; a message of opaque bytes is refused like a raw hash |
+| `signMessage` | a message, decoded and checked. A hex string is read as the raw bytes AgentKit's wallets sign, and a 32-byte hash or any other opaque binary is refused like a raw hash |
 | `sign(hash)` | refused: a raw hash could authorize anything (`allowRawHashSigning: true` lets it through, unchecked) |
 | `toSigner()` (and `toEip1193Provider()` where AgentKit has it) | built on the guarded methods above |
-| any other member whose name signs or sends (`swap…`, `transfer…`, `execute…`) | refused (`passthrough: ["name"]` lets it through, unchecked) |
+| `getAddress`, `getNetwork`, `getName`, `getBalance`, `getPublicClient`, `readContract`, `waitForTransactionReceipt` | passed through: they only read |
+| any other member: a gasless transfer, a trade, `getClient()`, a smart account or its owner account | a method refuses, and a field that holds an object throws. `passthrough: ["name"]` makes it reachable, unchecked |
 
-**Not covered:** work a wallet's backend does on its own, without the wallet provider's signing methods. A CDP server wallet's swaps through `getClient()`, for example, sign inside CDP.
+**AgentKit actions that sign outside these methods refuse** on a guarded wallet:
+- CDP's swaps and faucet go through `getClient()`.
+- The legacy CDP wallet's gasless ERC-20 transfers and trades.
+- A smart wallet's own account.
+
+`passthrough` lets each through by name, unchecked, if you accept that.
+
+A transaction for a chain other than the wallet's is refused, because the wallet sends on its own network.
 
 **Solana:** this release guards EVM wallets. For a Solana signer, wrap it with `guardSolanaSigner` from `@x402check/client/guard`.
 
@@ -68,7 +76,7 @@ When the agent pays an x402 resource, transfers tokens or approves a spender, th
 - **the content the agent acted on:** `context`, checked for injected instructions;
 - **limits:** `origin`, `maxFeeWei`, `passthrough` and `allowRawHashSigning`.
 
-The chain comes from the wallet's network.
+The chain comes from the wallet's network. `maxFeeWei` applies to `signTransaction` only: `sendTransaction` and `nativeTransfer` let the wallet set its own fees.
 
 `x402checkActionProvider` takes `creditToken`, `fetch`, `baseUrl`, `timeoutMs`, `issuer` and `pinnedKeys`.
 
@@ -82,7 +90,7 @@ The chain comes from the wallet's network.
 - `@coinbase/agentkit` from 0.10.4 to below 0.12.
 - The action's schema is built with the zod that AgentKit itself loads, so it works with AgentKit's LangChain, Vercel AI SDK and MCP extensions.
 - The provider overrides `getActions`, so it uses no decorators.
-- Node.js 22 or later.
+- Node.js 22.12 or later.
 
 ## License
 

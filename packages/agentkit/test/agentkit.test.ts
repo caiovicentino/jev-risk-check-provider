@@ -37,6 +37,8 @@ class TestWallet extends EvmWalletProvider {
   readonly #account = privateKeyToAccount(KEY);
   readonly sent: unknown[] = [];
   readonly calls: string[] = [];
+  /** A signing account kept on the wallet, as CDP's smart wallet keeps its owner. */
+  readonly ownerAccount = privateKeyToAccount(KEY);
   getAddress(): string {
     return this.#account.address;
   }
@@ -57,9 +59,10 @@ class TestWallet extends EvmWalletProvider {
     this.calls.push("sign");
     return this.#account.sign({ hash });
   }
+  /** As AgentKit's ViemWalletProvider: a hex string is signed as raw bytes. */
   async signMessage(message: string | Uint8Array): Promise<Hex> {
     this.calls.push("signMessage");
-    return this.#account.signMessage({ message: typeof message === "string" ? message : { raw: message } });
+    return this.#account.signMessage({ message: typeof message === "string" && !/^0x[0-9a-fA-F]*$/.test(message) ? message : { raw: message as Hex | Uint8Array } });
   }
   async signTypedData(typedData: any): Promise<Hex> {
     this.calls.push("signTypedData");
@@ -87,6 +90,11 @@ class TestWallet extends EvmWalletProvider {
   async swapTokens(): Promise<string> {
     this.calls.push("swapTokens");
     return "swapped";
+  }
+  /** Like LegacyCdpWalletProvider.gaslessERC20Transfer: it signs, and its name says nothing of it. */
+  async gaslessERC20Transfer(): Promise<string> {
+    this.calls.push("gaslessERC20Transfer");
+    return "sent";
   }
 }
 
@@ -231,4 +239,38 @@ test("caip2Of maps AgentKit networks", () => {
   assert.equal(caip2Of({ protocolFamily: "evm", networkId: "base-mainnet", chainId: "8453" }), "eip155:8453");
   assert.equal(caip2Of({ protocolFamily: "svm", networkId: "solana-mainnet" }), "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
   assert.equal(caip2Of({ protocolFamily: "evm" }), undefined);
+});
+
+test("only reading members pass: a gasless transfer, a backend shortcut or a signing account on the wallet is not reachable", async () => {
+  const { wallet, guarded } = setup();
+  const gasless = await refused((guarded as unknown as TestWallet).gaslessERC20Transfer());
+  assert.equal(gasless.code, "unguarded_method");
+  assert.throws(() => (guarded as unknown as TestWallet).ownerAccount, (e: unknown) => e instanceof X402CheckBlockedError && e.verdict.code === "unguarded_method");
+  assert.deepEqual(wallet.calls, []);
+  // Named in passthrough: reachable, unchecked, by the caller's choice.
+  const open = guardWalletProvider(wallet, { pinnedKeys: false, passthrough: ["gaslessERC20Transfer", "ownerAccount"] }) as unknown as TestWallet;
+  assert.equal(await open.gaslessERC20Transfer(), "sent");
+  assert.equal(open.ownerAccount.address, wallet.getAddress());
+});
+
+test("signMessage reads a hex string as the bytes the wallet signs: a 32-byte hash is refused, text is checked and signed", async () => {
+  const { api, wallet, guarded } = setup();
+  const hash = await refused(guarded.signMessage(`0x${"11".repeat(32)}`));
+  assert.equal(hash.code, "raw_hash_signing");
+  assert.deepEqual(wallet.calls, []);
+  assert.equal(api.calls.length, 0, "refused locally, before any paid check");
+  // Hex that is readable text is read as that text; the wallet signs the same bytes.
+  const hello = await guarded.signMessage("0x68656c6c6f");
+  assert.equal(hello, await privateKeyToAccount(KEY).signMessage({ message: "hello" }));
+  assert.equal(await guarded.signMessage("hello"), hello);
+});
+
+test("malformed amounts and transactions for another chain refuse with the guard's error", async () => {
+  const { wallet, guarded, verdicts } = setup();
+  const decimal = await refused(guarded.nativeTransfer(PAYEE, "0.1"));
+  assert.equal(decimal.code, "invalid_transaction");
+  const otherChain = await refused(guarded.sendTransaction({ to: PAYEE as Hex, value: 1n, chainId: 1 } as TransactionRequest));
+  assert.equal(otherChain.code, "invalid_transaction");
+  assert.deepEqual(wallet.calls, []);
+  assert.equal(verdicts.length, 2);
 });

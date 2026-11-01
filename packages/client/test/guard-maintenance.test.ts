@@ -186,3 +186,22 @@ describe("L2: delegations the simulation does not apply", () => {
     assert.deepEqual([v.action, v.code, signed.length], ["not_verified", "not_simulated", 0]);
   });
 });
+
+test("the agent's context is cut at the API's limit without splitting a character", async () => {
+  const api = boundProvider(() => ({ tier: "low", score: 90, categories: [] }));
+  const signer = {
+    address: "0x5555555555555555555555555555555555555555",
+    signTypedData: async (_typedData: unknown) => "0x" as const,
+  };
+  const usdc = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const guarded = guardAccount(signer, { pinnedKeys: false, fetch: api.fetch, context: "x" + "💸".repeat(3000) });
+  await guarded.signTypedData({
+    domain: { name: "USD Coin", version: "2", chainId: 8453, verifyingContract: usdc },
+    types: { TransferWithAuthorization: [{ name: "from", type: "address" }, { name: "to", type: "address" }, { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" }, { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" }] },
+    primaryType: "TransferWithAuthorization",
+    message: { from: signer.address, to: "0x1111111111111111111111111111111111111111", value: 3500n, validAfter: 0n, validBefore: 2_000_000_000n, nonce: `0x${"01".repeat(32)}` },
+  });
+  const context = api.seen[0]?.context ?? "";
+  assert.ok(context.length > 0 && context.length <= 4096);
+  assert.doesNotMatch(context, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+});
