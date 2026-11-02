@@ -1,6 +1,6 @@
 {
   "name": "@x402check/ai-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "x402check for the Vercel AI SDK: a tool-approval policy that screens the counterparty before a tool moves money (allow → runs, warn → asks the user, block → denied), and a risk-check tool for the model. Signed, paid verdicts; no free tier.",
   "type": "module",
   "main": "./dist/index.js",

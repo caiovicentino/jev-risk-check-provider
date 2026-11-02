@@ -205,3 +205,22 @@ test("the agent's context is cut at the API's limit without splitting a characte
   assert.ok(context.length > 0 && context.length <= 4096);
   assert.doesNotMatch(context, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
 });
+
+test("without an agent context, a decoded excerpt that ends in an emoji still reaches the API as valid UTF-8", async () => {
+  const api = boundProvider(() => ({ tier: "low", score: 90, categories: [] }));
+  const signer = {
+    address: "0x5555555555555555555555555555555555555555",
+    signMessage: async (_args: unknown) => "0x" as const,
+  };
+  const guarded = guardAccount(signer, { pinnedKeys: false, fetch: api.fetch });
+  // Every cut position against the excerpt's limit: an emoji at the boundary is kept whole or left out.
+  // (Plain words: a long run of one character reads as a secret and is redacted before any excerpt.)
+  const lead = "please confirm your newsletter subscription for the weekly digest ".repeat(10);
+  for (let n = 290; n <= 305; n++) {
+    await guarded.signMessage({ message: `${lead.slice(0, n)}😀 thanks` });
+  }
+  assert.equal(api.seen.length, 16);
+  for (const request of api.seen) {
+    assert.doesNotMatch(request.context ?? "", /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  }
+});

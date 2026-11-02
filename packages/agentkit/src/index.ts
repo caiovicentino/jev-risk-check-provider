@@ -16,7 +16,7 @@ const INTERCEPTED = new Set(["sign", "signMessage", "signTypedData", "signTransa
  * a CDP client, a smart account or its owner) could sign or send without a check, so on a guarded
  * wallet it refuses, unless `options.passthrough` names it.
  */
-const READ_ONLY = new Set(["getAddress", "getNetwork", "getName", "getBalance", "getPublicClient", "readContract", "waitForTransactionReceipt"]);
+const READ_ONLY = new Set(["getAddress", "getNetwork", "getName", "getBalance", "getPublicClient", "readContract", "waitForTransactionReceipt", "getCdpSdkNetwork"]);
 const HEX = /^0x[0-9a-fA-F]*$/;
 const INTEGER = /^\d+$/;
 
@@ -26,9 +26,10 @@ const INTEGER = /^\d+$/;
  * are decoded, checked and verified before the key signs; anything but a verified allow throws
  * `X402CheckBlockedError` and nothing is signed or sent. Pass it to `AgentKit.from`.
  *
- * Only the members that read pass through as they are. Any other member (a gasless transfer, a
- * trade, `getClient()`, a smart account) refuses, or throws when it is a property, unless
- * `options.passthrough` names it: then it is reachable, unchecked.
+ * Only the members that read pass through as they are. Any other method (a gasless transfer, a
+ * trade, `getClient()`) refuses when called; a field holding an account (a smart account, its
+ * owner) shows only its address, and any other object throws. `options.passthrough` makes a member
+ * reachable as it is, unchecked.
  */
 export function guardWalletProvider<W extends EvmWalletProvider>(wallet: W, options: GuardOptions = {}): W {
   if (!(wallet instanceof EvmWalletProvider)) throw new TypeError("guardWalletProvider takes an AgentKit EvmWalletProvider (Solana: guardSolanaSigner from @x402check/client/guard)");
@@ -92,6 +93,7 @@ export function guardWalletProvider<W extends EvmWalletProvider>(wallet: W, opti
   const passthrough = new Set(options.passthrough ?? []);
   const base = [EvmWalletProvider.prototype, WalletProvider.prototype] as unknown as Record<PropertyKey, unknown>[];
 
+  const open = (prop: PropertyKey) => typeof prop === "symbol" || prop === "constructor" || READ_ONLY.has(prop as string) || passthrough.has(prop as string);
   const guarded: W = new Proxy(wallet, {
     get(target, prop) {
       if (typeof prop === "string" && INTERCEPTED.has(prop)) return intercepted[prop];
@@ -100,15 +102,32 @@ export function guardWalletProvider<W extends EvmWalletProvider>(wallet: W, opti
       if (typeof value === "function" && base.some((proto) => proto[prop] === value)) {
         return (...args: unknown[]) => (value as (...a: unknown[]) => unknown).apply(guarded, args);
       }
-      const open = typeof prop === "symbol" || prop === "constructor" || READ_ONLY.has(prop) || passthrough.has(prop);
-      if (typeof value === "function") {
+      if (open(prop)) {
         // The wallet's own members run on the wallet itself (private fields need the real instance).
-        if (open) return (value as (...a: unknown[]) => unknown).bind(target);
-        return () => refuseUnguarded(String(prop), options);
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
       }
-      // A field holding an object (a smart account, an owner account, a client) could sign: not reachable.
-      if (value !== null && typeof value === "object" && !open) throw unguardedError(String(prop), options);
+      // Refused synchronously: a caller that does not await the member (AgentKit's CDP actions call
+      // some members that way) still sees the refusal, and no rejected promise is left to end the process.
+      if (typeof value === "function") {
+        return () => {
+          throw unguardedError(String(prop), options, true);
+        };
+      }
+      if (value !== null && typeof value === "object") {
+        // An account (a smart account, its owner) shows its address only: it could sign, the address cannot.
+        const address = (value as { address?: unknown }).address;
+        if (typeof address === "string") return Object.freeze({ address });
+        // Any other object (a client) could sign: not reachable.
+        throw unguardedError(String(prop), options);
+      }
       return value;
+    },
+    // Reading a field through its descriptor follows the same rules as reading it.
+    getOwnPropertyDescriptor(target, prop) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+      if (!descriptor || open(prop)) return descriptor;
+      if (!descriptor.configurable) throw unguardedError(String(prop), options);
+      return { get: () => (guarded as Record<PropertyKey, unknown>)[prop], enumerable: descriptor.enumerable ?? false, configurable: true };
     },
   });
   return guarded;
@@ -127,20 +146,14 @@ function unguardedVerdict(name: string, call = false): GuardVerdict {
   };
 }
 
-function unguardedError(name: string, options: GuardOptions): X402CheckBlockedError {
-  const verdict = unguardedVerdict(name);
+function unguardedError(name: string, options: GuardOptions, call = false): X402CheckBlockedError {
+  const verdict = unguardedVerdict(name, call);
   void Promise.resolve(options.onVerdict?.(verdict)).catch(() => undefined);
   return new X402CheckBlockedError(verdict);
 }
 
 async function refuseMalformed(kind: "transaction", summary: string, reason: string, options: GuardOptions): Promise<never> {
   const verdict: GuardVerdict = { action: "not_verified", signed: false, kind, summary, reasons: [reason], code: "invalid_transaction", checks: [] };
-  await Promise.resolve(options.onVerdict?.(verdict)).catch(() => undefined);
-  throw new X402CheckBlockedError(verdict);
-}
-
-async function refuseUnguarded(name: string, options: GuardOptions): Promise<never> {
-  const verdict = unguardedVerdict(name, true);
   await Promise.resolve(options.onVerdict?.(verdict)).catch(() => undefined);
   throw new X402CheckBlockedError(verdict);
 }

@@ -54,8 +54,9 @@ When the agent pays an x402 resource, transfers tokens or approves a spender, th
 | `signMessage` | a message, decoded and checked. A hex string is read as the raw bytes AgentKit's wallets sign, and a 32-byte hash or any other opaque binary is refused like a raw hash |
 | `sign(hash)` | refused: a raw hash could authorize anything (`allowRawHashSigning: true` lets it through, unchecked) |
 | `toSigner()` (and `toEip1193Provider()` where AgentKit has it) | built on the guarded methods above |
-| `getAddress`, `getNetwork`, `getName`, `getBalance`, `getPublicClient`, `readContract`, `waitForTransactionReceipt` | passed through: they only read |
-| any other member: a gasless transfer, a trade, `getClient()`, a smart account or its owner account | a method refuses, and a field that holds an object throws. `passthrough: ["name"]` makes it reachable, unchecked |
+| `getAddress`, `getNetwork`, `getName`, `getBalance`, `getPublicClient`, `readContract`, `waitForTransactionReceipt`, `getCdpSdkNetwork` | passed through: they only read |
+| a field that holds an account: a smart account, its owner account | its address only, so AgentKit's `get_wallet_details` still shows it; the account cannot sign |
+| any other member: a gasless transfer, a trade, `getClient()`, a client on the wallet | a method refuses when called, before any promise, and a field that holds an object throws. `passthrough: ["name"]` makes it reachable, unchecked |
 
 **AgentKit actions that sign outside these methods refuse** on a guarded wallet:
 - CDP's swaps and faucet go through `getClient()`.

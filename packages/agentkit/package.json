@@ -1,6 +1,6 @@
 {
   "name": "@x402check/agentkit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "x402check for Coinbase AgentKit: a wallet-provider guard that screens every signature and transaction before the key signs (x402 payments, transfers, approvals), and an action provider the agent calls to check a counterparty. Signed, paid verdicts; no free tier.",
   "type": "module",
   "main": "./dist/index.js",

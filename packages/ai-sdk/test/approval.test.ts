@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateText, jsonSchema, tool } from "ai";
+import { z } from "zod";
 import { MockLanguageModelV4 } from "ai/test";
 import type { RiskCheckRequest } from "@x402check/client";
 import { boundProvider, json, mockFetch } from "../../client/test/helpers.ts";
@@ -307,6 +308,38 @@ test("a tool's own needsApproval still applies under the policy, and the stricte
   // Its needsApproval says no: x402check's allow runs it.
   await generateText({ model: modelCalling([{ toolName: "sendWithConfirm", input: { to: OTHER } }]), tools, prompt: "go", toolApproval: policy });
   assert.deepEqual(ran, ["sendWithConfirm"]);
+});
+
+test("needsApproval gets the tool's context through its contextSchema, as the AI SDK passes it", async () => {
+  const provider = boundProvider(() => LOW);
+  const ran: string[] = [];
+  const tools = {
+    sendAmount: tool({
+      description: "Send an amount of USDC",
+      inputSchema: jsonSchema<{ to: string; amount: number }>({ type: "object", properties: { to: { type: "string" }, amount: { type: "number" } }, required: ["to", "amount"] }),
+      // The app's limit: above it, a person approves. The schema supplies the default.
+      contextSchema: z.object({ approveAbove: z.number().default(100) }),
+      needsApproval: async (input: { amount: number }, { context }: { context: { approveAbove: number } }) => input.amount > context.approveAbove,
+      execute: async () => {
+        ran.push("sendAmount");
+        return { ok: true };
+      },
+    }),
+  };
+  const policy = x402checkApproval<typeof tools>({ fetch: provider.fetch, creditToken: TOKEN, pinnedKeys: false, tools: { sendAmount: (i) => ({ wallet: i.to, chain: "base" }) } });
+  const pay = (amount: number, context: object) =>
+    generateText({ model: modelCalling([{ toolName: "sendAmount", input: { to: PAYEE, amount } }]), tools, toolsContext: { sendAmount: context } as never, prompt: "go", toolApproval: policy }).then(approvalParts);
+  // The default applies: above 100, the person decides, as without the policy.
+  assert.match((await pay(5000, {})).requests[0]?.reason ?? "", /^x402check: allow.*needsApproval/);
+  assert.deepEqual(ran, []);
+  // Under the limit, x402check's allow runs it.
+  await pay(50, {});
+  assert.deepEqual(ran, ["sendAmount"]);
+  // A context the schema refuses denies the call.
+  const denied = (await pay(50, { approveAbove: "lots" })).responses[0];
+  assert.equal(denied?.approved, false);
+  assert.match(denied?.reason ?? "", /contextSchema/);
+  assert.deepEqual(ran, ["sendAmount"]);
 });
 
 test("a mapped tool without execute (run by the client) is denied: an approval cannot hold it back", async () => {

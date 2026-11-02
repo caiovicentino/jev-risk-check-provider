@@ -1,4 +1,4 @@
-import { jsonSchema, tool, type InferSchema, type ModelMessage, type Tool, type ToolSet } from "ai";
+import { asSchema, jsonSchema, tool, type InferSchema, type ModelMessage, type Tool, type ToolSet } from "ai";
 import { INTERACTION_TYPES, toCaip2, type InteractionType, type RiskCheckRequest } from "@x402check/client";
 import { createScreener, type Screening, type X402checkOptions } from "./screen.js";
 
@@ -88,9 +88,14 @@ export function x402checkApproval<TOOLS extends ToolSet>(options: ApprovalOption
   }
 
   return async ({ toolCall, messages, tools, toolsContext }) => {
-    const definition = own(tools, toolCall.toolName) as { execute?: unknown; needsApproval?: unknown } | undefined;
+    const definition = own(tools, toolCall.toolName) as { execute?: unknown; needsApproval?: unknown; contextSchema?: unknown } | undefined;
     // With a policy the AI SDK never reads the tool's own needsApproval, so the policy does.
-    const own_ = await ownApproval(definition, toolCall, messages, own(toolsContext, toolCall.toolName));
+    let own_: ApprovalDecision;
+    try {
+      own_ = await ownApproval(definition, toolCall, messages, own(toolsContext, toolCall.toolName));
+    } catch (err) {
+      return { type: "denied", reason: `x402check: the tool's own needsApproval could not be evaluated: ${err instanceof Error ? err.message : String(err)}`.slice(0, 600) };
+    }
     const mapper = own(mappers, toolCall.toolName) as Counterparties<unknown> | undefined;
     if (!mapper) return own_;
     if (definition && typeof definition.execute !== "function") {
@@ -128,15 +133,31 @@ function own(record: unknown, key: string): unknown {
 
 /** The tool's own needsApproval, as the AI SDK reads it when no policy is given. */
 async function ownApproval(
-  definition: { needsApproval?: unknown } | undefined,
+  definition: { needsApproval?: unknown; contextSchema?: unknown } | undefined,
   toolCall: { toolCallId: string; input: unknown },
   messages: ModelMessage[],
   context: unknown,
 ): Promise<ApprovalDecision> {
   const needs = definition?.needsApproval;
   if (needs == null) return { type: "not-applicable" };
-  const required = typeof needs === "function" ? await (needs as (input: unknown, o: object) => unknown)(toolCall.input, { toolCallId: toolCall.toolCallId, messages, context }) : needs;
+  const required =
+    typeof needs === "function"
+      ? await (needs as (input: unknown, o: object) => unknown)(toolCall.input, { toolCallId: toolCall.toolCallId, messages, context: await toolContext(definition?.contextSchema, context) })
+      : needs;
   return required ? { type: "user-approval", reason: "the tool asks for approval (needsApproval)" } : { type: "not-applicable" };
+}
+
+/**
+ * The tool's context as the AI SDK hands it to needsApproval: validated, and with its defaults,
+ * through the tool's `contextSchema`. A context the schema refuses throws, as it does in the SDK.
+ */
+async function toolContext(contextSchema: unknown, context: unknown): Promise<unknown> {
+  if (contextSchema == null) return context;
+  const schema = asSchema(contextSchema as Parameters<typeof asSchema>[0]);
+  if (!schema.validate) return context;
+  const result = await schema.validate(context);
+  if (!result.success) throw new Error(`the tool context does not match its contextSchema: ${result.error.message}`);
+  return result.value;
 }
 
 function statusOf(screening: Screening, onWarn: "user-approval" | "denied"): ApprovalDecision {

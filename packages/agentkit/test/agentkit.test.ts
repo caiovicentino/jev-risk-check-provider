@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { AgentKit, EvmWalletProvider, x402ActionProvider, type Network } from "@coinbase/agentkit";
+import { AgentKit, CdpSmartWalletProvider, EvmWalletProvider, walletActionProvider, x402ActionProvider, type Network } from "@coinbase/agentkit";
 import { privateKeyToAccount } from "viem/accounts";
 import { verifyTypedData, type Hex, type TransactionRequest } from "viem";
 import type { RiskCheckRequest } from "@x402check/client";
@@ -91,6 +91,17 @@ class TestWallet extends EvmWalletProvider {
     this.calls.push("swapTokens");
     return "swapped";
   }
+  /** A client kept on the wallet, as CDP's wallets keep theirs: it could sign, and it has no address. */
+  readonly cdpClient = { signHash: () => "signed" };
+  /** Like CdpEvmWalletProvider.getCdpSdkNetwork: it only reads, and AgentKit calls it without awaiting it. */
+  getCdpSdkNetwork(): string {
+    return "base";
+  }
+  /** Like CdpEvmWalletProvider.getClient: synchronous, and the client it returns can sign. */
+  getClient(): object {
+    this.calls.push("getClient");
+    return this.cdpClient;
+  }
   /** Like LegacyCdpWalletProvider.gaslessERC20Transfer: it signs, and its name says nothing of it. */
   async gaslessERC20Transfer(): Promise<string> {
     this.calls.push("gaslessERC20Transfer");
@@ -113,6 +124,18 @@ const payment = (from: string, to: string) => ({
   primaryType: "TransferWithAuthorization" as const,
   message: { from: from as Hex, to: to as Hex, value: 3500n, validAfter: 0n, validBefore: 2_000_000_000n, nonce: `0x${"01".repeat(32)}` as Hex },
 });
+
+/** A member the guard does not check refuses as it is called, before any promise. */
+function refusedNow(call: () => unknown): GuardVerdict {
+  let thrown: unknown;
+  try {
+    call();
+  } catch (e) {
+    thrown = e;
+  }
+  assert.ok(thrown instanceof X402CheckBlockedError, `expected a synchronous refusal, got ${String(thrown)}`);
+  return thrown.verdict;
+}
 
 async function refused(p: Promise<unknown>): Promise<GuardVerdict> {
   const err = await p.then(
@@ -189,7 +212,7 @@ test("raw hash signing and unguarded signing members refuse; plain members pass 
   const { wallet, guarded, verdicts } = setup();
   const raw = await refused(guarded.sign(`0x${"11".repeat(32)}`));
   assert.equal(raw.code, "raw_hash_signing");
-  const swap = await refused((guarded as unknown as TestWallet).swapTokens());
+  const swap = refusedNow(() => (guarded as unknown as TestWallet).swapTokens());
   assert.equal(swap.code, "unguarded_method");
   assert.deepEqual(wallet.calls, []);
   assert.equal(await guarded.getBalance(), 10n ** 18n);
@@ -243,9 +266,19 @@ test("caip2Of maps AgentKit networks", () => {
 
 test("only reading members pass: a gasless transfer, a backend shortcut or a signing account on the wallet is not reachable", async () => {
   const { wallet, guarded } = setup();
-  const gasless = await refused((guarded as unknown as TestWallet).gaslessERC20Transfer());
+  const g = guarded as unknown as TestWallet;
+  const gasless = refusedNow(() => g.gaslessERC20Transfer());
   assert.equal(gasless.code, "unguarded_method");
-  assert.throws(() => (guarded as unknown as TestWallet).ownerAccount, (e: unknown) => e instanceof X402CheckBlockedError && e.verdict.code === "unguarded_method");
+  // An account shows its address only; a client throws.
+  assert.deepEqual({ ...g.ownerAccount }, { address: wallet.getAddress() });
+  assert.ok(Object.isFrozen(g.ownerAccount));
+  assert.throws(() => g.cdpClient, (e: unknown) => e instanceof X402CheckBlockedError && e.verdict.code === "unguarded_method");
+  // Through a property descriptor, the same rules.
+  const owner = Object.getOwnPropertyDescriptor(guarded, "ownerAccount");
+  assert.equal(owner?.value, undefined);
+  assert.deepEqual({ ...(owner?.get?.() as object) }, { address: wallet.getAddress() });
+  assert.throws(() => Object.getOwnPropertyDescriptor(guarded, "cdpClient")?.get?.(), X402CheckBlockedError);
+  assert.equal(Object.getOwnPropertyDescriptors(guarded).ownerAccount?.value, undefined);
   assert.deepEqual(wallet.calls, []);
   // Named in passthrough: reachable, unchecked, by the caller's choice.
   const open = guardWalletProvider(wallet, { pinnedKeys: false, passthrough: ["gaslessERC20Transfer", "ownerAccount"] }) as unknown as TestWallet;
@@ -329,3 +362,49 @@ for (const name of ["make_http_request_with_x402", "retry_http_request_with_x402
     }
   });
 }
+
+test("a refused member called without await refuses at once: no unhandled rejection ends the process", async () => {
+  const { wallet, guarded, verdicts } = setup();
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown) => void unhandled.push(reason);
+  process.on("unhandledRejection", record);
+  try {
+    const g = guarded as unknown as TestWallet;
+    // AgentKit's CDP actions call these without awaiting them: one reads, the other could sign.
+    assert.equal(g.getCdpSdkNetwork(), "base");
+    const verdict = refusedNow(() => g.getClient());
+    assert.equal(verdict.code, "unguarded_method");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+    assert.deepEqual(wallet.calls, []);
+    assert.equal(verdicts.length, 1);
+  } finally {
+    process.off("unhandledRejection", record);
+  }
+});
+
+test("a guarded CDP smart wallet: get_wallet_details shows the owner's address, and its owner account cannot sign by any path", async () => {
+  const owner = privateKeyToAccount(KEY);
+  // Its constructor is private (configureWithWallet calls CDP); the fields are what matter here.
+  const SmartWallet = CdpSmartWalletProvider as unknown as new (config: object) => CdpSmartWalletProvider;
+  const wallet = new SmartWallet({
+    smartAccount: { address: "0x00000000000000000000000000000000000000aa", name: "agent" },
+    ownerAccount: owner,
+    cdp: {},
+    publicClient: { getBalance: async () => 0n },
+    network: { protocolFamily: "evm", networkId: "base-mainnet", chainId: "8453" },
+  });
+  const guarded = guardWalletProvider(wallet, { pinnedKeys: false, fetch: boundProvider(decide).fetch });
+  const agentkit = await AgentKit.from({ walletProvider: guarded, actionProviders: [walletActionProvider()] });
+  const action = agentkit.getActions().find((a) => a.name.endsWith("_get_wallet_details"));
+  assert.ok(action);
+  const details = await action.invoke({});
+  assert.match(details, new RegExp(`Owner Address: ${owner.address}`));
+  // The owner account is an address only, read directly or through its descriptor.
+  const g = guarded as unknown as { ownerAccount: Record<string, unknown>; smartAccount: Record<string, unknown> };
+  assert.deepEqual(Object.keys(g.ownerAccount), ["address"]);
+  assert.equal(g.ownerAccount.signMessage, undefined);
+  assert.equal(Object.getOwnPropertyDescriptor(guarded, "ownerAccount")?.value, undefined);
+  assert.equal((Object.getOwnPropertyDescriptor(guarded, "ownerAccount")?.get?.() as Record<string, unknown>).signMessage, undefined);
+  assert.deepEqual(Object.keys(g.smartAccount), ["address"]);
+});

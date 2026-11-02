@@ -4,6 +4,14 @@ Each release's full notes and evidence are on the [releases page](https://github
 
 ## Unreleased
 
+- **`@x402check/ai-sdk` 0.1.1 and `@x402check/agentkit` 0.1.1** (built, waiting to be published): the fixes from the 2026-11-02 review of the integrations. That independent review found 5 problems, 2 of them medium. None lets a signature or a payment through unchecked. Each fix has a test that fails on the code before it:
+  - **agentkit: a refused member called without `await` could end the process.** A refused method returned a rejected promise. AgentKit's CDP actions call some members without awaiting them, so the rejection went unhandled and Node exited. A refused method now throws as it is called. `getCdpSdkNetwork`, which only maps the network to its name, is now read-only.
+  - **ai-sdk: a tool's `needsApproval` received its raw context.** The AI SDK passes the context through the tool's `contextSchema`, defaults included; the policy passed it raw. So `needsApproval: amount > context.approveAbove`, with the limit as a schema default, read `undefined` and let the tool run without the person's approval. The policy now validates the context as the SDK does, and a context the schema refuses denies the call.
+  - **agentkit: an object field was readable through its property descriptor.** `Object.getOwnPropertyDescriptor(wallet, "ownerAccount").value` returned the owner account, which signs unchecked. Only code in the agent's own process could do this. The descriptor now follows the same rules as a read.
+  - **agentkit: `get_wallet_details` failed on a CDP smart wallet,** because it reads `ownerAccount.address`. A field holding an account now shows its address only.
+  - **client: decoded excerpts cut through emoji.** The decoders' 300-character excerpt and the typed-data previews were cut in UTF-16 units. A message with an emoji at the cut produced a context the API refuses, so the signature was refused as `not_verified` when no agent context was set.
+    - Cuts now keep an emoji whole (`headOf` in the Snap's `util.ts`, vendored into the client), and the guard cleans every context, not only the agent's.
+    - This ships with the next client release. The Worker's bundle is unchanged.
 - **Dependencies (2026-11-01):** Dependabot's monthly updates: `ai` 7.0.153, `tldts` 7.4.19, `viem` 2.57.11, `@modelcontextprotocol/sdk` 1.32.2 and `wrangler` 4.152.0. The root lockfile was rebuilt locally, because Dependabot's left out jayson's nested `utf-8-validate`. Production was redeployed from `6520146`.
 - **The MCP's lockfile:** zod 4.6.7 (GHSA-mrhx-c7xc-m3w5), body-parser 2.4.0 (GHSA-27r3-jxmh-p828) and fast-uri 3.1.9. The published 0.3.3 pins the earlier versions in its shrinkwrap. Over stdio the server never starts the SDK's express server, and every input it validates is size-bounded.
 - **The Worker's lockfile:** zod 4.6.7.

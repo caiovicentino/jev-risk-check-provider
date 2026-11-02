@@ -546,10 +546,16 @@ export function tokenAmount(value: bigint, chain: string | undefined, token: str
   return `${value.toString()} base units of ${token ? `token ${token}` : "an unknown token"}`;
 }
 
-/** Caps a string, appending an ellipsis when truncated. */
+/** The first `max` UTF-16 units of a string, without splitting a surrogate pair (an emoji). */
+export function headOf(text: string, max: number): string {
+  const head = text.slice(0, Math.max(0, max));
+  return /[\uD800-\uDBFF]$/.test(head) && /^[\uDC00-\uDFFF]/.test(text.slice(head.length)) ? head.slice(0, -1) : head;
+}
+
+/** Caps a string, appending an ellipsis when truncated; an emoji is never cut in half. */
 export function capText(text: string, max: number): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+  return `${headOf(text, max - 1).trimEnd()}…`;
 }
 
 export function unixDate(value: bigint | undefined): string | undefined {

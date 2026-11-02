@@ -7,6 +7,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { REDACTED, cleanText, decodePersonalSign, decodeSignature, redactSecrets } from '../../src/decode';
+import { capText, headOf } from '../../src/util';
 import { buildRiskCheckBodies, originHost } from '../../src/request';
 import { DRAINER, RECIPIENT, USDC, USER, utf8Hex } from '../helpers';
 
@@ -97,5 +98,28 @@ describe('finding 8 (personal_sign): large payloads are summarized', () => {
     expect(decoded.counterparty).toBe(USER);
     expect(decoded.summary).toContain('large payload (4194304 bytes)');
     expect(decoded.warnings.join()).toContain('very large');
+  });
+});
+
+describe('2026-11-02 review: a cut never splits an emoji', () => {
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+
+  it('capText and headOf keep surrogate pairs whole at every cut position', () => {
+    const text = `${'a'.repeat(10)}😀😀😀 tail`;
+    for (let max = 1; max <= text.length + 1; max++) {
+      expect(capText(text, max)).not.toMatch(lone);
+      expect(headOf(text, max)).not.toMatch(lone);
+      expect(headOf(text, max).length).toBeLessThanOrEqual(max);
+    }
+  });
+
+  it('a personal_sign excerpt that ends in an emoji stays well-formed', () => {
+    // Plain words: a long run of one character reads as a secret and is redacted before any excerpt.
+    const lead = 'please confirm your newsletter subscription for the weekly digest '.repeat(10);
+    for (let n = 290; n <= 305; n++) {
+      const decoded = decodePersonalSign(utf8Hex(`${lead.slice(0, n)}😀 thanks`), USER);
+      // JSON.stringify escapes a lone surrogate (\udXXX) and writes a whole pair as the character.
+      expect(JSON.stringify(decoded)).not.toMatch(/\\ud[89a-f][0-9a-f]{2}/u);
+    }
   });
 });

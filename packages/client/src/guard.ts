@@ -479,7 +479,8 @@ export function createGuard(options: GuardOptions = {}) {
   /** Adds the agent's own context in front of the decoded description (the request is then bound as sent). */
   function withAgentContext(body: RiskCheckBody): RiskCheckRequest {
     const extra = agentContext();
-    const context = extra ? cut(`${cut(extra, MAX_CONTEXT - 200)}\n\nAbout to sign: ${body.context}`, MAX_CONTEXT) : body.context;
+    // Always cut: a decoded excerpt can end in half an emoji, and the API refuses a body that is not valid UTF-8.
+    const context = extra ? cut(`${cut(extra, MAX_CONTEXT - 200)}\n\nAbout to sign: ${body.context}`, MAX_CONTEXT) : typeof body.context === "string" ? cut(body.context, MAX_CONTEXT) : body.context;
     return { ...(body as RiskCheckRequest), context };
   }
 

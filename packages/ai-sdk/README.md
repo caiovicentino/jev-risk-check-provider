@@ -11,7 +11,7 @@
   | `block` | **denied** |
   | `not_verified` (the check failed, or its signature did not verify) | **denied** |
 
-  For a tool that runs on the server (it has an `execute`), the model cannot skip the check: the AI SDK asks the policy before it executes the tool, and again when an approval is replayed. The tool's own `needsApproval` still applies, and the stricter answer wins. [Limits](#limits) lists what a tool-approval policy cannot hold back.
+  For a tool that runs on the server (it has an `execute`), the model cannot skip the check: the AI SDK asks the policy before it executes the tool, and again when an approval is replayed. The tool's own `needsApproval` still applies, with its context passed through the tool's `contextSchema` as the AI SDK does (a context the schema refuses denies the call), and the stricter answer wins. [Limits](#limits) lists what a tool-approval policy cannot hold back.
 - **`x402checkTool`** gives the model a risk-check tool to call on its own, for counterparties it is still choosing.
 
 Every verdict is an ES256 attestation signed by `did:web:x402check.xyz`. It is verified against the exact request it answers, with x402check's key pinned, before anything is approved. The check screens:
