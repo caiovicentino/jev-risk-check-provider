@@ -29,7 +29,7 @@ before(() => {
 });
 after(() => {
   globalThis.fetch = realFetch;
-  assert.deepEqual(stray.filter((u) => !u.includes("cca-lite.coinbase.com")), []);
+  assert.deepEqual(stray.filter((u) => URL.parse(u)?.hostname !== "cca-lite.coinbase.com"), []);
 });
 
 /** A wallet like AgentKit's own: private state, signing with a local key, sending recorded. */
