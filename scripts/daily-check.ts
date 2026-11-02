@@ -55,7 +55,7 @@ export const THREADS: ReadonlyArray<{ repo: string; number: number; label: strin
   { repo: "romudille-bit/agentpay", number: 9, label: "agentpay#9 (pay_to screen)", readThrough: "2026-10-02T16:04:36Z" },
   { repo: "romudille-bit/awesome-x402", number: 1, label: "awesome-x402#1 (our listing PR)", readThrough: "2026-10-01T00:00:00Z" },
   { repo: "coinbase/agentkit", number: 1613, label: "agentkit#1613 (an \"x402check\" provider for x402check.dev, not ours)", readThrough: "2026-10-31T20:18:43Z" },
-  { repo: "coinbase/agentkit", number: 1402, label: "agentkit#1402 (a neutral beforePayment hook, not ours)", readThrough: "2026-11-01T16:55:05Z" },
+  { repo: "coinbase/agentkit", number: 1402, label: "agentkit#1402 (a neutral beforePayment hook, not ours)", readThrough: "2026-11-02T01:08:42Z" },
 ];
 /** EVM RPCs for networks the evaluation tables do not cover (settlement payers only). */
 const EXTRA_RPC: Record<string, readonly string[]> = {
