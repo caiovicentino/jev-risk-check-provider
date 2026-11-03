@@ -94,7 +94,7 @@ export function x402checkApproval<TOOLS extends ToolSet>(options: ApprovalOption
     try {
       own_ = await ownApproval(definition, toolCall, messages, own(toolsContext, toolCall.toolName));
     } catch (err) {
-      return { type: "denied", reason: `x402check: the tool's own needsApproval could not be evaluated: ${err instanceof Error ? err.message : String(err)}`.slice(0, 600) };
+      return { type: "denied", reason: truncate(`x402check: the tool's own needsApproval could not be evaluated: ${err instanceof Error ? err.message : String(err)}`, 600) };
     }
     const mapper = own(mappers, toolCall.toolName) as Counterparties<unknown> | undefined;
     if (!mapper) return own_;
@@ -161,7 +161,7 @@ async function toolContext(contextSchema: unknown, context: unknown): Promise<un
 }
 
 function statusOf(screening: Screening, onWarn: "user-approval" | "denied"): ApprovalDecision {
-  const reason = `x402check: ${screening.action}${screening.tier ? ` (tier ${screening.tier})` : ""}${screening.reasons.length ? `: ${screening.reasons.slice(0, 3).join("; ")}` : ""}`.slice(0, 600);
+  const reason = truncate(`x402check: ${screening.action}${screening.tier ? ` (tier ${screening.tier})` : ""}${screening.reasons.length ? `: ${screening.reasons.slice(0, 3).join("; ")}` : ""}`, 600);
   switch (screening.action) {
     case "allow":
       return { type: "approved", reason };

@@ -224,3 +224,24 @@ test("without an agent context, a decoded excerpt that ends in an emoji still re
     assert.doesNotMatch(request.context ?? "", /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   }
 });
+
+test("an emoji at the decoder's input cap reaches neither the verdict nor the refusal cut in half", async () => {
+  const api = boundProvider(() => BLOCK);
+  const verdicts: GuardVerdict[] = [];
+  const guarded = guardAccount(
+    { address: "0x5555555555555555555555555555555555555555", signMessage: async (_args: unknown) => "0x" as const },
+    { pinnedKeys: false, fetch: api.fetch, onVerdict: (v) => void verdicts.push(v) },
+  );
+  // The emoji straddles the decoder's 2,048-unit input cap; collapsing the spaces then brings the
+  // text under the excerpt's limit, so no later cut runs on it.
+  const message = `Send to ${DRAINER.replace(/2/gu, "3")}${" ".repeat(2048 - 49 - 2)}😀 bye`;
+  const refused = await guarded.signMessage({ message }).then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  assert.ok(refused instanceof X402CheckBlockedError);
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  assert.doesNotMatch(refused.message, lone);
+  assert.equal(verdicts.length, 1);
+  assert.doesNotMatch(verdicts[0]?.summary ?? "", lone);
+});

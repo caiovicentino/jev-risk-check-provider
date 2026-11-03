@@ -378,3 +378,54 @@ test("long content cut at the API's limit never splits a character (the API refu
     assert.doesNotMatch(context, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   }
 });
+
+test("a denial's reason never ends in half an emoji, at any cut position (2026-11-03 review)", async () => {
+  const provider = boundProvider(() => LOW);
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  const tools = {
+    sendMemo: tool({
+      description: "Send USDC with a memo",
+      inputSchema: jsonSchema<{ to: string; memo: string }>({ type: "object", properties: { to: { type: "string" }, memo: { type: "string" } }, required: ["to", "memo"] }),
+      needsApproval: async (input: { memo: string }) => {
+        throw new Error(`unknown memo ${input.memo}`);
+      },
+      execute: async () => ({ sent: true }),
+    }),
+    payInvoice: tool({
+      description: "Pay an invoice",
+      inputSchema: jsonSchema<{ to: string }>({ type: "object", properties: { to: { type: "string" } }, required: ["to"] }),
+      execute: async () => ({ paid: true }),
+    }),
+  };
+  const policy = x402checkApproval<typeof tools>({
+    fetch: provider.fetch,
+    creditToken: TOKEN,
+    pinnedKeys: false,
+    tools: {
+      sendMemo: (i) => ({ wallet: PAYEE, chain: "base", context: i.memo.slice(0, 8) }),
+      payInvoice: (i) => {
+        throw new Error(`cannot read payee ${i.to}`);
+      },
+    },
+  });
+  // Text the model wrote ends up in the reason; pad it so the emoji crosses the 600-unit cut.
+  for (let pad = 505; pad <= 535; pad++) {
+    const text = `${"a".repeat(pad)}😀`;
+    const result = await generateText({
+      model: modelCalling([
+        { toolName: "sendMemo", input: { to: PAYEE, memo: text } },
+        { toolName: "payInvoice", input: { to: text } },
+      ]),
+      tools,
+      prompt: "pay",
+      toolApproval: policy,
+    });
+    const responses = approvalParts(result).responses;
+    assert.equal(responses.length, 2);
+    for (const response of responses) {
+      assert.equal(response.approved, false);
+      assert.ok((response.reason ?? "").length <= 600);
+      assert.doesNotMatch(response.reason ?? "", lone);
+    }
+  }
+});

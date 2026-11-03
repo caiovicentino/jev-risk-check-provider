@@ -626,7 +626,7 @@ export type CleanText = { text: string; hadInvisible: boolean; truncated: boolea
  */
 export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText {
   const truncated = input.length > maxInput;
-  const capped = truncated ? input.slice(0, maxInput) : input;
+  const capped = truncated ? headOf(input, maxInput) : input;
   const hadInvisible = INVISIBLE_RE.test(capped);
   const text = redactSecrets(
     capped

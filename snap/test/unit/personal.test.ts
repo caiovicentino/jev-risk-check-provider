@@ -122,4 +122,14 @@ describe('2026-11-02 review: a cut never splits an emoji', () => {
       expect(JSON.stringify(decoded)).not.toMatch(/\\ud[89a-f][0-9a-f]{2}/u);
     }
   });
+
+  it('an emoji at the input cap is kept whole or left out (2026-11-03 review)', () => {
+    // The emoji straddles cleanText's input cap; collapsing the spaces then brings the text under
+    // the excerpt's limit, so no later cut runs on it.
+    for (const pad of [2039, 2040, 2041]) {
+      const decoded = decodePersonalSign(utf8Hex(`Welcome${' '.repeat(pad)}😀 bye`), USER);
+      expect(JSON.stringify(decoded)).not.toMatch(/\\ud[89a-f][0-9a-f]{2}/u);
+    }
+    expect(cleanText(`${'a '.repeat(10)}😀`, 21).text).not.toMatch(lone);
+  });
 });
