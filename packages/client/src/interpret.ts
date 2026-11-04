@@ -97,10 +97,14 @@ export function describeCategory(category: string): string {
 // Reasons are read by people and models: strip control, format (bidi, zero-width, tag) and
 // line-separator characters, collapse whitespace, and cap the length.
 const UNSAFE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+/** Half an emoji: JSON can carry one ("\ud83d"), and a cut can leave one. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 export function sanitizeText(text: string, max = 600): string {
-  const clean = String(text).replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
-  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+  const clean = String(text).replace(UNSAFE, " ").replace(LONE_SURROGATE, "\uFFFD").replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  const head = clean.slice(0, max - 1);
+  return `${/[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head}…`;
 }
 
 function shortAddress(address: string): string {

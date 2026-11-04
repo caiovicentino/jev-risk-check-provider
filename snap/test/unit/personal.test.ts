@@ -132,4 +132,23 @@ describe('2026-11-02 review: a cut never splits an emoji', () => {
     }
     expect(cleanText(`${'a '.repeat(10)}😀`, 21).text).not.toMatch(lone);
   });
+
+  it('a lone surrogate already in typed data never reaches the API body (2026-11-04 review)', () => {
+    const half = '\ud83d';
+    for (const slot of ['domain', 'value', 'field', 'type']) {
+      const field = slot === 'field' ? `note${half}` : 'note';
+      const type = slot === 'type' ? `Mail${half}` : 'Mail';
+      const typed = {
+        types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }], [type]: [{ name: 'to', type: 'address' }, { name: field, type: 'string' }] },
+        primaryType: type,
+        domain: { name: slot === 'domain' ? `Mail${half}` : 'Mail', chainId: 8453 },
+        message: { to: RECIPIENT, [field]: slot === 'value' ? `hi ${half}` : 'hi' },
+      };
+      const decoded = decodeSignature({ from: USER, data: JSON.stringify(typed), signatureMethod: 'eth_signTypedData_v4' }, 'drainer.example');
+      const bodies = buildRiskCheckBodies(decoded, 'https://drainer.example');
+      expect(bodies.length).toBeGreaterThan(0);
+      for (const body of bodies) expect(body.context ?? '').not.toMatch(lone);
+    }
+    expect(capText(`ok ${half}`, 100)).toBe('ok \ufffd');
+  });
 });

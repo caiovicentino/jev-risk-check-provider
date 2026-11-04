@@ -553,10 +553,16 @@ export function headOf(text: string, max: number): string {
   return /[\uD800-\uDBFF]$/.test(head) && /^[\uDC00-\uDFFF]/.test(text.slice(head.length)) ? head.slice(0, -1) : head;
 }
 
-/** Caps a string, appending an ellipsis when truncated; an emoji is never cut in half. */
+/** Lone surrogates (half an emoji, which untrusted JSON can carry as "\ud83d") replaced: the API refuses text that is not valid UTF-8. */
+export function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+}
+
+/** Caps a string, appending an ellipsis when truncated; an emoji is never cut in half, and a lone half is replaced. */
 export function capText(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${headOf(text, max - 1).trimEnd()}…`;
+  const clean = wellFormed(text);
+  if (clean.length <= max) return clean;
+  return `${headOf(clean, max - 1).trimEnd()}…`;
 }
 
 export function unixDate(value: bigint | undefined): string | undefined {
@@ -626,7 +632,7 @@ export type CleanText = { text: string; hadInvisible: boolean; truncated: boolea
  */
 export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText {
   const truncated = input.length > maxInput;
-  const capped = truncated ? headOf(input, maxInput) : input;
+  const capped = wellFormed(truncated ? headOf(input, maxInput) : input);
   const hadInvisible = INVISIBLE_RE.test(capped);
   const text = redactSecrets(
     capped

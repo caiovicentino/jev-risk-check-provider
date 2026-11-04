@@ -377,6 +377,14 @@ describe("x402check_pay", () => {
           assert.equal(s.response.truncated, true);
         },
       ],
+      [
+        // An emoji across the cut is left out whole (2026-11-04 review): never half of one.
+        () => new Response(`${"a".repeat(16_383)}😀 tail`, { status: 200, headers: { "Content-Type": "text/plain" } }),
+        (s) => {
+          assert.equal(s.response.body, "a".repeat(16_383));
+          assert.equal(s.response.truncated, true);
+        },
+      ],
     ];
     for (const [unpaid, check] of answers) {
       const w = world(issuer, { unpaid });

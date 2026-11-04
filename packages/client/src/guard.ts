@@ -47,7 +47,7 @@ import { serializedMismatch } from "./serialized.js";
 import { decodeTypedData } from "./decode/typed.js";
 import { decodePersonalSign } from "./decode/personal.js";
 import { buildRiskCheckBodies, type RiskCheckBody } from "./decode/request.js";
-import { MAX_UINT256, parseUint, type Decoded } from "./decode/util.js";
+import { MAX_UINT256, parseUint, quote, wellFormed, type Decoded } from "./decode/util.js";
 import {
   accountKeys,
   ADDRESS_LOOKUP_TABLE_PROGRAM,
@@ -127,7 +127,7 @@ export class X402CheckBlockedError extends Error {
   readonly verdict: GuardVerdict;
   constructor(verdict: GuardVerdict) {
     const tier = verdict.checks.find((c) => c.interpretation.action === verdict.action)?.interpretation.tier;
-    super(`x402check refused to sign (${verdict.code ?? verdict.action}${tier ? `, tier ${tier}` : ""}): ${verdict.reasons[0] ?? "no verdict"}. ${verdict.summary}`.slice(0, 600));
+    super(cut(`x402check refused to sign (${verdict.code ?? verdict.action}${tier ? `, tier ${tier}` : ""}): ${verdict.reasons[0] ?? "no verdict"}. ${verdict.summary}`, 600));
     this.verdict = verdict;
   }
 }
@@ -214,7 +214,7 @@ const MAX_CONTEXT = 4096;
  * the API refuses a body that is not valid UTF-8, so a cut through an emoji would refuse the check.
  */
 function cut(text: string, max: number): string {
-  const clean = text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+  const clean = wellFormed(text);
   if (clean.length <= max) return clean;
   const head = clean.slice(0, max);
   return /[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head;
@@ -277,7 +277,7 @@ function normalizeTransaction(input: unknown, fallbackChainId: number | undefine
   for (const key of VIEM_ATTACHMENTS) delete tx[key];
   for (const key of Object.keys(tx)) {
     if (tx[key] === undefined) delete tx[key];
-    else if (!TRANSACTION_FIELDS.has(key)) return { reason: `its field "${key.slice(0, 40)}" is not one the standard serializer reads (a chain's own serializer could sign what it holds)` };
+    else if (!TRANSACTION_FIELDS.has(key)) return { reason: `its field ${quote(key, 40)} is not one the standard serializer reads (a chain's own serializer could sign what it holds)` };
   }
   // List fields are arrays, as the serializer iterates them: a Set or another iterable would pass a
   // length or emptiness test the guard makes and still be serialized (a delegation hidden in a Set).
@@ -485,7 +485,8 @@ export function createGuard(options: GuardOptions = {}) {
   }
 
   function verdictOf(kind: SigningKind, summary: string, action: Action, reasons: string[], checks: GuardCheck[], code?: string): GuardVerdict {
-    return { action, signed: action === "allow", kind, summary, reasons, checks, ...(code ? { code } : {}) };
+    // Summaries and reasons quote untrusted text (messages, a seller's URL): never half an emoji.
+    return { action, signed: action === "allow", kind, summary: wellFormed(summary), reasons: reasons.map(wellFormed), checks, ...(code ? { code } : {}) };
   }
 
   /** Checks the requests (a batch call per MAX_BATCH) and combines the verdicts: the worst one decides. */
@@ -668,7 +669,7 @@ export function createGuard(options: GuardOptions = {}) {
     if (opaque) return verdictOf(kind, decoded.summary, "not_verified", [`it authorizes content this guard cannot read (${opaque}); nothing unreadable is signed`], [], "opaque_signature");
     // Malformed as the decoders read it: a strict wallet would refuse it, but the signer behind this
     // guard may sign what it hashes anyway, unchecked. Never "nothing to check".
-    if (decoded.unsignable) return verdictOf(kind, decoded.summary, "not_verified", [`the request is malformed as this guard reads it (${decoded.unsignable}): what the key would sign cannot be read, so it is not signed`], [], "malformed");
+    if (decoded.unsignable) return verdictOf(kind, decoded.summary, "not_verified", [`the request is malformed as this guard reads it (${quote(decoded.unsignable, 200)}): what the key would sign cannot be read, so it is not signed`], [], "malformed");
     // A transaction whose effects cannot be simulated (calldata too large, malformed fields) is not signed on an address check alone.
     if (kind === "transaction" && (deployment ? hasValue : decoded.simulationSkipped !== undefined)) {
       const why = decoded.simulationSkipped ?? "contract deployments are not simulated, and this one carries value";
@@ -845,7 +846,7 @@ export function createGuard(options: GuardOptions = {}) {
     }
     // Sign-In With Solana names the site it signs in to; a different requesting origin is the login-phishing pattern.
     const siws = text ? /^(?:https?:\/\/)?([A-Za-z0-9.-]{1,253}(?::\d{1,5})?) wants you to sign in with your Solana account:/.exec(text) : null;
-    const summary = text ? `Solana message signature (${message.length} bytes): ${text.slice(0, 300)}` : `Solana message signature of ${message.length} bytes of binary data`;
+    const summary = text ? `Solana message signature (${message.length} bytes): ${quote(text, 300)}` : `Solana message signature of ${message.length} bytes of binary data`;
     const signsInTo = siws?.[1] ? host(siws[1]) : undefined;
     const origin = host(options.origin);
     if (signsInTo && origin && signsInTo !== origin) {

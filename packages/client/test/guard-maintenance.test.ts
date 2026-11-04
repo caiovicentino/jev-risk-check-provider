@@ -6,7 +6,7 @@ import { describe, test } from "node:test";
 import { createWalletClient, custom, encodeFunctionData, erc20Abi, parseAbi, type Hex } from "viem";
 import { base } from "viem/chains";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { guardAccount, X402CheckBlockedError, type GuardVerdict } from "../src/guard.js";
+import { guardAccount, guardSolanaSigner, x402PaymentGuard, X402CheckBlockedError, type GuardVerdict } from "../src/guard.js";
 import { boundProvider } from "./helpers.js";
 
 const BOB = "0x1111111111111111111111111111111111111111";
@@ -244,4 +244,52 @@ test("an emoji at the decoder's input cap reaches neither the verdict nor the re
   assert.doesNotMatch(refused.message, lone);
   assert.equal(verdicts.length, 1);
   assert.doesNotMatch(verdicts[0]?.summary ?? "", lone);
+});
+
+describe("2026-11-04 review: no half an emoji in what the guard reports or refuses with", () => {
+  const LONE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  const USER = "0x5555555555555555555555555555555555555555";
+  const refusal = (p: Promise<unknown>) =>
+    p.then(
+      () => undefined,
+      (err: unknown) => (err instanceof X402CheckBlockedError ? err : undefined),
+    );
+
+  test("an x402 abort reason built from a seller's long URL is cut whole", async () => {
+    for (let pad = 0; pad < 40; pad++) {
+      const hook = x402PaymentGuard({ pinnedKeys: false, fetch: boundProvider(() => BLOCK).fetch });
+      const url = `https://seller.example/${"p".repeat(pad)}${"😀".repeat(200)}`;
+      const out = await hook({ paymentRequired: { resource: { url } }, selectedRequirements: { network: "eip155:8453", payTo: DRAINER, amount: "10000", asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" } });
+      assert.ok(out && out.reason.length <= 600);
+      assert.doesNotMatch(out.reason, LONE);
+    }
+  });
+
+  test("a lone surrogate already in a message reaches neither the verdict nor the refusal", async () => {
+    const verdicts: GuardVerdict[] = [];
+    const guarded = guardAccount({ address: USER, signMessage: async (_args: unknown) => "0x" as const }, { pinnedKeys: false, fetch: boundProvider(() => BLOCK).fetch, onVerdict: (v) => void verdicts.push(v) });
+    const refused = await refusal(guarded.signMessage({ message: `Send to ${DRAINER} now \ud83d` }));
+    assert.ok(refused);
+    assert.doesNotMatch(refused.message, LONE);
+    assert.doesNotMatch(verdicts[0]?.summary ?? "", LONE);
+  });
+
+  test("an unknown transaction field is quoted whole", async () => {
+    const verdicts: GuardVerdict[] = [];
+    const guarded = guardAccount({ address: USER, signTransaction: async (_tx: unknown) => "0x" as const }, { pinnedKeys: false, fetch: boundProvider(() => LOW).fetch, chainId: 8453, onVerdict: (v) => void verdicts.push(v) });
+    const refused = await refusal(guarded.signTransaction({ to: BOB, value: 1n, chainId: 8453, [`${"k".repeat(39)}😀`]: 1 } as never));
+    assert.ok(refused);
+    assert.doesNotMatch(refused.message, LONE);
+    assert.doesNotMatch(verdicts[0]?.reasons[0] ?? "", LONE);
+  });
+
+  test("a Solana message's summary is cut whole and cleaned like an EVM message", async () => {
+    const verdicts: GuardVerdict[] = [];
+    const signer = { address: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", signMessages: async () => [] };
+    const guarded = guardSolanaSigner(signer as never, { pinnedKeys: false, fetch: boundProvider(() => LOW).fetch, onVerdict: (v) => void verdicts.push(v) });
+    await refusal((guarded as unknown as { signMessages: (m: unknown) => Promise<unknown> }).signMessages([{ content: new TextEncoder().encode(`${"a b ".repeat(74)}a b😀 more‮`) }]));
+    assert.equal(verdicts.length, 1);
+    assert.doesNotMatch(verdicts[0]?.summary ?? "", LONE);
+    assert.doesNotMatch(verdicts[0]?.summary ?? "", /‮/);
+  });
 });

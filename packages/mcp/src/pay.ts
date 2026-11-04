@@ -228,6 +228,8 @@ async function readBody(res: Response, timeoutMs: number, signal: AbortSignal | 
     let text = data.toString("utf8").replace(BODY_UNSAFE, " ");
     if (text.length > MAX_BODY_CHARS) {
       text = text.slice(0, MAX_BODY_CHARS);
+      // Never half an emoji: the decoded text is otherwise well-formed (invalid bytes read as U+FFFD).
+      if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
       truncated = true;
     }
     return { bytes: data.byteLength, truncated, text };
