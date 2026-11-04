@@ -459,7 +459,7 @@ async function main(): Promise<void> {
   await guard("npm", async () => {
     const parts: string[] = [];
     let behind = false;
-    for (const pkg of ["client", "mcp"]) {
+    for (const pkg of ["client", "mcp", "ai-sdk", "agentkit"]) {
       const local = (JSON.parse(readFileSync(`packages/${pkg}/package.json`, "utf8")) as { version: string }).version;
       const published = run("npm", ["view", `@x402check/${pkg}`, "version"], 60_000).trim();
       if (published !== local) behind = true;
