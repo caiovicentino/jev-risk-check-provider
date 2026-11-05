@@ -288,8 +288,23 @@ function unanswered(t: (typeof THREADS)[number]): string | undefined {
 }
 
 async function main(): Promise<void> {
-  // --threads: only the followed threads' last word, read-only (no files written); for the thread watch.
+  // --threads: the followed threads' last word, read-only (no files written); for the thread watch.
+  // Production's failures too (not its warnings, which the daily run reports): on 2026-11-05 Base's
+  // kit watch fell an hour behind between two daily runs, and only the next one saw it.
   if (process.argv.includes("--threads")) {
+    const failing: string[] = [];
+    try {
+      const health = await http("/healthz");
+      const hz = parse<{ ok?: boolean; version?: string; commit?: string; attestation_key?: string }>(health.text) ?? {};
+      if (!(health.status === 200 && hz.ok && hz.attestation_key === "ok")) failing.push(`healthz — HTTP ${health.status} v${hz.version} ${hz.commit} key ${hz.attestation_key}`);
+      const statusRes = await http("/status");
+      const status = parse<Status>(statusRes.text);
+      if (!status) failing.push(`status — HTTP ${statusRes.status}: not JSON`);
+      else failing.push(...statusChecks(status, null).filter((c) => c.level === "fail").map((c) => `${c.id} — ${c.detail}`));
+    } catch (err) {
+      failing.push(`production — check could not run: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`);
+    }
+    if (failing.length) console.log(failing.map((line) => `FAIL  ${line}`).join("\n"));
     const open = THREADS.map((t) => {
       try {
         return unanswered(t);
