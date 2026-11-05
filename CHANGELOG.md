@@ -25,6 +25,7 @@ Each release's full notes and evidence are on the [releases page](https://github
 - **The MCP's lockfile:** zod 4.6.7 (GHSA-mrhx-c7xc-m3w5), body-parser 2.4.0 (GHSA-27r3-jxmh-p828) and fast-uri 3.1.9. The published 0.3.3 pins the earlier versions in its shrinkwrap. Over stdio the server never starts the SDK's express server, and every input it validates is size-bounded.
 - **The Worker's lockfile:** zod 4.6.7.
 - **Development tooling:** the root `overrides` hold undici at 7.30.1 (GHSA-xjj6-f33q-929c, high). Before this, miniflare, wrangler's local runtime, pinned 7.29.1. The Snap's tooling moves to fast-uri 3.1.9 and body-parser 2.4.0.
+  - **2026-11-05:** `wrangler` 4.157.0. Its miniflare pins undici 7.30.1 itself, so the override is gone, and its workerd (1.20261103.1) takes Brotli 1.2.1, which matters for local `wrangler dev` only. The Worker's bundle is unchanged.
 - **CI:** the production dependency audit is `scripts/audit-gate.mjs`. It fails on any high or critical finding, except an advisory accepted for exact install paths with a reason and a review date. That covers the zod 3 copies that `@x402/core` and `@x402/evm` require, since no zod 3 release fixes this advisory.
 - **The audit gate, hardened (2026-10-25 review):**
   - It audits even when run through a symlinked path: its main-module guard compares real paths. Before, it exited 0 without auditing.
