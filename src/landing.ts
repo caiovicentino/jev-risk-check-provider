@@ -211,7 +211,9 @@ const PAGE = `<!doctype html>
   <script>
   // Aggregate counts only, from /status (the watchlist itself is private). Hidden if unavailable.
   (function () {
-    var chains = [["eip155:1", "Ethereum", 12], ["eip155:8453", "Base", 2]];
+    // [chain, name, seconds a block, blocks scanned before a block-time change, seconds a block before it].
+    // Base's Denim upgrade (2026-11-05 18:00 UTC) took its blocks from 2 s to 200 ms, about 1,592,000 blocks into the watch.
+    var chains = [["eip155:1", "Ethereum", 12, 0, 12], ["eip155:8453", "Base", 0.2, 1592000, 2]];
     fetch("/status").then(function (r) { return r.json(); }).then(function (s) {
       var watch = s && s.data && s.data.kit_watch && s.data.kit_watch.chains;
       if (!watch) return;
@@ -220,7 +222,7 @@ const PAGE = `<!doctype html>
         var w = watch[c[0]];
         if (!w || typeof w.scanned_blocks !== "number" || w.scanned_blocks <= 0) return;
         var found = Object.keys(w.flagged || {}).reduce(function (n, k) { return n + (Number(w.flagged[k]) || 0); }, 0);
-        var hours = (w.scanned_blocks * c[2]) / 3600;
+        var hours = (Math.min(w.scanned_blocks, c[3]) * c[4] + Math.max(0, w.scanned_blocks - c[3]) * c[2]) / 3600;
         var span = hours >= 48 ? Math.round(hours / 24) + " days" : hours >= 1 ? hours.toFixed(1) + " h" : Math.max(1, Math.round(hours * 60)) + " min";
         parts.push(c[1] + ": " + found.toLocaleString("en-US") + " addresses recorded in " + w.scanned_blocks.toLocaleString("en-US") + " blocks (~" + span + "), " + (w.lag_blocks || 0) + " behind the head");
       });

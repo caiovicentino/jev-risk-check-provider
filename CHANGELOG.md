@@ -65,6 +65,17 @@ Agent-framework integrations, two new packages.
   - **Peer and engine ranges** are the tested ones: `ai` 7.0.153 or later, and Node.js 22.12 or later.
 - **Tested through AgentKit's own x402 actions:** against a mock x402 v2 seller, `make_http_request_with_x402` (the one-shot path, which a `beforePayment` hook in the action provider cannot gate) and `retry_http_request_with_x402` pay a clean payee with the authorization that was checked, and refuse a drainer before the key signs; the seller receives nothing.
 
+## v0.6.22 — 2026-11-05: the kit watch keeps up with Base's 200 ms blocks
+
+Base's Denim upgrade (2026-11-05 at 18:00 UTC) took its blocks from 2 seconds to 200 milliseconds: about 300 a minute instead of 30. The kit watch read at most 90 Base blocks a run, once a minute, so it fell behind. From about 18:50 UTC it reached its 10,800-block limit and skipped ahead every run. About 210 blocks a minute went unread, each skip recorded as a hole: Base's `gaps` rose from 10,850 to 10,951 by 20:32 UTC, and `unbroken_since` moved forward every minute. Ethereum was not affected. The 2026-11-05 maintenance run found it.
+
+- **Base's plan keeps the same times at 10 times the blocks:** a run reads up to 900 blocks, the confirmations are 100 blocks (20 seconds, as before), and the watch skips ahead only when it is more than 108,000 blocks behind (6 hours, as before). A test runs Base at 200 ms blocks: one run reads 900 blocks with no hole, and only a lag past 6 hours skips ahead.
+- **1rpc.io's Base endpoint is dropped from the scan rotation.** It stopped at the last block before the upgrade, and a run that took its head from it had nothing to scan.
+- **The site's coverage estimate** counts Base blocks at 2 seconds up to the upgrade and at 200 ms after it.
+- **The daily check's lag thresholds for Base** are 10 times larger in blocks, the same in time (warn past 5 minutes, fail past an hour).
+- **Embedded OFAC snapshot:** the 2026-11-04 release. Its 1,071 addresses are unchanged.
+- **Development tooling:** `wrangler` 4.157.0, without the undici override (see Unreleased).
+
 ## v0.6.21 — 2026-10-31: forwarding verdicts from before v0.6.0 follow its rule
 
 The 2026-10-31 maintenance run investigated a new coverage hole on Base: 713 authorizations, in one 20-second segment at 19:15 UTC on 2026-10-30. About 10,400 EIP-7702 authorizations arrived in 25 blocks, to three delegates. What it found is larger than the hole.

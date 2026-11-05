@@ -89,8 +89,10 @@ type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag:
 const PLAN: Record<WatchChain, ChainPlan> = {
   // ~5 blocks a minute; a run catches up to 15.
   "eip155:1": { confirmations: 2, perRun: 15, start: 5, maxLag: 1800, writes: 450, evaluations: 400 },
-  // ~30 blocks a minute; a run catches up to 90, in segments of 10.
-  "eip155:8453": { confirmations: 10, perRun: 90, start: 30, maxLag: 10800, writes: 250, evaluations: 200 },
+  // ~300 blocks a minute since the Denim upgrade (2026-11-05 18:00 UTC, 200 ms blocks; 2 s before it):
+  // a run catches up to 900, in segments of 10. The same times as before: 20 s of confirmations, and
+  // at most 6 h behind before the watch skips ahead.
+  "eip155:8453": { confirmations: 100, perRun: 900, start: 300, maxLag: 108000, writes: 250, evaluations: 200 },
 };
 const SEGMENT = 10;
 

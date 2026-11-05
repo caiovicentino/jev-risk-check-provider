@@ -244,7 +244,8 @@ function seeded(): ReturnType<typeof memoryKv> {
   const kv = memoryKv();
   kv.data.set(KW.registry, JSON.stringify({ updated_at: "2026-10-02", families: [KIT] }));
   kv.data.set(KW.cursor("eip155:1"), "99");
-  kv.data.set(KW.cursor("eip155:8453"), "499");
+  // Base: the stubs' head 0x200 (512) less 100 confirmations leaves three blocks, 410 to 412.
+  kv.data.set(KW.cursor("eip155:8453"), "409");
   return kv;
 }
 const kitCreation = { 100: [{ hash: "0xc1", from: DEPLOYER, to: null, nonce: "0x0" }] };
@@ -257,7 +258,7 @@ test("cron: a read that still fails is queued (one KV write), signed as pending,
   assert.equal(kv.data.has(KW.address(KIT_ADDRESS)), false);
   assert.deepEqual(kv.puts.filter((k) => k.startsWith("kw:pending:")), [KW.pending("eip155:1")], "one write for the queue, none per address");
   // The coverage clock does not claim complete coverage while the read waits (it is pending, not a hole).
-  assert.deepEqual(coverageOf(down), { complete_through: { "eip155:1": 114, "eip155:8453": 502 }, pending: { "eip155:1": 1 }, unbroken_since: { "eip155:1": 100, "eip155:8453": 500 } });
+  assert.deepEqual(coverageOf(down), { complete_through: { "eip155:1": 114, "eip155:8453": 412 }, pending: { "eip155:1": 1 }, unbroken_since: { "eip155:1": 100, "eip155:8453": 410 } });
 
   const log: string[] = [];
   const up = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ blocks: kitCreation, code: (a) => (a === KIT_ADDRESS ? DRAINER : "0x"), log }), now: T + 60_000 })) as KitWatchStats;
@@ -398,8 +399,8 @@ test("coverage: stats from before 0.6.4 are migrated once: the reads dropped bef
   const eth = st.chains["eip155:1"] as ChainStats;
   assert.deepEqual([eth.gaps_total, eth.unbroken_since, eth.coverage_v], [LEGACY_DROPPED_READS["eip155:1"], 1001, COVERAGE_V]);
   // A chain with no earlier stats has no legacy holes; its coverage starts with its first block.
-  assert.deepEqual([st.chains["eip155:8453"]?.gaps_total, st.chains["eip155:8453"]?.unbroken_since], [0, 500]);
-  assert.deepEqual(coverageOf(st), { complete_through: { "eip155:1": 1008, "eip155:8453": 589 }, gaps: { "eip155:1": 9_884 }, unbroken_since: { "eip155:1": 1001, "eip155:8453": 500 } });
+  assert.deepEqual([st.chains["eip155:8453"]?.gaps_total, st.chains["eip155:8453"]?.unbroken_since], [0, 410]);
+  assert.deepEqual(coverageOf(st), { complete_through: { "eip155:1": 1008, "eip155:8453": 910 }, gaps: { "eip155:1": 9_884 }, unbroken_since: { "eip155:1": 1001, "eip155:8453": 410 } });
   // Once only.
   const again = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 1010 }), now: T + 60_000 })) as KitWatchStats;
   assert.deepEqual([again.chains["eip155:1"]?.gaps_total, again.chains["eip155:1"]?.unbroken_since], [9_884, 1001]);
@@ -566,20 +567,20 @@ test("cron: the queue is retried by cost: at most 100 reads a run, a threat's au
 
 test("cron: a segment whose blocks no endpoint serves ends the run's scan there: earlier segments are kept, the next run resumes, nothing is skipped", async () => {
   const kv = seeded();
-  // Base: cursor 499, head 600 − 10 confirmations; blocks from 530 on cannot be fetched this run.
-  const stuck = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600, missing: (n) => n >= 530 && n < 1000 }), now: T })) as KitWatchStats;
+  // Base: cursor 409, head 600 − 100 confirmations; blocks from 440 on cannot be fetched this run.
+  const stuck = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600, missing: (n) => n >= 440 && n < 1000 }), now: T })) as KitWatchStats;
   const base = stuck.chains["eip155:8453"] as ChainStats;
-  assert.deepEqual([base.cursor, base.gaps_total ?? 0], [529, 0], "three segments kept, no hole");
+  assert.deepEqual([base.cursor, base.gaps_total ?? 0], [439, 0], "three segments kept, no hole");
   // Every endpoint was asked; the two that serve evaluations last.
-  assert.match(base.error ?? "", /^Error: blocks 530-530 unavailable \((?:[a-z0-9.-]+: incomplete; ){5}mainnet\.base\.org: incomplete; base-rpc\.publicnode\.com: incomplete\)$/);
+  assert.match(base.error ?? "", /^Error: blocks 440-440 unavailable \((?:[a-z0-9.-]+: incomplete; ){4}mainnet\.base\.org: incomplete; base-rpc\.publicnode\.com: incomplete\)$/);
   assert.equal(stuck.chains["eip155:1"]?.error, undefined, "the other chain is untouched");
-  assert.equal(coverageOf(stuck).complete_through["eip155:8453"], 529);
+  assert.equal(coverageOf(stuck).complete_through["eip155:8453"], 439);
   const view = kitWatchStatus(stuck, Date.parse(stuck.updated_at)) as { chains: Record<string, Record<string, unknown>> };
   assert.equal(view.chains["eip155:8453"]?.status, "error");
 
   const resumed = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600 }), now: T + 60_000 })) as KitWatchStats;
   const base2 = resumed.chains["eip155:8453"] as ChainStats;
-  assert.deepEqual([base2.cursor, base2.error, base2.gaps_total ?? 0, base2.scanned_blocks], [590, undefined, 0, 91], "resumed at 530: every block from 500 to 590 scanned once");
+  assert.deepEqual([base2.cursor, base2.error, base2.gaps_total ?? 0, base2.scanned_blocks], [500, undefined, 0, 91], "resumed at 440: every block from 410 to 500 scanned once");
 });
 
 test("blocks: an endpoint that answers 429 is not asked again in the run; when all are limited the fetch fails at once", async () => {
@@ -831,4 +832,21 @@ test("scan: of a delegate whose re-probe can flag only the probed account, only 
   assert.equal(sampled({ ...due, code_kind: "none", bytes: 0 }), false, "code may yet be deployed");
   assert.equal(sampled({ ...due, at: nowS - 60 }), false, "no re-probe due: settled instead");
   assert.equal(sampled({ class: "unprobed", at: nowS, bytes: 4292, code_kind: "logic" }), false);
+});
+
+test("cron: Base at 200 ms blocks (Denim, 2026-11-05): a run catches up 900 blocks with no hole, and skips ahead only past 6 hours", async () => {
+  const head = 200_000;
+  const kv = seeded();
+  // 2,000 blocks behind (under 7 minutes at 300 blocks a minute): the run reads 900 of them, no hole.
+  kv.data.set(KW.cursor("eip155:8453"), String(head - 100 - 2_000));
+  const st = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head }), now: T })) as KitWatchStats;
+  const base = st.chains["eip155:8453"] as ChainStats;
+  assert.deepEqual([base.cursor, base.scanned_blocks, base.gaps_total ?? 0], [head - 100 - 1_100, 900, 0]);
+
+  // More than 108,000 blocks (6 h) behind: the watch skips ahead and records one hole.
+  const far = seeded();
+  far.data.set(KW.cursor("eip155:8453"), String(head - 100 - 108_500));
+  const st2 = (await runKitWatch({ RATE: far }, { fetchImpl: chainStub({ head }), now: T })) as KitWatchStats;
+  const base2 = st2.chains["eip155:8453"] as ChainStats;
+  assert.deepEqual([base2.gaps_total, base2.unbroken_since, base2.cursor], [1, head - 100 - 108_000 + 1, head - 100 - 108_000 + 900]);
 });

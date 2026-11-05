@@ -94,7 +94,7 @@ export type State = {
 };
 
 /** How far behind each chain may be, in blocks: a warning past 5 minutes, a failure past an hour. */
-const LAG: Record<string, { warn: number; fail: number }> = { "eip155:1": { warn: 25, fail: 300 }, "eip155:8453": { warn: 150, fail: 1800 } };
+const LAG: Record<string, { warn: number; fail: number }> = { "eip155:1": { warn: 25, fail: 300 }, "eip155:8453": { warn: 1500, fail: 18000 } };
 
 /** The checks on /status alone, against the last run's state (pure: tested in test/daily-check.test.ts). */
 export function statusChecks(status: Status, prev: State | null, published?: { metamask?: string; ofac?: string }): Check[] {
