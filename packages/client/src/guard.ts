@@ -47,7 +47,7 @@ import { serializedMismatch } from "./serialized.js";
 import { decodeTypedData } from "./decode/typed.js";
 import { decodePersonalSign } from "./decode/personal.js";
 import { buildRiskCheckBodies, type RiskCheckBody } from "./decode/request.js";
-import { MAX_UINT256, parseUint, quote, wellFormed, type Decoded } from "./decode/util.js";
+import { MAX_UINT256, parseUint, plainText, quote, wellFormed, type Decoded } from "./decode/util.js";
 import {
   accountKeys,
   ADDRESS_LOOKUP_TABLE_PROGRAM,
@@ -485,8 +485,9 @@ export function createGuard(options: GuardOptions = {}) {
   }
 
   function verdictOf(kind: SigningKind, summary: string, action: Action, reasons: string[], checks: GuardCheck[], code?: string): GuardVerdict {
-    // Summaries and reasons quote untrusted text (messages, a seller's URL): never half an emoji.
-    return { action, signed: action === "allow", kind, summary: wellFormed(summary), reasons: reasons.map(wellFormed), checks, ...(code ? { code } : {}) };
+    // Summaries and reasons quote untrusted text (messages, a type's name, a seller's URL): never half an
+    // emoji, and nothing that reorders or hides the text after it.
+    return { action, signed: action === "allow", kind, summary: plainText(summary), reasons: reasons.map(plainText), checks, ...(code ? { code } : {}) };
   }
 
   /** Checks the requests (a batch call per MAX_BATCH) and combines the verdicts: the worst one decides. */

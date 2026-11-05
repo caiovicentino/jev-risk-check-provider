@@ -1696,9 +1696,11 @@ function scalarFields(ctx: Ctx, limit: number): string[] {
       return;
     }
     let text: string | undefined;
-    if (Array.isArray(value)) text = `${path}=[${value.length} items]`;
-    else if (typeof value === "bigint" || typeof value === "boolean") text = `${path}=${value.toString()}`;
-    else if (typeof value === "string") text = `${path}=${capText(cleanText(value, 256).text, 48)}`;
+    // The path is the request's own field names: shown as plain text.
+    const label = capText(path, 60);
+    if (Array.isArray(value)) text = `${label}=[${value.length} items]`;
+    else if (typeof value === "bigint" || typeof value === "boolean") text = `${label}=${value.toString()}`;
+    else if (typeof value === "string") text = `${label}=${capText(cleanText(value, 256).text, 48)}`;
     if (text !== undefined) found.push({ text, economic: ECONOMIC_FIELD_RE.test(name) });
   };
   walk(ctx.primaryType, ctx.message, "", "", 0);
@@ -1795,12 +1797,13 @@ function decodeParsed(parsed: unknown, signer: string | undefined, method: strin
     raw: isRecord(parsed) ? parsed : {},
     depth,
   };
-  for (const note of canon.unusual.slice(0, 4)) ctx.warnings.push(note);
+  // Paths and values quote the request's own names and data: shown as plain text.
+  for (const note of canon.unusual.slice(0, 4)) ctx.warnings.push(capText(note, 300));
   if (canon.unsignable.length > 0) {
-    ctx.warnings.push(`MetaMask cannot sign this request as-is: invalid field(s) ${canon.unsignable.slice(0, 3).join(", ")}`);
+    ctx.warnings.push(`MetaMask cannot sign this request as-is: invalid field(s) ${capText(canon.unsignable.slice(0, 3).join(", "), 200)}`);
   }
   if (canon.unresolved.length > 0) {
-    ctx.danger.push(`x402check could not decode field(s) ${canon.unresolved.slice(0, 3).join(", ")}; do not sign unless you trust the site`);
+    ctx.danger.push(`x402check could not decode field(s) ${capText(canon.unresolved.slice(0, 3).join(", "), 200)}; do not sign unless you trust the site`);
   }
   // Not read in full: a part never inspected (one order of a Seaport bulk listing, say) is signed with
   // the rest, so the request cannot be called checked.
@@ -1849,7 +1852,7 @@ function decodeParsed(parsed: unknown, signer: string | undefined, method: strin
   // A field the decoders could not read as its type (a uint sent as `true` or `[1]`, which viem hashes
   // as 1) was read as missing, and its rule with it: never "decoded", whatever the rest says.
   if (canon.unsignable.length > 0 && !result.unsignable) {
-    return { ...result, unsignable: `field(s) ${canon.unsignable.slice(0, 3).join(", ")} could not be read as their declared types` };
+    return { ...result, unsignable: `field(s) ${capText(canon.unsignable.slice(0, 3).join(", "), 200)} could not be read as their declared types` };
   }
   return result;
 }

@@ -7,7 +7,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { REDACTED, cleanText, decodePersonalSign, decodeSignature, redactSecrets } from '../../src/decode';
-import { capText, headOf } from '../../src/util';
+import { capText, headOf, plainText } from '../../src/util';
 import { buildRiskCheckBodies, originHost } from '../../src/request';
 import { DRAINER, RECIPIENT, USDC, USER, utf8Hex } from '../helpers';
 
@@ -150,5 +150,43 @@ describe('2026-11-02 review: a cut never splits an emoji', () => {
       for (const body of bodies) expect(body.context ?? '').not.toMatch(lone);
     }
     expect(capText(`ok ${half}`, 100)).toBe('ok \ufffd');
+  });
+});
+
+describe('2026-11-05 review: names from typed data are shown as plain text', () => {
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+  // Direction overrides and isolates, zero-width characters and marks: they reorder or hide what follows.
+  const hidden = /[​-‏‪-‮⁠-⁤⁦-⁩؜﻿]/u;
+  const shown = (decoded: object) => Object.values(decoded).filter((v): v is string => typeof v === 'string').concat(...['warnings', 'danger'].map((k) => ((decoded as Record<string, unknown>)[k] as string[] | undefined) ?? []));
+
+  it('an undeclared primary type', () => {
+    const typed = { types: { EIP712Domain: [{ name: 'name', type: 'string' }], Mail: [{ name: 'to', type: 'address' }] }, primaryType: 'Permit‮evil​\ud83d', domain: { name: 'x' }, message: { to: RECIPIENT } };
+    const decoded = decodeSignature({ from: USER, data: JSON.stringify(typed), signatureMethod: 'eth_signTypedData_v4' }, 'drainer.example');
+    expect(decoded.unsignable).toBeDefined();
+    for (const text of shown(decoded)) {
+      expect(text).not.toMatch(hidden);
+      expect(text).not.toMatch(lone);
+    }
+    expect(decoded.localNote).toContain('"Permitevil�"');
+  });
+
+  it('a declared primary type, and a field name in a warning', () => {
+    const type = 'Order‮kcab';
+    const field = 'to⁦x';
+    const typed = {
+      types: { EIP712Domain: [{ name: 'name', type: 'string' }], [type]: [{ name: field, type: 'address' }, { name: 'spender', type: 'address' }] },
+      primaryType: type,
+      domain: { name: 'x' },
+      message: { [field]: '0xzz', spender: DRAINER },
+    };
+    const decoded = decodeSignature({ from: USER, data: JSON.stringify(typed), signatureMethod: 'eth_signTypedData_v4' }, 'drainer.example');
+    expect(shown(decoded).join(' ')).toContain('message.tox');
+    for (const text of shown(decoded)) expect(text).not.toMatch(hidden);
+  });
+
+  it('plainText and capText drop what reorders or hides text, and keep the rest', () => {
+    expect(plainText('a‮b​c\u0007d\ud83d')).toBe('abc d�');
+    expect(capText('pay ‮0x12‬ to', 100)).toBe('pay 0x12 to');
+    expect(plainText('line one\nline two\tend 😀')).toBe('line one\nline two\tend 😀');
   });
 });

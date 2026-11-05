@@ -558,9 +558,17 @@ export function wellFormed(text: string): string {
   return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
 }
 
-/** Caps a string, appending an ellipsis when truncated; an emoji is never cut in half, and a lone half is replaced. */
+/**
+ * Text safe to show a person or a model: well-formed, with no invisible or direction-changing
+ * characters (which can reorder or hide what follows them) and control characters as spaces.
+ */
+export function plainText(text: string): string {
+  return wellFormed(text).replace(INVISIBLE_GLOBAL_RE, "").replace(CONTROL_RE, " ");
+}
+
+/** Caps a string, appending an ellipsis when truncated; an emoji is never cut in half, and it is plain text (`plainText`). */
 export function capText(text: string, max: number): string {
-  const clean = wellFormed(text);
+  const clean = plainText(text);
   if (clean.length <= max) return clean;
   return `${headOf(clean, max - 1).trimEnd()}…`;
 }

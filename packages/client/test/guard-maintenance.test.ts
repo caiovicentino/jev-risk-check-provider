@@ -293,3 +293,32 @@ describe("2026-11-04 review: no half an emoji in what the guard reports or refus
     assert.doesNotMatch(verdicts[0]?.summary ?? "", /‮/);
   });
 });
+
+describe("2026-11-05 review: nothing in what the guard reports or refuses with reorders or hides text", () => {
+  // Direction overrides and isolates, zero-width characters and marks.
+  const HIDDEN = /[​-‏‪-‮⁠-⁤⁦-⁩؜﻿]/;
+  const USER = "0x5555555555555555555555555555555555555555";
+
+  test("a typed-data primary type that is not declared", async () => {
+    const verdicts: GuardVerdict[] = [];
+    let fetched = 0;
+    const guarded = guardAccount({ address: USER, signTypedData: async (_args: unknown) => "0x" as const }, { pinnedKeys: false, fetch: async () => (fetched++, new Response("{}", { status: 500 })), onVerdict: (v) => void verdicts.push(v) });
+    const typed = { types: { EIP712Domain: [{ name: "name", type: "string" }], Mail: [{ name: "to", type: "address" }] }, primaryType: "Permit‮evil​\ud83d", domain: { name: "x" }, message: { to: BOB } };
+    const refused = await guarded.signTypedData(typed as never).then(() => undefined, (err: unknown) => err as X402CheckBlockedError);
+    assert.ok(refused instanceof X402CheckBlockedError);
+    assert.equal(fetched, 0);
+    assert.equal(verdicts[0]?.code, "malformed");
+    assert.doesNotMatch(refused.message, HIDDEN);
+    assert.doesNotMatch(verdicts[0]?.summary ?? "", HIDDEN);
+    for (const reason of verdicts[0]?.reasons ?? []) assert.doesNotMatch(reason, HIDDEN);
+  });
+
+  test("an x402 seller's URL", async () => {
+    const hook = x402PaymentGuard({ pinnedKeys: false, fetch: boundProvider(() => BLOCK).fetch });
+    const url = "https://seller.example/item‮txt.exe";
+    const out = await hook({ paymentRequired: { resource: { url } }, selectedRequirements: { network: "eip155:8453", payTo: DRAINER, amount: "10000", asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" } });
+    assert.ok(out?.abort);
+    assert.doesNotMatch(out.reason, HIDDEN);
+    assert.match(out.reason, /seller\.example\/itemtxt\.exe/);
+  });
+});

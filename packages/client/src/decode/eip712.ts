@@ -13,7 +13,7 @@
  * - bool: JavaScript truthiness (so "false", "0" and 1 all sign as TRUE).
  * Values the encoder would reject are reported as unsignable.
  */
-import { hasOwn, headOf, isRecord, parseBigIntString, toBigIntLike } from "./util.js";
+import { hasOwn, headOf, isRecord, parseBigIntString, quote, toBigIntLike } from "./util.js";
 
 export type TypedField = { name: string; type: string };
 export type TypedTypes = Record<string, TypedField[]>;
@@ -359,7 +359,7 @@ export function canonicalizeTypedData(input: unknown): Canonical | { error: stri
     return { error: "the typed data has no primaryType" };
   }
   if (primaryType !== "EIP712Domain" && !hasOwn(types, primaryType)) {
-    return { error: `its primary type "${headOf(primaryType, 40)}" is not declared in its types` };
+    return { error: `its primary type ${quote(primaryType, 40)} is not declared in its types` };
   }
   const ctx: Context = { types, budget: MAX_NODES, unsignable: [], unresolved: [], unusual: [], truncated: false };
   const domainValue = canonValue(ctx, "EIP712Domain", input.domain, "domain", 0);
