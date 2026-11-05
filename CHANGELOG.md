@@ -67,7 +67,7 @@ Agent-framework integrations, two new packages.
 
 ## v0.6.22 — 2026-11-05: the kit watch keeps up with Base's 200 ms blocks
 
-Base's Denim upgrade (2026-11-05 at 18:00 UTC) took its blocks from 2 seconds to 200 milliseconds: about 300 a minute instead of 30. The kit watch read at most 90 Base blocks a run, once a minute, so it fell behind. From about 18:50 UTC it reached its 10,800-block limit and skipped ahead every run. About 210 blocks a minute went unread, each skip recorded as a hole: Base's `gaps` rose from 10,850 to 10,951 by 20:32 UTC, and `unbroken_since` moved forward every minute. Ethereum was not affected. The 2026-11-05 maintenance run found it.
+Base's Denim upgrade (2026-11-05 at 18:00 UTC) took its blocks from 2 seconds to 200 milliseconds: about 300 a minute instead of 30. The kit watch read at most 90 Base blocks a run, once a minute, so it fell behind. From about 18:50 UTC it reached its 10,800-block limit and skipped ahead every run. About 210 blocks a minute went unread, each skip recorded as a hole: Base's `gaps` rose from 10,850 to 10,961 by the deploy at 20:42 UTC, and `unbroken_since` moved forward every minute. Ethereum was not affected. The 2026-11-05 maintenance run found it.
 
 - **Base's plan keeps the same times at 10 times the blocks:** a run reads up to 900 blocks, the confirmations are 100 blocks (20 seconds, as before), and the watch skips ahead only when it is more than 108,000 blocks behind (6 hours, as before). A test runs Base at 200 ms blocks: one run reads 900 blocks with no hole, and only a lag past 6 hours skips ahead.
 - **1rpc.io's Base endpoint is dropped from the scan rotation.** It stopped at the last block before the upgrade, and a run that took its head from it had nothing to scan.
