@@ -44,17 +44,20 @@ const OWN_LOGIN = "caiovicentino";
  * The upstream threads AGENTS.md §2.6 follows. `readThrough`: the newest comment from others that
  * the lead agent has read and recorded in §2.6. A later one that is also newer than our own last
  * comment is reported every day until it is answered or read (move `readThrough` past it), so a
- * reply cannot hide behind the first run's baseline (kora#682 waited 17 days that way).
+ * reply cannot hide behind the first run's baseline (kora#682 waited 17 days that way). `pull`: a
+ * pull request, whose reviews and line comments count too. `bots`: a bot's word counts (a review
+ * bot on our own pull request; elsewhere bots are noise).
  */
-export const THREADS: ReadonlyArray<{ repo: string; number: number; label: string; readThrough: string }> = [
-  { repo: "x402-foundation/x402", number: 2300, label: "x402#2300 (trust provider)", readThrough: "2026-11-06T16:50:30Z" },
+export const THREADS: ReadonlyArray<{ repo: string; number: number; label: string; readThrough: string; pull?: true; bots?: true }> = [
+  { repo: "x402-foundation/x402", number: 2300, label: "x402#2300 (trust provider)", readThrough: "2026-11-06T16:50:30Z", pull: true },
   { repo: "x402-foundation/x402", number: 3597, label: "x402#3597 (our issue)", readThrough: "2026-09-29T07:31:38Z" },
-  { repo: "x402-foundation/x402", number: 2422, label: "x402#2422 (risk-check spec)", readThrough: "2026-05-25T16:31:12Z" },
+  { repo: "x402-foundation/x402", number: 2422, label: "x402#2422 (risk-check spec)", readThrough: "2026-05-25T16:31:12Z", pull: true },
   { repo: "PayAINetwork/docs", number: 98, label: "PayAI docs#98 (shadow proposal)", readThrough: "2026-09-29T00:00:00Z" },
   { repo: "solana-foundation/kora", number: 682, label: "kora#682 (fee-payer gate)", readThrough: "2026-11-06T15:55:07Z" },
+  { repo: "solana-foundation/kora", number: 765, label: "kora#765 (our external_decision draft PR)", readThrough: "2026-11-06T17:24:00Z", pull: true, bots: true },
   { repo: "romudille-bit/agentpay", number: 9, label: "agentpay#9 (pay_to screen)", readThrough: "2026-10-02T16:04:36Z" },
-  { repo: "romudille-bit/awesome-x402", number: 1, label: "awesome-x402#1 (our listing PR)", readThrough: "2026-10-01T00:00:00Z" },
-  { repo: "coinbase/agentkit", number: 1613, label: "agentkit#1613 (an \"x402check\" provider for x402check.dev, not ours)", readThrough: "2026-10-31T20:18:43Z" },
+  { repo: "romudille-bit/awesome-x402", number: 1, label: "awesome-x402#1 (our listing PR)", readThrough: "2026-10-01T00:00:00Z", pull: true },
+  { repo: "coinbase/agentkit", number: 1613, label: "agentkit#1613 (an \"x402check\" provider for x402check.dev, not ours)", readThrough: "2026-10-31T20:18:43Z", pull: true },
   { repo: "coinbase/agentkit", number: 1402, label: "agentkit#1402 (a neutral beforePayment hook, not ours)", readThrough: "2026-11-04T03:32:02Z" },
 ];
 /** EVM RPCs for networks the evaluation tables do not cover (settlement payers only). */
@@ -280,9 +283,17 @@ function thumbprint(jwk: { crv?: string; kty?: string; x?: string; y?: string })
  * untrusted, and the reader opens the link.
  */
 function unanswered(t: (typeof THREADS)[number]): string | undefined {
-  const all = gh<Array<{ user: { login: string }; created_at: string; html_url: string }>>(["api", `repos/${t.repo}/issues/${t.number}/comments?per_page=100`]);
+  type Remark = { user: { login: string }; created_at: string; html_url: string };
+  const all = gh<Remark[]>(["api", `repos/${t.repo}/issues/${t.number}/comments?per_page=100`]);
+  if (t.pull) {
+    // A review, and a comment on a line, are not issue comments: a maintainer's review would hide there.
+    all.push(...gh<Remark[]>(["api", `repos/${t.repo}/pulls/${t.number}/comments?per_page=100`]));
+    const reviews = gh<Array<{ user: { login: string }; submitted_at?: string; html_url: string }>>(["api", `repos/${t.repo}/pulls/${t.number}/reviews?per_page=100`]);
+    all.push(...reviews.flatMap((r) => (r.submitted_at ? [{ user: r.user, created_at: r.submitted_at, html_url: r.html_url }] : [])));
+    all.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
   const ours = all.filter((c) => c.user.login === OWN_LOGIN).at(-1)?.created_at ?? "";
-  const theirs = all.filter((c) => c.user.login !== OWN_LOGIN && !c.user.login.endsWith("[bot]")).at(-1);
+  const theirs = all.filter((c) => c.user.login !== OWN_LOGIN && (t.bots || !c.user.login.endsWith("[bot]"))).at(-1);
   if (!theirs || theirs.created_at <= ours || theirs.created_at <= t.readThrough) return undefined;
   return `${t.label}: unanswered since ${theirs.created_at.slice(0, 16)}, ${clean(theirs.user.login, 40)} ${clean(theirs.html_url, 120)}: read it, answer or record it in AGENTS.md §2.6, then move readThrough in scripts/daily-check.ts`;
 }
