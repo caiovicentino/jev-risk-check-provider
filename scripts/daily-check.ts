@@ -47,11 +47,11 @@ const OWN_LOGIN = "caiovicentino";
  * reply cannot hide behind the first run's baseline (kora#682 waited 17 days that way).
  */
 export const THREADS: ReadonlyArray<{ repo: string; number: number; label: string; readThrough: string }> = [
-  { repo: "x402-foundation/x402", number: 2300, label: "x402#2300 (trust provider)", readThrough: "2026-10-14T05:55:24Z" },
+  { repo: "x402-foundation/x402", number: 2300, label: "x402#2300 (trust provider)", readThrough: "2026-11-06T16:50:30Z" },
   { repo: "x402-foundation/x402", number: 3597, label: "x402#3597 (our issue)", readThrough: "2026-09-29T07:31:38Z" },
   { repo: "x402-foundation/x402", number: 2422, label: "x402#2422 (risk-check spec)", readThrough: "2026-05-25T16:31:12Z" },
   { repo: "PayAINetwork/docs", number: 98, label: "PayAI docs#98 (shadow proposal)", readThrough: "2026-09-29T00:00:00Z" },
-  { repo: "solana-foundation/kora", number: 682, label: "kora#682 (fee-payer gate)", readThrough: "2026-10-06T14:48:40Z" },
+  { repo: "solana-foundation/kora", number: 682, label: "kora#682 (fee-payer gate)", readThrough: "2026-11-06T15:55:07Z" },
   { repo: "romudille-bit/agentpay", number: 9, label: "agentpay#9 (pay_to screen)", readThrough: "2026-10-02T16:04:36Z" },
   { repo: "romudille-bit/awesome-x402", number: 1, label: "awesome-x402#1 (our listing PR)", readThrough: "2026-10-01T00:00:00Z" },
   { repo: "coinbase/agentkit", number: 1613, label: "agentkit#1613 (an \"x402check\" provider for x402check.dev, not ours)", readThrough: "2026-10-31T20:18:43Z" },
