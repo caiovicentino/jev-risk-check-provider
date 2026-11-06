@@ -33,12 +33,14 @@ export const SIMULATION_ENDPOINTS: Record<string, readonly string[]> = {
  * endpoint takes the whole volume (from 2026-10-15 the Base endpoints answered the cron's shared
  * egress with HTTP 429), and the scan can never rate-limit a paid check: the endpoints that serve
  * evaluations (RPC_ENDPOINTS, SIMULATION_ENDPOINTS) are only the last fallback. 1rpc.io/base stopped
- * at the last block before Base's Denim upgrade (2026-11-05 18:00 UTC) and was dropped: an endpoint
- * that names a stale head leaves its run nothing to scan.
+ * at the last block before Base's Denim upgrade (2026-11-05 18:00 UTC) and was dropped (an endpoint
+ * that names a stale head leaves its run nothing to scan); it followed the chain again by 2026-11-06
+ * and is back. Base's blocks since Denim are about 28 KB, so the scan's batch sits at 10 blocks, more
+ * than dRPC and meowrpc take (BATCH_LIMITS): they serve only when a batch is split.
  */
 export const SCAN_ENDPOINTS: Record<string, readonly string[]> = {
   "eip155:1": ["https://eth-mainnet.public.blastapi.io", "https://mainnet.gateway.tenderly.co", "https://rpc.mevblocker.io", "https://1rpc.io/eth", "https://rpc.flashbots.net", "https://eth.meowrpc.com", "https://ethereum-rpc.publicnode.com"],
-  "eip155:8453": ["https://base.gateway.tenderly.co", "https://base-mainnet.public.blastapi.io", "https://base.meowrpc.com", "https://base.drpc.org", "https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+  "eip155:8453": ["https://base.gateway.tenderly.co", "https://base-mainnet.public.blastapi.io", "https://1rpc.io/base", "https://base.meowrpc.com", "https://base.drpc.org", "https://mainnet.base.org", "https://base-rpc.publicnode.com"],
 };
 
 /**
@@ -53,7 +55,7 @@ export const READ_ENDPOINTS: Record<string, readonly string[]> = {
 };
 
 /** Keyless tiers that refuse a whole JSON-RPC batch of more calls than this. */
-export const BATCH_LIMITS: Record<string, number> = { "https://eth.drpc.org": 3, "https://base.drpc.org": 3, "https://base.meowrpc.com": 5, "https://eth.meowrpc.com": 5, "https://rpc.flashbots.net": 3, "https://rpc.mevblocker.io": 10, "https://1rpc.io/eth": 10, "https://mainnet.base.org": 10, "https://mainnet.gateway.tenderly.co": 10, "https://base.gateway.tenderly.co": 10 };
+export const BATCH_LIMITS: Record<string, number> = { "https://eth.drpc.org": 3, "https://base.drpc.org": 3, "https://base.meowrpc.com": 5, "https://eth.meowrpc.com": 5, "https://rpc.flashbots.net": 3, "https://rpc.mevblocker.io": 10, "https://1rpc.io/eth": 10, "https://1rpc.io/base": 10, "https://mainnet.base.org": 10, "https://mainnet.gateway.tenderly.co": 10, "https://base.gateway.tenderly.co": 10 };
 
 /** An operator override (one URL) takes the primary slot; the defaults remain as fallbacks. */
 export function endpointsFor(network: string, defaults: Record<string, readonly string[]>, override?: Record<string, string>): string[] {

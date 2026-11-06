@@ -127,10 +127,13 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   const evaluation = new Set([...(RPC_ENDPOINTS[chain] ?? []), ...(SIMULATION_ENDPOINTS[chain] ?? [])]);
   const rotating = scanUrls.filter((u) => !evaluation.has(u));
   const lastResort = scanUrls.filter((u) => evaluation.has(u));
+  // A batch rotates over the endpoints that accept its size (BATCH_LIMITS), so turns stay even: one
+  // that cannot take it would hand its turn to the next, which then takes two.
   let turn = 0;
-  const scanOrder = (): string[] => {
-    const k = rotating.length ? turn++ % rotating.length : 0;
-    return [...rotating.slice(k), ...rotating.slice(0, k), ...lastResort];
+  const scanOrder = (size = 1): string[] => {
+    const able = rotating.filter((u) => size <= (BATCH_LIMITS[u] ?? Number.POSITIVE_INFINITY));
+    const k = able.length ? turn++ % able.length : 0;
+    return [...able.slice(k), ...able.slice(0, k), ...rotating.filter((u) => !able.includes(u)), ...lastResort];
   };
   // An endpoint that answered 429 is not asked for blocks again in this run: more requests would
   // only prolong its limit. When every endpoint is limited the scan stops, and the next run resumes.
@@ -138,7 +141,7 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   const fetchBlocks = async (numbers: number[]): Promise<{ blocks: RawBlock[]; bytes: number }> => {
     const deadline = Date.now() + timeoutMs;
     const why: string[] = [];
-    for (const url of scanOrder()) {
+    for (const url of scanOrder(numbers.length)) {
       const host = new URL(url).hostname;
       if (limited.has(url)) {
         why.push(`${host}: HTTP 429 earlier in this run`);

@@ -13,7 +13,7 @@
  * - bool: JavaScript truthiness (so "false", "0" and 1 all sign as TRUE).
  * Values the encoder would reject are reported as unsignable.
  */
-import { hasOwn, headOf, isRecord, parseBigIntString, quote, toBigIntLike } from "./util.js";
+import { capText, hasOwn, headOf, isRecord, parseBigIntString, quote, toBigIntLike } from "./util.js";
 
 export type TypedField = { name: string; type: string };
 export type TypedTypes = Record<string, TypedField[]>;
@@ -105,6 +105,11 @@ export function isStrictHexString(value: string): boolean {
   return true;
 }
 
+/** A field's path in a note, capped so the value it signs as always fits in the note's own cap. */
+function fieldPath(path: string): string {
+  return capText(path, 100);
+}
+
 function display(value: unknown): string {
   if (typeof value === "string") return JSON.stringify(value.length > 40 ? `${headOf(value, 40)}…` : value);
   if (typeof value === "bigint") return `${value.toString()}n`;
@@ -152,7 +157,7 @@ function canonAddress(ctx: Context, value: unknown, path: string): string | unde
   if (typeof value === "number") {
     if (Number.isSafeInteger(value) && value >= 0) {
       const address = `0x${value.toString(16).padStart(40, "0")}`;
-      ctx.unusual.push(`${path} is the number ${value}, which signs as address ${address}`);
+      ctx.unusual.push(`${fieldPath(path)} is the number ${value}, which signs as address ${address}`);
       return address;
     }
     ctx.unsignable.push(path);
@@ -171,7 +176,7 @@ function canonAddress(ctx: Context, value: unknown, path: string): string | unde
     }
     const address = `0x${hex.padStart(40, "0")}`;
     if (value.length !== 42 || value[1] !== "x") {
-      ctx.unusual.push(`${path} uses a non-standard address encoding (${display(value)}) that signs as ${address}`);
+      ctx.unusual.push(`${fieldPath(path)} uses a non-standard address encoding (${display(value)}) that signs as ${address}`);
     }
     return address;
   }
@@ -184,7 +189,7 @@ function canonAddress(ctx: Context, value: unknown, path: string): string | unde
     ctx.unresolved.push(path);
     return undefined;
   }
-  ctx.unusual.push(`${path} uses a non-standard address encoding (${display(value)}) that signs as ${resolved}`);
+  ctx.unusual.push(`${fieldPath(path)} uses a non-standard address encoding (${display(value)}) that signs as ${resolved}`);
   return resolved;
 }
 
@@ -199,7 +204,7 @@ function bitLength(type: string, prefix: "uint" | "int"): number | undefined {
 function noteUnusualNumber(ctx: Context, value: unknown, path: string, parsed: bigint): void {
   if (typeof value !== "string") return;
   if (/^(?:0|[1-9]\d{0,77}|0x[0-9a-fA-F]{1,64})$/u.test(value)) return;
-  ctx.unusual.push(`${path} uses a non-standard number encoding (${display(value)}) that signs as ${parsed.toString()}`);
+  ctx.unusual.push(`${fieldPath(path)} uses a non-standard number encoding (${display(value)}) that signs as ${parsed.toString()}`);
 }
 
 function canonUint(ctx: Context, type: string, value: unknown, path: string): bigint | undefined {
@@ -316,7 +321,7 @@ function canonValue(ctx: Context, type: string, value: unknown, path: string, de
   if (type === "bool") {
     const signed = Boolean(value);
     if (typeof value !== "boolean") {
-      ctx.unusual.push(`${path} is ${display(value)}, which signs as ${signed ? "TRUE" : "FALSE"}`);
+      ctx.unusual.push(`${fieldPath(path)} is ${display(value)}, which signs as ${signed ? "TRUE" : "FALSE"}`);
     }
     return signed;
   }

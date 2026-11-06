@@ -85,16 +85,16 @@ export const LEGACY_DROPPED_READS: Record<WatchChain, number> = { "eip155:1": 9_
  * `writes` so that the entries a run's other findings add still fit. Ethereum carries the floods of
  * delegations (address-poisoning look-alikes), so it gets the larger share.
  */
-type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag: number; writes: number; evaluations: number };
+type ChainPlan = { confirmations: number; perRun: number; start: number; maxLag: number; writes: number; evaluations: number; segment: number };
 const PLAN: Record<WatchChain, ChainPlan> = {
-  // ~5 blocks a minute; a run catches up to 15.
-  "eip155:1": { confirmations: 2, perRun: 15, start: 5, maxLag: 1800, writes: 450, evaluations: 400 },
+  // ~5 blocks a minute; a run catches up to 15, in segments of 10.
+  "eip155:1": { confirmations: 2, perRun: 15, start: 5, maxLag: 1800, writes: 450, evaluations: 400, segment: 10 },
   // ~300 blocks a minute since the Denim upgrade (2026-11-05 18:00 UTC, 200 ms blocks; 2 s before it):
-  // a run catches up to 900, in segments of 10. The same times as before: 20 s of confirmations, and
-  // at most 6 h behind before the watch skips ahead.
-  "eip155:8453": { confirmations: 100, perRun: 900, start: 300, maxLag: 108000, writes: 250, evaluations: 200 },
+  // a run catches up to 900. The same times as before: 20 s of confirmations, at most 6 h behind
+  // before the watch skips ahead, and segments of 20 s (100 blocks), so each scan's bounds (probes,
+  // authorizations kept) still cover the same stretch of chain time.
+  "eip155:8453": { confirmations: 100, perRun: 900, start: 300, maxLag: 108000, writes: 250, evaluations: 200, segment: 100 },
 };
-const SEGMENT = 10;
 
 export type ChainStats = {
   cursor: number;
@@ -235,8 +235,8 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   // and the next run starts with it (never skipped). The reason is recorded as the chain's error.
   let scannedTo = from - 1;
   let blockError: string | null = null;
-  for (let n = from; n <= to; n += SEGMENT) {
-    const end = Math.min(to, n + SEGMENT - 1);
+  for (let n = from; n <= to; n += plan.segment) {
+    const end = Math.min(to, n + plan.segment - 1);
     const act = newActivity();
     try {
       // Each batch's block bodies are dropped once its activity is taken: full blocks are large.

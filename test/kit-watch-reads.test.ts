@@ -567,20 +567,20 @@ test("cron: the queue is retried by cost: at most 100 reads a run, a threat's au
 
 test("cron: a segment whose blocks no endpoint serves ends the run's scan there: earlier segments are kept, the next run resumes, nothing is skipped", async () => {
   const kv = seeded();
-  // Base: cursor 409, head 600 − 100 confirmations; blocks from 440 on cannot be fetched this run.
-  const stuck = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600, missing: (n) => n >= 440 && n < 1000 }), now: T })) as KitWatchStats;
+  // Base: cursor 409, head 800 − 100 confirmations, in segments of 100 blocks; blocks from 640 on cannot be fetched this run.
+  const stuck = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 800, missing: (n) => n >= 640 && n < 1000 }), now: T })) as KitWatchStats;
   const base = stuck.chains["eip155:8453"] as ChainStats;
-  assert.deepEqual([base.cursor, base.gaps_total ?? 0], [439, 0], "three segments kept, no hole");
+  assert.deepEqual([base.cursor, base.gaps_total ?? 0], [609, 0], "two segments kept, no hole");
   // Every endpoint was asked; the two that serve evaluations last.
-  assert.match(base.error ?? "", /^Error: blocks 440-440 unavailable \((?:[a-z0-9.-]+: incomplete; ){4}mainnet\.base\.org: incomplete; base-rpc\.publicnode\.com: incomplete\)$/);
+  assert.match(base.error ?? "", /^Error: blocks 640-640 unavailable \((?:[a-z0-9.-]+: incomplete; ){5}mainnet\.base\.org: incomplete; base-rpc\.publicnode\.com: incomplete\)$/);
   assert.equal(stuck.chains["eip155:1"]?.error, undefined, "the other chain is untouched");
-  assert.equal(coverageOf(stuck).complete_through["eip155:8453"], 439);
+  assert.equal(coverageOf(stuck).complete_through["eip155:8453"], 609);
   const view = kitWatchStatus(stuck, Date.parse(stuck.updated_at)) as { chains: Record<string, Record<string, unknown>> };
   assert.equal(view.chains["eip155:8453"]?.status, "error");
 
-  const resumed = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 600 }), now: T + 60_000 })) as KitWatchStats;
+  const resumed = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 800 }), now: T + 60_000 })) as KitWatchStats;
   const base2 = resumed.chains["eip155:8453"] as ChainStats;
-  assert.deepEqual([base2.cursor, base2.error, base2.gaps_total ?? 0, base2.scanned_blocks], [500, undefined, 0, 91], "resumed at 440: every block from 410 to 500 scanned once");
+  assert.deepEqual([base2.cursor, base2.error, base2.gaps_total ?? 0, base2.scanned_blocks], [700, undefined, 0, 291], "resumed at 610: every block from 410 to 700 scanned once");
 });
 
 test("blocks: an endpoint that answers 429 is not asked again in the run; when all are limited the fetch fails at once", async () => {
@@ -849,4 +849,40 @@ test("cron: Base at 200 ms blocks (Denim, 2026-11-05): a run catches up 900 bloc
   const st2 = (await runKitWatch({ RATE: far }, { fetchImpl: chainStub({ head }), now: T })) as KitWatchStats;
   const base2 = st2.chains["eip155:8453"] as ChainStats;
   assert.deepEqual([base2.gaps_total, base2.unbroken_since, base2.cursor], [1, head - 100 - 108_000 + 1, head - 100 - 108_000 + 900]);
+});
+
+test("cron: Base's scans keep their time bounds at 200 ms blocks: at most 6 probes per 100 blocks (20 s), as per 10 blocks before Denim (2026-11-06 review)", async () => {
+  const head = 1_000_000;
+  const first = head - 100 - 900 + 1;
+  // One new delegate a block, each authority delegated to it: every one is due a probe.
+  const authorities = new Map<string, string>();
+  const blocks: Record<number, RawBlock["transactions"]> = {};
+  for (let i = 0; i < 900; i++) {
+    const signer = privateKeyToAccount(`0x${(i + 1).toString(16).padStart(64, "a")}`);
+    const delegate = addr(0x100000 + i);
+    const a = await signer.signAuthorization({ address: delegate as `0x${string}`, chainId: 8453, nonce: 0 });
+    authorities.set(signer.address.toLowerCase(), delegate);
+    blocks[first + i] = [{ hash: `0x${(first + i).toString(16)}`, from: signer.address, to: signer.address, nonce: "0x0", type: "0x4", authorizationList: [{ chainId: "0x2105", address: delegate, nonce: "0x0", yParity: `0x${(a.yParity ?? 0).toString(16)}`, r: a.r, s: a.s }] }] as RawBlock["transactions"];
+  }
+  const kv = seeded();
+  kv.data.set(KW.cursor("eip155:8453"), String(first - 1));
+  const log: string[] = [];
+  const code = (a: string) => (authorities.has(a) ? `0xef0100${authorities.get(a)?.slice(2)}` : `0x6080604052${a.slice(2)}5b00`);
+  const st = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head, blocks, code, log }), now: T })) as KitWatchStats;
+  assert.equal(st.chains["eip155:8453"]?.scanned_blocks, 900);
+  // Nine segments of 100 blocks: 54 probes (the old plan's 90 blocks, nine segments of 10, made as many); 533 before this fix.
+  assert.equal(log.filter((m) => m === "eth_simulateV1").length, 54);
+});
+
+test("blocks: a batch rotates over the endpoints that accept its size, in even turns (2026-11-06 review)", async () => {
+  const served = new Map<string, number>();
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Req[];
+    served.set(host(url), (served.get(host(url)) ?? 0) + 1);
+    return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
+  }) as unknown as typeof fetch;
+  const rpc = kitWatchRpc("eip155:8453", { fetchImpl, blockBatch: 10 });
+  for (let n = 1000; n < 1090; n += 10) await rpc.eachBlocks(n, n + 9, () => undefined);
+  // dRPC and meowrpc take at most 3 and 5 calls a batch: before this fix their turns went to the next endpoint (tenderly 5, the others 2).
+  assert.deepEqual(Object.fromEntries(served), { "base.gateway.tenderly.co": 3, "base-mainnet.public.blastapi.io": 3, "1rpc.io": 3 });
 });

@@ -26,6 +26,17 @@ Each release's full notes and evidence are on the [releases page](https://github
   - The names shown without it now go through it: an undeclared primary type (now quoted and cleaned), the field paths in warnings and in the summary's list of fields, and the lists of invalid or undecoded fields.
   - The guard's verdict summary and reasons are plain text, so a seller's URL can no longer reorder a refusal.
   - These ship with the next client release. The Worker's bundle is unchanged.
+- **Client and Snap: every invisible character is dropped from what is shown (2026-11-06 review).** The review of the previous day's fix found that `plainText` still kept some characters a person cannot see. It changes no decision. Each fix has a test that fails on the code before it:
+  - **Tag characters** (U+E0000–E007F: text a model reads and a person does not see), variation selectors, soft hyphens and fillers reached the guard's refusals and verdicts and the Snap's screen. `plainText` now drops every default-ignorable code point, and `cleanText` does too.
+  - **Line breaks:** a carriage return in a seller's URL could overwrite the start of the guard's refusal when it is printed in a terminal (`…/item\rx402check: payment ALLOWED`). `plainText` now puts carriage returns, line feeds and line and paragraph separators on one line as spaces.
+  - **A message to sign that carries tag characters** now gets the Snap's "invisible or text-direction control characters" warning, as one with direction overrides does.
+  - **A long field name** no longer cuts the address a non-standard encoding signs as from its warning: the path in a note is capped at 100 characters, so the note's value always fits under its 300-character cap.
+  - These ship with the next client release. The Worker's bundle is unchanged.
+- **Daily check (2026-11-06):**
+  - The thread watch (`--threads`) compares production with the daily run's state, reading it without writing it. A burst of more than 1,000 new holes with no lag (as in the 2026-10-30 flood) is a failure there too; before, `--threads` compared with nothing, so it could never report one.
+  - Text from others in its output drops every invisible character, tag characters included.
+  - A commit that changes only Markdown under `deploy/` is no longer reported as code production does not run.
+  - One caller that pays twice in a minute is credited; before, two calls from one user agent were reported as an ambiguous caller.
 - **Dependencies (2026-11-01):** Dependabot's monthly updates: `ai` 7.0.153, `tldts` 7.4.19, `viem` 2.57.11, `@modelcontextprotocol/sdk` 1.32.2 and `wrangler` 4.152.0. The root lockfile was rebuilt locally, because Dependabot's left out jayson's nested `utf-8-validate`. Production was redeployed from `6520146`.
 - **The MCP's lockfile:** zod 4.6.7 (GHSA-mrhx-c7xc-m3w5), body-parser 2.4.0 (GHSA-27r3-jxmh-p828) and fast-uri 3.1.9. The published 0.3.3 pins the earlier versions in its shrinkwrap. Over stdio the server never starts the SDK's express server, and every input it validates is size-bounded.
 - **The Worker's lockfile:** zod 4.6.7.
@@ -64,6 +75,16 @@ Agent-framework integrations, two new packages.
   - **`maxFeeWei` cannot cap `sendTransaction`,** because the wallet sets its own fees; this is documented.
   - **Peer and engine ranges** are the tested ones: `ai` 7.0.153 or later, and Node.js 22.12 or later.
 - **Tested through AgentKit's own x402 actions:** against a mock x402 v2 seller, `make_http_request_with_x402` (the one-shot path, which a `beforePayment` hook in the action provider cannot gate) and `retry_http_request_with_x402` pay a clean payee with the authorization that was checked, and refuse a drainer before the key signs; the seller receives nothing.
+
+## v0.6.23 — 2026-11-06: Base's scans keep their time bounds, and its block fetches spread evenly
+
+The 2026-11-06 maintenance run's independent review of v0.6.22 found 4 low problems and 1 informational one. None lets a payment or signature through unchecked, and none loses a block. Each fix has a test that fails on the code before it.
+
+- **Base's scan bounds cover the same chain time as before Denim.** v0.6.22 scaled Base's plan tenfold, but kept segments of 10 blocks, which are 2 seconds of Base now instead of 20. Every bound held per segment grew tenfold per minute. Probes of new delegates (`eth_simulateV1`, on the endpoints paid simulations use) could reach 533 in a catch-up run instead of 54, and about 180 a minute instead of 18. The authorizations a segment keeps for evaluation grew the same way. A chain's plan now sets its segment: 100 blocks (20 s) on Base, 10 on Ethereum. A test runs 900 Base blocks, each delegating to a new delegate: 54 probes.
+- **Block batches rotate over the endpoints that can take them.** Base's blocks are about 28 KB since Denim, so the scan's batch sits at 10 blocks. dRPC and meowrpc take at most 3 and 5 calls a batch. Their turns went to the next endpoint, so Tenderly served most of Base's fetches. If it rate-limited, the scan would fall through to the endpoints that serve paid evaluations sooner. A batch now rotates over the endpoints that accept its size, in even turns.
+- **1rpc.io's Base endpoint is back in the rotation.** It stopped at the last block before Denim, which is why v0.6.22 dropped it. By 2026-11-06 it followed the chain again (8 blocks behind the freshest endpoint) and served batches of 10 full blocks.
+- **Embedded OFAC snapshot:** the 2026-11-05 release. Its 1,071 addresses are unchanged.
+- The review's other findings are in the client, the Snap and the daily check (Unreleased).
 
 ## v0.6.22 — 2026-11-05: the kit watch keeps up with Base's 200 ms blocks
 

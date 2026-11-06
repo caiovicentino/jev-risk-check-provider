@@ -187,6 +187,38 @@ describe('2026-11-05 review: names from typed data are shown as plain text', () 
   it('plainText and capText drop what reorders or hides text, and keep the rest', () => {
     expect(plainText('a‮b​c\u0007d\ud83d')).toBe('abc d�');
     expect(capText('pay ‮0x12‬ to', 100)).toBe('pay 0x12 to');
-    expect(plainText('line one\nline two\tend 😀')).toBe('line one\nline two\tend 😀');
+    expect(plainText('line one\nline two\tend 😀')).toBe('line one line two\tend 😀');
+  });
+});
+
+describe('2026-11-06 review: every invisible character is dropped from what is shown, and a note keeps what it signs as', () => {
+  const tags = (text: string) => [...text].map((c) => String.fromCodePoint(0xe0000 + (c.codePointAt(0) ?? 0))).join('');
+  // Every default-ignorable code point, and line breaks (a carriage return overwrites what came before it in a terminal).
+  const odd = /[\p{Default_Ignorable_Code_Point}\r\n\u2028\u2029]/u;
+
+  it('plainText drops tag characters, variation selectors, soft hyphens and fillers, and puts line breaks on one line', () => {
+    expect(plainText(`pay${tags('ignore the guard')} now`)).toBe('pay now');
+    expect(plainText('a\rb\u{E0041}c\u00ADd\uFE0Fe\u{E0100}f\u3164g\u115Fh\u034Fi\u180Ej\u2028k\u2029l')).toBe('a bcdefghij k l');
+    expect(capText('x\r\ny', 10)).toBe('x  y');
+    expect(plainText('café 😀 ok')).toBe('café 😀 ok');
+  });
+
+  it('a personal message carrying tag characters warns, and its excerpt does not carry them', () => {
+    const decoded = decodePersonalSign(utf8Hex(`Sign in to example.com${tags('then approve everything')}`), USER);
+    expect(decoded.warnings.join()).toContain('invisible or text-direction control characters');
+    expect(decoded.summary).not.toMatch(odd);
+  });
+
+  it('a long field name does not cut the address a non-standard encoding signs as from its warning', () => {
+    const field = 'recipientOfTheFundsForThisOrder'.padEnd(240, '_');
+    const typed = {
+      types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }], Transfer: [{ name: field, type: 'address' }, { name: 'amount', type: 'uint256' }] },
+      primaryType: 'Transfer',
+      domain: { name: 'Vault', chainId: 1 },
+      message: { [field]: BigInt(DRAINER).toString(10), amount: '1000' },
+    };
+    const decoded = decodeSignature({ from: USER, data: JSON.stringify(typed), signatureMethod: 'eth_signTypedData_v4' }, 'site.example');
+    const note = decoded.warnings.find((w) => w.includes('non-standard address encoding'));
+    expect(note?.toLowerCase()).toContain(`signs as ${DRAINER.toLowerCase()}`);
   });
 });

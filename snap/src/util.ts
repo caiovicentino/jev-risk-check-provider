@@ -558,11 +558,13 @@ export function wellFormed(text: string): string {
 }
 
 /**
- * Text safe to show a person or a model: well-formed, with no invisible or direction-changing
- * characters (which can reorder or hide what follows them) and control characters as spaces.
+ * Text safe to show a person or a model, on one line: well-formed, with no invisible or
+ * direction-changing characters (which can reorder or hide what follows them, or carry text a
+ * model reads and a person does not) and control characters and line breaks as spaces (a
+ * carriage return can overwrite what came before it in a terminal).
  */
 export function plainText(text: string): string {
-  return wellFormed(text).replace(INVISIBLE_GLOBAL_RE, "").replace(CONTROL_RE, " ");
+  return wellFormed(text).replace(IGNORABLE_GLOBAL_RE, "").replace(CONTROL_RE, " ").replace(LINE_BREAK_RE, " ");
 }
 
 /** Caps a string, appending an ellipsis when truncated; an emoji is never cut in half, and it is plain text (`plainText`). */
@@ -589,11 +591,15 @@ export function shortAddress(address: string): string {
 
 export const REDACTED = "[redacted secret-like string]";
 
-// Invisible / direction-changing characters used to disguise text.
-const INVISIBLE_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u061C\uFEFF]/u;
-const INVISIBLE_GLOBAL_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u061C\uFEFF]/gu;
+// Invisible / direction-changing characters used to disguise text, and tag characters (text a model
+// reads and a person does not see): reported as a warning.
+const INVISIBLE_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u061C\uFEFF\u{E0000}-\u{E007F}]/u;
+// Every default-ignorable code point (the above, soft hyphens, variation selectors, fillers, tags):
+// none shows, so all are dropped from text that is shown.
+const IGNORABLE_GLOBAL_RE = /\p{Default_Ignorable_Code_Point}/gu;
 // C0/C1 control characters (tab, CR and LF are handled as whitespace).
 const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu;
+const LINE_BREAK_RE = /[\n\r\u2028\u2029]/gu;
 
 const B58 = "1-9A-HJ-NP-Za-km-z";
 // 32-byte hex secrets: bare, 0x-, pk_- or letter-suffixed (bounded by non-hex).
@@ -643,7 +649,7 @@ export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText 
   const hadInvisible = INVISIBLE_RE.test(capped);
   const text = redactSecrets(
     capped
-      .replace(INVISIBLE_GLOBAL_RE, "")
+      .replace(IGNORABLE_GLOBAL_RE, "")
       .replace(CONTROL_RE, " ")
       .replace(MNEMONIC_RE, REDACTED),
   )

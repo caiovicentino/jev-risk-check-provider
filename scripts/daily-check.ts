@@ -169,9 +169,9 @@ export function challengeCheck(accepts: Accept[], routes: Route[]): Check {
   return { id: "blackbox.challenge", level: problems.length ? "fail" : "ok", detail: problems.length ? problems.join("; ") : `${accepts.length} options, prices and transfer methods match` };
 }
 
-/** Text from others (comments, titles, errors) for a terminal and a file: control and bidi characters are blanked. */
+/** Text from others (comments, titles, errors) for a terminal and a file: control characters and every invisible one (bidi, zero-width, tags) are blanked. */
 export function clean(text: string, max = 240): string {
-  return text.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\p{Default_Ignorable_Code_Point}]/gu, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
 function short(network: string): string {
@@ -299,8 +299,10 @@ async function main(): Promise<void> {
       if (!(health.status === 200 && hz.ok && hz.attestation_key === "ok")) failing.push(`healthz — HTTP ${health.status} v${hz.version} ${hz.commit} key ${hz.attestation_key}`);
       const statusRes = await http("/status");
       const status = parse<Status>(statusRes.text);
+      // The daily run's state, read and never written, so holes since that run count as they do there.
+      const prev = existsSync(STATE_FILE) ? parse<State>(readFileSync(STATE_FILE, "utf8")) : null;
       if (!status) failing.push(`status — HTTP ${statusRes.status}: not JSON`);
-      else failing.push(...statusChecks(status, null).filter((c) => c.level === "fail").map((c) => `${c.id} — ${c.detail}`));
+      else failing.push(...statusChecks(status, prev).filter((c) => c.level === "fail").map((c) => `${c.id} — ${c.detail}`));
     } catch (err) {
       failing.push(`production — check could not run: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`);
     }
