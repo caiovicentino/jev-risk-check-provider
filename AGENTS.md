@@ -403,7 +403,7 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - In production from credits, 4/4 decisions agreed (both legitimate cases revert).
   - Probe credits: `~/.config/paysol/x402check-credit-token` (mode 600; never print it).
 - **Colosseum hackathon:** the owner submitted the project on 2026-10-06 with the answers in `docs/hackathon/submission-form.md` (v0.6.4 facts, Solana first, AI-assisted reviews disclosed, revenue stated honestly). Keep production healthy and the evidence current while it is judged.
-- **Revenue from outside:** $0.0835 by 2026-11-01, all from paying monitors and directories, none yet from a customer:
+- **Revenue from outside:** $0.0905 by 2026-11-06, all from paying monitors and directories, none yet from a customer:
   - `lumiere-paycheck-prober`: one check and a batch of two on 2026-10-01 ($0.0105);
   - vet402's observatory (`vet402-observatory-l1`, which buys from Bazaar-listed endpoints to check that payment settles and the service delivers): one check each on 2026-10-03, 2026-10-12 and 2026-10-23 ($0.0105, settled by CDP; we delivered);
   - `cog-x402-audit/2` (cog.xyz): a check and a batch of two on 2026-10-08 ($0.0105);
@@ -411,6 +411,7 @@ The lead agent's daily routine is in `docs/MAINTENANCE.md`: what it checks (`scr
   - `nohumans-scout/1.0` (nohumans.directory): one check on 2026-10-15 and a batch of two on 2026-10-19 ($0.0105);
   - `LumiTrustBuyer/1.0` (Lumi, api.lumitrades.io: a trust observatory that test-buys Bazaar listings from its Base wallet and publishes signed receipts): one check on 2026-10-22 ($0.0035);
   - an unidentified buyer with two twin Base wallets (`0x73cc…1ea4` and `0x35fe…c030`), each funded with $20 on 2026-10-28 and each paying about 185 distinct x402 sellers in rounds every 9–10 hours. User agent `node`, from the US; it reads `/`, `/llms.txt` and `/openapi.json`, then buys one check. Five checks by 2026-10-31, three from the first wallet ($0.0175). agent402.tools' crawler was active in the same minutes, which does not prove they are the same.
+  - `usetested-harness/0.1` (usetested.com, "x402 Service List — 1,000+ Agent-Payable Services, Independently Tested"), from Spain: a probe POST on 2026-11-05 and two checks on Base from one wallet on 2026-11-06 at 02:14 UTC ($0.007; `usetested-harness-pulse/2.0` also tried a GET and a HEAD). Its two calls in one minute made the daily check report the caller as ambiguous; one caller is now credited however many calls it makes.
 
   Every other payment has come from our own probe wallets. Receipts land in the owner's wallet `0xbF88…0178` (confirmed his on 2026-10-02).
 - **Dependabot (2026-11-01):** the monthly PRs #27 (runtime: `ai` 7.0.153, `tldts` 7.4.19, `viem` 2.57.11; in the MCP, `viem` 2.57.11 and `@modelcontextprotocol/sdk` 1.32.2) and #28 (`wrangler` 4.152.0, workerd 1.20261019.1) failed CI. The packages were fine, but Dependabot's root lockfile left out jayson's nested `utf-8-validate` 5.0.10, and `npm ci` refuses a lockfile without it.

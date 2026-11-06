@@ -409,7 +409,8 @@ async function main(): Promise<void> {
     })();
     if (!known) return add("deploy", "warn", `production runs ${deployed}, unknown to the repository`);
     // The Worker also bundles parts of the SDK (packages/client/src: the Solana decoder, interpret, redaction).
-    const code = run("git", ["log", "--format=%h %s", `${deployed}..origin/main`, "--", "src", "deploy", "packages/client/src", "package.json", "package-lock.json"]).trim();
+    // Markdown in those trees (deploy/README.md) is documentation, not code production runs.
+    const code = run("git", ["log", "--format=%h %s", `${deployed}..origin/main`, "--", "src", "deploy", "packages/client/src", "package.json", "package-lock.json", ":(exclude,glob)**/*.md"]).trim();
     const all = Number(run("git", ["rev-list", "--count", `${deployed}..origin/main`]).trim());
     add("deploy", code ? "warn" : "info", code ? `main has code production does not run: ${code.split("\n").length} commit(s): ${code.split("\n").slice(0, 3).join(" | ")}` : `main is ${all} docs/test commit(s) ahead of production`);
   });
@@ -536,15 +537,16 @@ async function main(): Promise<void> {
         }
         const pay: OutsidePayment = { key, at: rec.at ?? "", network, path: rec.path ?? "", payer: who.payer, micro: rec.micro ?? who.micro, ...(rec.undelivered ? { undelivered: true } : {}) };
         // Who called: the paid POSTs to that path around the settlement record's time, from any request
-        // source (a payer can call from another zone's Worker: "edgeWorkerFetch"). More than one candidate
-        // is reported as ambiguous rather than credited to the first.
+        // source (a payer can call from another zone's Worker: "edgeWorkerFetch"). One caller (user agent,
+        // country and source) is credited even with several calls, as when one payer buys twice in a minute;
+        // more than one is reported as ambiguous rather than credited to the first.
         if (zone && pay.at) {
           const t = Date.parse(pay.at);
           const q = `query($z:String!,$a:Time!,$b:Time!,$p:String!){viewer{zones(filter:{zoneTag:$z}){httpRequestsAdaptiveGroups(limit:5,filter:{datetime_geq:$a,datetime_lt:$b,clientRequestPath:$p,clientRequestHTTPMethodName:"POST",edgeResponseStatus:200}){count dimensions{userAgent clientCountryName requestSource}}}}}`;
           const g = await cf<{ data?: { viewer?: { zones?: Array<{ httpRequestsAdaptiveGroups?: Array<{ count: number; dimensions: { userAgent: string; clientCountryName: string; requestSource: string } }> }> } } }>(token, "/graphql", { method: "POST", body: JSON.stringify({ query: q, variables: { z: zone, a: new Date(t - 120_000).toISOString(), b: new Date(t + 30_000).toISOString(), p: pay.path } }) }).catch(() => null);
           const rows = g?.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups ?? [];
           const row = rows[0]?.dimensions;
-          if (rows.length === 1 && rows[0]?.count === 1 && row) Object.assign(pay, { ua: row.userAgent.slice(0, 80), country: row.clientCountryName, ...(row.requestSource === "edgeWorkerFetch" ? { worker: true } : {}) });
+          if (rows.length === 1 && row) Object.assign(pay, { ua: row.userAgent.slice(0, 80), country: row.clientCountryName, ...(row.requestSource === "edgeWorkerFetch" ? { worker: true } : {}) });
           else if (rows.length > 0) pay.ua = `ambiguous: ${rows.reduce((n, r) => n + r.count, 0)} paid calls (${rows.map((r) => r.dimensions.userAgent.slice(0, 30)).join(" | ")})`.slice(0, 120);
         }
         found.push(pay);
