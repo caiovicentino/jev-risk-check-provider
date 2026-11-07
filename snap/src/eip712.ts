@@ -12,7 +12,7 @@
  * - bool: JavaScript truthiness (so "false", "0" and 1 all sign as TRUE).
  * Values the encoder would reject are reported as unsignable.
  */
-import { capText, hasOwn, headOf, isRecord, parseBigIntString, quote, toBigIntLike } from "./util";
+import { capText, hasOwn, isRecord, parseBigIntString, quote, toBigIntLike } from "./util";
 
 export type TypedField = { name: string; type: string };
 export type TypedTypes = Record<string, TypedField[]>;
@@ -110,7 +110,16 @@ function fieldPath(path: string): string {
 }
 
 function display(value: unknown): string {
-  if (typeof value === "string") return JSON.stringify(value.length > 40 ? `${headOf(value, 40)}…` : value);
+  if (typeof value === "string") {
+    // Capped once escaped: a control character takes six characters then (\u000b).
+    let shown = "";
+    for (const char of value) {
+      const escaped = JSON.stringify(char).slice(1, -1);
+      if (shown.length + escaped.length > 40) return `"${shown}…"`;
+      shown += escaped;
+    }
+    return `"${shown}"`;
+  }
   if (typeof value === "bigint") return `${value.toString()}n`;
   return String(value);
 }

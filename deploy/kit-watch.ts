@@ -160,7 +160,7 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
   const plan = PLAN[chain];
   const prev: ChainStats = stats.chains[chain] ?? { cursor: 0, head: 0, last_run: "", scanned_blocks: 0, flagged: {}, delegates: 0, gaps: [] };
   // The block batch starts where the last run's measurement left it.
-  const rpc = kitWatchRpc(chain, { timeoutMs: 15000, blockBatch: prev.block_batch, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
+  const rpc = kitWatchRpc(chain, { timeoutMs: 15000, blockBatch: prev.block_batch, turn: Math.floor(opts.now / 60_000), ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
   const nowS = Math.floor(opts.now / 1000);
   const today = new Date(opts.now).toISOString().slice(0, 10);
   const head = (await rpc.head()) - plan.confirmations;

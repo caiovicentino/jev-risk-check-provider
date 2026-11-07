@@ -32,7 +32,12 @@ Each release's full notes and evidence are on the [releases page](https://github
   - **A message to sign that carries tag characters** now gets the Snap's "invisible or text-direction control characters" warning, as one with direction overrides does.
   - **A long field name** no longer cuts the address a non-standard encoding signs as from its warning: the path in a note is capped at 100 characters, so the note's value always fits under its 300-character cap.
   - These ship with the next client release. The Worker's bundle is unchanged.
+- **Client and Snap: a note keeps what a value signs as, and a phrase apart by any space is redacted (2026-11-07 review).** The review of the previous day's fix found 2 low problems. Neither changes a decision. Each fix has a test that fails on the code before it:
+  - **A value made of control characters still cut "signs as" from its note.** The 100-character cap on a field's path assumed the quoted value took at most about 42 characters, but the 40-character cap ran before escaping, and each control character is six characters escaped (`\u000b`). A field `to` of `z` and 39 vertical tabs, or an `amount` of 39 vertical tabs and `9`, produced notes that ended "that signs…". The value is now capped once escaped.
+  - **A mnemonic phrase apart by a no-break space, an ideographic space, a line separator or a zero-width space was not redacted.** The rule took only spaces, tabs, line breaks and commas between words, and zero-width spaces were removed before it ran, which joined the words. It now takes any space or invisible character between words, and runs before invisible characters are dropped.
+  - These ship with the next client release. The Worker's bundle is unchanged.
 - **Daily check (2026-11-06):**
+  - The thread watch reads a followed pull request's reviews and line comments, which are not issue comments, so a maintainer's review no longer goes unseen. Our own draft PR (kora#765) counts its review bot too.
   - The thread watch (`--threads`) compares production with the daily run's state, reading it without writing it. A burst of more than 1,000 new holes with no lag (as in the 2026-10-30 flood) is a failure there too; before, `--threads` compared with nothing, so it could never report one.
   - Text from others in its output drops every invisible character, tag characters included.
   - A commit that changes only Markdown under `deploy/` is no longer reported as code production does not run.
@@ -75,6 +80,14 @@ Agent-framework integrations, two new packages.
   - **`maxFeeWei` cannot cap `sendTransaction`,** because the wallet sets its own fees; this is documented.
   - **Peer and engine ranges** are the tested ones: `ai` 7.0.153 or later, and Node.js 22.12 or later.
 - **Tested through AgentKit's own x402 actions:** against a mock x402 v2 seller, `make_http_request_with_x402` (the one-shot path, which a `beforePayment` hook in the action provider cannot gate) and `retry_http_request_with_x402` pay a clean payee with the authorization that was checked, and refuse a drainer before the key signs; the seller receives nothing.
+
+## v0.6.24 — 2026-11-07: block fetches stay even when an endpoint rate-limits, and on Ethereum
+
+The 2026-11-07 maintenance run's independent review of v0.6.23 found 4 low problems: 2 in the kit watch's scan rotation (here) and 2 in the client and the Snap (Unreleased). None lets a payment or signature through unchecked, and none loses a block. Each fix has a test that fails on the code before it.
+
+- **An endpoint limited by HTTP 429 leaves the rotation.** It was already skipped for the rest of the run, but kept its turns, so the next endpoint took two: with Tenderly limited on Base, BlastAPI served 20 of 30 batches and 1rpc 10. That raises the odds of a second 429 and of falling through to the endpoints paid evaluations use. The others now share its turns evenly (15 and 15).
+- **Each run's first turn moves with the minute.** The rotation started at turn 0 in every run, and the head request took that turn, so on Ethereum, where a run fetches about one batch, every batch went to the same endpoint (Tenderly). Base, with about 90 batches a run, was even already. The cron now starts each run's rotation at the minute, so consecutive runs start at consecutive endpoints.
+- **Embedded OFAC snapshot:** the 2026-11-06 release, 1,077 addresses (6 added). Production had been redeployed with it from `ebd7d3b` the same morning.
 
 ## v0.6.23 — 2026-11-06: Base's scans keep their time bounds, and its block fetches spread evenly
 

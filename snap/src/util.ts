@@ -610,8 +610,9 @@ const B58_SECRET_RE = new RegExp(`(?<![${B58}])[${B58}]{85,90}(?![${B58}])`, "gu
 const WIF_RE = new RegExp(`(?<![${B58}])[5KL][${B58}]{50,51}(?![${B58}])`, "gu");
 const XPRV_RE = new RegExp(`(?<![${B58}])[xtyz]prv[${B58}]{100,108}(?![${B58}])`, "gu");
 const JWT_RE = /eyJ[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}/gu;
-// 12+ lowercase words of 3-8 letters (BIP39 words are 3-8 letters).
-const MNEMONIC_RE = /(?<![A-Za-z])(?:[a-z]{3,8}[ \t\r\n,]{1,4}){11,23}[a-z]{3,8}(?![A-Za-z])/gu;
+// 12+ lowercase words of 3-8 letters (BIP39 words are 3-8 letters), apart by any space (a no-break or
+// ideographic space, a line separator) or an invisible character such as a zero-width space.
+const MNEMONIC_RE = /(?<![A-Za-z])(?:[a-z]{3,8}[\s,\p{Default_Ignorable_Code_Point}]{1,4}){11,23}[a-z]{3,8}(?![A-Za-z])/gu;
 const LONG_ENCODED_RE = /[A-Za-z0-9+/=_-]{120,8192}/gu;
 
 /**
@@ -649,9 +650,10 @@ export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText 
   const hadInvisible = INVISIBLE_RE.test(capped);
   const text = redactSecrets(
     capped
-      .replace(IGNORABLE_GLOBAL_RE, "")
       .replace(CONTROL_RE, " ")
-      .replace(MNEMONIC_RE, REDACTED),
+      // Before the invisible characters go: words a zero-width space keeps apart are still a phrase.
+      .replace(MNEMONIC_RE, REDACTED)
+      .replace(IGNORABLE_GLOBAL_RE, ""),
   )
     .replace(LONG_ENCODED_RE, "[long encoded data]")
     .replace(/\s+/gu, " ")

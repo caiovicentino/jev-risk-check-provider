@@ -62,7 +62,7 @@ async function postBatch(doFetch: typeof fetch, url: string, requests: readonly 
   }
 }
 
-export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; scanEndpoints?: readonly string[]; timeoutMs?: number; batch?: number; blockBatch?: number | undefined } = {}): KitWatchRpc {
+export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; scanEndpoints?: readonly string[]; timeoutMs?: number; batch?: number; blockBatch?: number | undefined; turn?: number } = {}): KitWatchRpc {
   const doFetch = opts.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => fetch(input, init));
   const readUrls = endpointsFor(chain, READ_ENDPOINTS, opts.rpc);
   const simUrls = endpointsFor(chain, SIMULATION_ENDPOINTS, opts.rpc);
@@ -127,17 +127,19 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   const evaluation = new Set([...(RPC_ENDPOINTS[chain] ?? []), ...(SIMULATION_ENDPOINTS[chain] ?? [])]);
   const rotating = scanUrls.filter((u) => !evaluation.has(u));
   const lastResort = scanUrls.filter((u) => evaluation.has(u));
-  // A batch rotates over the endpoints that accept its size (BATCH_LIMITS), so turns stay even: one
-  // that cannot take it would hand its turn to the next, which then takes two.
-  let turn = 0;
-  const scanOrder = (size = 1): string[] => {
-    const able = rotating.filter((u) => size <= (BATCH_LIMITS[u] ?? Number.POSITIVE_INFINITY));
-    const k = able.length ? turn++ % able.length : 0;
-    return [...able.slice(k), ...able.slice(0, k), ...rotating.filter((u) => !able.includes(u)), ...lastResort];
-  };
   // An endpoint that answered 429 is not asked for blocks again in this run: more requests would
   // only prolong its limit. When every endpoint is limited the scan stops, and the next run resumes.
   const limited = new Set<string>();
+  // A batch rotates over the endpoints that accept its size (BATCH_LIMITS) and are not limited, so
+  // turns stay even: one that cannot take it would hand its turn to the next, which then takes two.
+  // The first turn is the caller's (the cron passes the minute): a run makes few requests, and
+  // starting each at the same endpoint would give it every Ethereum batch.
+  let turn = Math.max(0, Math.trunc(opts.turn ?? 0));
+  const scanOrder = (size = 1): string[] => {
+    const able = rotating.filter((u) => !limited.has(u) && size <= (BATCH_LIMITS[u] ?? Number.POSITIVE_INFINITY));
+    const k = able.length ? turn++ % able.length : 0;
+    return [...able.slice(k), ...able.slice(0, k), ...rotating.filter((u) => !able.includes(u)), ...lastResort];
+  };
   const fetchBlocks = async (numbers: number[]): Promise<{ blocks: RawBlock[]; bytes: number }> => {
     const deadline = Date.now() + timeoutMs;
     const why: string[] = [];

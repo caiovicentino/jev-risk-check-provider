@@ -599,7 +599,7 @@ test("blocks: an endpoint that answers 429 is not asked again in the run; when a
   asked.length = 0;
   limiting.add("tenderly").add("publicnode");
   const batch = rpc.blockBatchSize();
-  await assert.rejects(rpc.eachBlocks(104, 110, () => undefined), /^Error: blocks 104-110 unavailable \(eth-mainnet\.public\.blastapi\.io: HTTP 429 earlier in this run; mainnet\.gateway\.tenderly\.co: HTTP 429; ethereum-rpc\.publicnode\.com: HTTP 429\)$/);
+  await assert.rejects(rpc.eachBlocks(104, 110, () => undefined), /^Error: blocks 104-110 unavailable \(mainnet\.gateway\.tenderly\.co: HTTP 429; eth-mainnet\.public\.blastapi\.io: HTTP 429 earlier in this run; ethereum-rpc\.publicnode\.com: HTTP 429\)$/);
   assert.deepEqual(asked, ["mainnet.gateway.tenderly.co", "ethereum-rpc.publicnode.com"], "nothing more for BlastAPI, and no smaller retries");
   assert.equal(rpc.blockBatchSize(), batch, "a rate limit does not shrink the batch");
 });
@@ -885,4 +885,36 @@ test("blocks: a batch rotates over the endpoints that accept its size, in even t
   for (let n = 1000; n < 1090; n += 10) await rpc.eachBlocks(n, n + 9, () => undefined);
   // dRPC and meowrpc take at most 3 and 5 calls a batch: before this fix their turns went to the next endpoint (tenderly 5, the others 2).
   assert.deepEqual(Object.fromEntries(served), { "base.gateway.tenderly.co": 3, "base-mainnet.public.blastapi.io": 3, "1rpc.io": 3 });
+});
+
+test("blocks: an endpoint limited by HTTP 429 leaves the rotation, so the others share its turns evenly (2026-11-07 review)", async () => {
+  const served = new Map<string, number>();
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Req[];
+    if (host(url) === "base.gateway.tenderly.co") return new Response("slow down", { status: 429 });
+    served.set(host(url), (served.get(host(url)) ?? 0) + 1);
+    return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
+  }) as unknown as typeof fetch;
+  const rpc = kitWatchRpc("eip155:8453", { fetchImpl, blockBatch: 10 });
+  for (let n = 1000; n < 1300; n += 10) await rpc.eachBlocks(n, n + 9, () => undefined);
+  // Before this fix the limited endpoint kept its turns and handed each to the next one (blastapi 20, 1rpc 10).
+  assert.deepEqual(Object.fromEntries(served), { "base-mainnet.public.blastapi.io": 15, "1rpc.io": 15 });
+});
+
+test("blocks: the first turn is the caller's (the cron passes the minute), so Ethereum's one batch a run reaches every rotating endpoint (2026-11-07 review)", async () => {
+  const first = new Set<string>();
+  for (let minute = 0; minute < 12; minute++) {
+    const hosts: string[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      const req = JSON.parse(String(init.body)) as Req[];
+      if (req.length > 1 || req[0]?.method === "eth_getBlockByNumber") hosts.push(host(url));
+      return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
+    }) as unknown as typeof fetch;
+    const rpc = kitWatchRpc("eip155:1", { fetchImpl, blockBatch: 5, scanEndpoints: ETH_SCAN, turn: minute });
+    await rpc.eachBlocks(100, 104, () => undefined);
+    if (hosts[0]) first.add(hosts[0]);
+  }
+  // publicnode serves evaluations, so it is a last resort, outside the rotation. With every run
+  // starting at turn 0, the one batch always went to tenderly.
+  assert.deepEqual([...first].sort(), ["eth-mainnet.public.blastapi.io", "mainnet.gateway.tenderly.co"]);
 });

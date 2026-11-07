@@ -222,3 +222,34 @@ describe('2026-11-06 review: every invisible character is dropped from what is s
     expect(note?.toLowerCase()).toContain(`signs as ${DRAINER.toLowerCase()}`);
   });
 });
+
+describe('2026-11-07 review: a note keeps what a value of control characters signs as, and a phrase apart by any space is redacted', () => {
+  const noteFor = (field: string, type: string, value: string) => {
+    const typed = {
+      types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }], Transfer: [{ name: field, type }, { name: 'memo', type: 'string' }] },
+      primaryType: 'Transfer',
+      domain: { name: 'Vault', chainId: 1 },
+      message: { [field]: value, memo: 'x' },
+    };
+    const decoded = decodeSignature({ from: USER, data: JSON.stringify(typed), signatureMethod: 'eth_signTypedData_v4' }, 'site.example');
+    return decoded.warnings.find((w) => w.includes('non-standard'));
+  };
+
+  it('a value escaped six characters a control character is capped after escaping', () => {
+    // Each \v is escaped as \u000b: before this fix the 40-character cap ran before escaping, and the note lost "signs as".
+    expect(noteFor('to', 'address', `z${'\u000b'.repeat(39)}`)).toMatch(/that signs as 0x[0-9a-fA-F]{40}$/u);
+    expect(noteFor('amount', 'uint256', `${'\u000b'.repeat(39)}9`)).toMatch(/that signs as 9$/u);
+  });
+
+  it.each([
+    ['a no-break space', ' '],
+    ['a line separator', ' '],
+    ['an ideographic space', '　'],
+    ['a zero-width space', '​'],
+    ['a soft hyphen and a space', '­ '],
+  ])('a phrase apart by %s is redacted', (_label, separator) => {
+    const { text } = cleanText(`my seed: ${MNEMONIC.split(' ').join(separator)}`);
+    expect(text).toContain(REDACTED);
+    expect(text).not.toMatch(/abandon|accident/u);
+  });
+});
