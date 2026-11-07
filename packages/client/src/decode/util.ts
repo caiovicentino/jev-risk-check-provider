@@ -565,7 +565,7 @@ export function wellFormed(text: string): string {
  * carriage return can overwrite what came before it in a terminal).
  */
 export function plainText(text: string): string {
-  return wellFormed(text).replace(IGNORABLE_GLOBAL_RE, "").replace(CONTROL_RE, " ").replace(LINE_BREAK_RE, " ");
+  return wellFormed(text).replace(IGNORABLE_GLOBAL_RE, "$1").replace(CONTROL_RE, " ").replace(LINE_BREAK_RE, " ");
 }
 
 /** Caps a string, appending an ellipsis when truncated; an emoji is never cut in half, and it is plain text (`plainText`). */
@@ -594,10 +594,16 @@ export const REDACTED = "[redacted secret-like string]";
 
 // Invisible / direction-changing characters used to disguise text, and tag characters (text a model
 // reads and a person does not see): reported as a warning.
-const INVISIBLE_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u061C\uFEFF\u{E0000}-\u{E007F}]/u;
-// Every default-ignorable code point (the above, soft hyphens, variation selectors, fillers, tags):
-// none shows, so all are dropped from text that is shown.
-const IGNORABLE_GLOBAL_RE = /\p{Default_Ignorable_Code_Point}/gu;
+// Interlinear annotation marks (U+FFF9–FFFB) too: a renderer may hide the annotation they delimit.
+const INVISIBLE_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u061C\uFEFF\uFFF9-\uFFFB\u{E0000}-\u{E007F}]/u;
+// Every default-ignorable code point (the above, soft hyphens, variation selectors, fillers, tags)
+// and the annotation marks: none shows, so all are dropped from text that is shown. Except, captured
+// and put back, what an emoji's spelling needs where it draws one emoji: the presentation selector
+// after an emoji (❤️, 1️⃣), a joiner between two pictographs (👨‍👩‍👧), and the tags of the three
+// subdivision flags (England, Scotland, Wales). None can carry hidden text: one selector per emoji,
+// and only those three tag spellings (other tags, even after 🏴, are dropped).
+const IGNORABLE_GLOBAL_RE =
+  /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}|(?<=\p{Emoji})️|(?<=[\p{Extended_Pictographic}\p{Emoji_Modifier}]️?)‍(?=\p{Extended_Pictographic}))|[\p{Default_Ignorable_Code_Point}￹-￻]/gu;
 // C0/C1 control characters (tab, CR and LF are handled as whitespace).
 const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu;
 const LINE_BREAK_RE = /[\n\r\u2028\u2029]/gu;
@@ -648,13 +654,14 @@ export type CleanText = { text: string; hadInvisible: boolean; truncated: boolea
 export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText {
   const truncated = input.length > maxInput;
   const capped = wellFormed(truncated ? headOf(input, maxInput) : input);
-  const hadInvisible = INVISIBLE_RE.test(capped);
+  // An emoji's own parts are not hidden text: tested without them.
+  const hadInvisible = INVISIBLE_RE.test(capped.replace(IGNORABLE_GLOBAL_RE, (part, emoji?: string) => (emoji ? "" : part)));
   const text = redactSecrets(
     capped
       .replace(CONTROL_RE, " ")
       // Before the invisible characters go: words a zero-width space keeps apart are still a phrase.
       .replace(MNEMONIC_RE, REDACTED)
-      .replace(IGNORABLE_GLOBAL_RE, ""),
+      .replace(IGNORABLE_GLOBAL_RE, "$1"),
   )
     .replace(LONG_ENCODED_RE, "[long encoded data]")
     .replace(/\s+/gu, " ")

@@ -174,7 +174,10 @@ export function challengeCheck(accepts: Accept[], routes: Route[]): Check {
 
 /** Text from others (comments, titles, errors) for a terminal and a file: control characters and every invisible one (bidi, zero-width, tags) are blanked. */
 export function clean(text: string, max = 240): string {
-  return text.replace(/[\u0000-\u001f\u007f-\u009f\p{Default_Ignorable_Code_Point}]/gu, " ").replace(/\s+/g, " ").trim().slice(0, max);
+  const blank = text.replace(/[\u0000-\u001f\u007f-\u009f\p{Default_Ignorable_Code_Point}]/gu, " ").replace(/\s+/g, " ").trim();
+  const cut = blank.slice(0, max);
+  // An emoji at the cut is dropped whole, not left half (a lone surrogate).
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
 }
 
 function short(network: string): string {
@@ -200,6 +203,11 @@ function run(cmd: string, args: string[], timeoutMs = 120_000): string {
 }
 function gh<T>(args: string[]): T {
   return JSON.parse(run("gh", args)) as T;
+}
+
+/** Every page of a list endpoint: past 100 items, the newest would be on a page not read. */
+function ghAll<T>(path: string): T[] {
+  return gh<T[][]>(["api", "--paginate", "--slurp", path]).flat();
 }
 
 async function rpc(urls: readonly string[], method: string, params: unknown[]): Promise<unknown> {
@@ -284,11 +292,11 @@ function thumbprint(jwk: { crv?: string; kty?: string; x?: string; y?: string })
  */
 function unanswered(t: (typeof THREADS)[number]): string | undefined {
   type Remark = { user: { login: string }; created_at: string; html_url: string };
-  const all = gh<Remark[]>(["api", `repos/${t.repo}/issues/${t.number}/comments?per_page=100`]);
+  const all = ghAll<Remark>(`repos/${t.repo}/issues/${t.number}/comments?per_page=100`);
   if (t.pull) {
     // A review, and a comment on a line, are not issue comments: a maintainer's review would hide there.
-    all.push(...gh<Remark[]>(["api", `repos/${t.repo}/pulls/${t.number}/comments?per_page=100`]));
-    const reviews = gh<Array<{ user: { login: string }; submitted_at?: string; html_url: string }>>(["api", `repos/${t.repo}/pulls/${t.number}/reviews?per_page=100`]);
+    all.push(...ghAll<Remark>(`repos/${t.repo}/pulls/${t.number}/comments?per_page=100`));
+    const reviews = ghAll<{ user: { login: string }; submitted_at?: string; html_url: string }>(`repos/${t.repo}/pulls/${t.number}/reviews?per_page=100`);
     all.push(...reviews.flatMap((r) => (r.submitted_at ? [{ user: r.user, created_at: r.submitted_at, html_url: r.html_url }] : [])));
     all.sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
@@ -458,19 +466,25 @@ async function main(): Promise<void> {
       const seen: NonNullable<State["threads"]> = { ...(prev?.threads ?? {}) };
       for (const t of THREADS) {
         const key = `${t.repo}#${t.number}`;
-        const issue = gh<{ comments: number; updated_at: string; state: string }>(["api", `repos/${t.repo}/issues/${t.number}`]);
-        const was = prev?.threads?.[key];
-        if (was && issue.comments > was.comments) {
-          const comments = gh<Array<{ user: { login: string }; created_at: string; body: string; html_url: string }>>(["api", `repos/${t.repo}/issues/${t.number}/comments?since=${encodeURIComponent(was.updated_at)}&per_page=100`]);
-          const fresh = comments.filter((c) => c.user.login !== OWN_LOGIN && c.created_at > was.updated_at);
-          if (fresh.length) {
-            // Untrusted text from other people: quoted for the reader, never followed.
-            add(`threads.${t.repo}#${t.number}`, "info", `${t.label}: ${fresh.length} new comment(s), ${issue.state}. ${fresh.map((c) => `[${clean(c.user.login, 40)} ${c.created_at.slice(0, 16)} ${clean(c.html_url, 120)}] «${clean(c.body)}»`).join(" ")}`);
+        // One thread that cannot be read (a network blip, a rate limit) is reported, and the others
+        // still run; its previous state is kept for the next run.
+        try {
+          const issue = gh<{ comments: number; updated_at: string; state: string }>(["api", `repos/${t.repo}/issues/${t.number}`]);
+          const was = prev?.threads?.[key];
+          if (was && issue.comments > was.comments) {
+            const comments = ghAll<{ user: { login: string }; created_at: string; body: string; html_url: string }>(`repos/${t.repo}/issues/${t.number}/comments?since=${encodeURIComponent(was.updated_at)}&per_page=100`);
+            const fresh = comments.filter((c) => c.user.login !== OWN_LOGIN && c.created_at > was.updated_at);
+            if (fresh.length) {
+              // Untrusted text from other people: quoted for the reader, never followed.
+              add(`threads.${t.repo}#${t.number}`, "info", `${t.label}: ${fresh.length} new comment(s), ${issue.state}. ${fresh.map((c) => `[${clean(c.user.login, 40)} ${c.created_at.slice(0, 16)} ${clean(c.html_url, 120)}] «${clean(c.body)}»`).join(" ")}`);
+            }
           }
+          const open = unanswered(t);
+          seen[key] = { comments: issue.comments, updated_at: issue.updated_at };
+          if (open && !checks.some((c) => c.id === `threads.${key}`)) add(`threads.${key}`, "warn", open);
+        } catch (err) {
+          add(`threads.${key}`, "warn", `${t.label}: check could not run: ${clean(String(err instanceof Error ? err.message : err), 200)}`);
         }
-        seen[key] = { comments: issue.comments, updated_at: issue.updated_at };
-        const open = unanswered(t);
-        if (open && !checks.some((c) => c.id === `threads.${key}`)) add(`threads.${key}`, "warn", open);
       }
       next.threads = seen;
       if (!checks.some((c) => c.id.startsWith("threads."))) add("threads", "ok", prev?.threads ? "no new comments from others" : `baseline recorded for ${THREADS.length} threads`);

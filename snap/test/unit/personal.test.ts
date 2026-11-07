@@ -252,4 +252,20 @@ describe('2026-11-07 review: a note keeps what a value of control characters sig
     expect(text).toContain(REDACTED);
     expect(text).not.toMatch(/abandon|accident/u);
   });
+
+  it('an emoji keeps what draws it, and nothing else hidden survives', () => {
+    const tags = (text: string) => [...text].map((c) => String.fromCodePoint(0xe0000 + (c.codePointAt(0) ?? 0))).join('');
+    const england = `\u{1F3F4}${tags('gbeng')}\u{E007F}`;
+    // Before this fix ❤️ lost its selector, 1️⃣ became 1⃣, families fell apart and England's flag became 🏴, with a warning.
+    for (const emoji of ['❤\uFE0F', '1\uFE0F\u20E3', '👨\u200D👩\u200D👧', '🏳\uFE0F\u200D🌈', '👩🏽\u200D💻', england]) {
+      expect(plainText(emoji)).toBe(emoji);
+      expect(cleanText(`I ${emoji} this`).hadInvisible).toBe(false);
+    }
+    // Tags after 🏴 that spell no subdivision flag, a second selector, a joiner between letters and annotation marks still go, with the warning.
+    expect(plainText(`\u{1F3F4}${tags('ignore')}\u{E007F}`)).toBe('\u{1F3F4}');
+    expect(plainText('❤\uFE0F\uFE0F')).toBe('❤\uFE0F');
+    expect(plainText('pay\u200Dpal')).toBe('paypal');
+    expect(plainText('a\uFFF9b\uFFFAc\uFFFBd')).toBe('abcd');
+    for (const hidden of [`\u{1F3F4}${tags('ignore')}\u{E007F}`, 'pay\u200Dpal', 'a\uFFF9b\uFFFAc\uFFFBd']) expect(cleanText(hidden).hadInvisible).toBe(true);
+  });
 });
