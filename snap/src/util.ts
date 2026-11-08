@@ -571,7 +571,7 @@ export function plainText(text: string): string {
 export function capText(text: string, max: number): string {
   const clean = plainText(text);
   if (clean.length <= max) return clean;
-  return `${headOf(clean, max - 1).trimEnd()}…`;
+  return `${headOf(clean, max - 1).replace(PARTIAL_EMOJI_END_RE, "").trimEnd()}…`;
 }
 
 export function unixDate(value: bigint | undefined): string | undefined {
@@ -598,11 +598,16 @@ const INVISIBLE_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u061
 // Every default-ignorable code point (the above, soft hyphens, variation selectors, fillers, tags)
 // and the annotation marks: none shows, so all are dropped from text that is shown. Except, captured
 // and put back, what an emoji's spelling needs where it draws one emoji: the presentation selector
-// after an emoji (❤️, 1️⃣), a joiner between two pictographs (👨‍👩‍👧), and the tags of the three
-// subdivision flags (England, Scotland, Wales). None can carry hidden text: one selector per emoji,
-// and only those three tag spellings (other tags, even after 🏴, are dropped).
+// after a pictograph (❤️) or in a keycap (1️⃣), a joiner between two pictographs (👨‍👩‍👧), and the
+// tags of the three subdivision flags (England, Scotland, Wales). None can carry hidden text: one
+// selector per emoji, and only those three tag spellings (other tags, even after 🏴, are dropped).
+// A selector after a bare digit draws nothing and is dropped: it would split a key from its redaction.
 const IGNORABLE_GLOBAL_RE =
-  /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}|(?<=\p{Emoji})️|(?<=[\p{Extended_Pictographic}\p{Emoji_Modifier}]️?)‍(?=\p{Extended_Pictographic}))|[\p{Default_Ignorable_Code_Point}￹-￻]/gu;
+  /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}|(?<=\p{Extended_Pictographic})\u{FE0F}|(?<=[0-9#*])\u{FE0F}(?=\u{20E3})|(?<=[\p{Extended_Pictographic}\p{Emoji_Modifier}]\u{FE0F}?)\u{200D}(?=\p{Extended_Pictographic}))|[\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]/gu;
+// What a cut can leave of an emoji at the end of a head: part of a subdivision flag's tags, a
+// joiner after a pictograph, a keycap's selector. Dropped from the head: it is not hidden text.
+const PARTIAL_EMOJI_END_RE =
+  /(?:(?<=\u{1F3F4})\u{E0067}(?:\u{E0062}(?:\u{E0065}(?:\u{E006E}\u{E0067}?)?|\u{E0073}(?:\u{E0063}\u{E0074}?)?|\u{E0077}(?:\u{E006C}\u{E0073}?)?)?)?|(?<=[\p{Extended_Pictographic}\p{Emoji_Modifier}]\u{FE0F}?)\u{200D}|(?<=[0-9#*])\u{FE0F})$/u;
 // C0/C1 control characters (tab, CR and LF are handled as whitespace).
 const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu;
 const LINE_BREAK_RE = /[\n\r\u2028\u2029]/gu;
@@ -616,9 +621,11 @@ const B58_SECRET_RE = new RegExp(`(?<![${B58}])[${B58}]{85,90}(?![${B58}])`, "gu
 const WIF_RE = new RegExp(`(?<![${B58}])[5KL][${B58}]{50,51}(?![${B58}])`, "gu");
 const XPRV_RE = new RegExp(`(?<![${B58}])[xtyz]prv[${B58}]{100,108}(?![${B58}])`, "gu");
 const JWT_RE = /eyJ[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}/gu;
-// 12+ lowercase words of 3-8 letters (BIP39 words are 3-8 letters), apart by any space (a no-break or
-// ideographic space, a line separator) or an invisible character such as a zero-width space.
-const MNEMONIC_RE = /(?<![A-Za-z])(?:[a-z]{3,8}[\s,\p{Default_Ignorable_Code_Point}]{1,4}){11,23}[a-z]{3,8}(?![A-Za-z])/gu;
+// 12+ lowercase words of 3-8 letters (BIP39 words are 3-8 letters; the first may be capitalised),
+// apart by any space (a no-break or ideographic space, a line separator), a comma, a hyphen or an
+// invisible character such as a zero-width space, and numbered or not (1. abandon 2. ability …).
+const MNEMONIC_RE =
+  /(?<![A-Za-z])[A-Za-z][a-z]{2,7}(?:[\s,\-\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]{1,4}(?:\d{1,2}[.):][\s\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]{0,3})?[a-z]{3,8}){11,23}(?![A-Za-z])/gu;
 const LONG_ENCODED_RE = /[A-Za-z0-9+/=_-]{120,8192}/gu;
 
 /**
@@ -652,15 +659,17 @@ export type CleanText = { text: string; hadInvisible: boolean; truncated: boolea
  */
 export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText {
   const truncated = input.length > maxInput;
-  const capped = wellFormed(truncated ? headOf(input, maxInput) : input);
+  const capped = wellFormed(truncated ? headOf(input, maxInput).replace(PARTIAL_EMOJI_END_RE, "") : input);
   // An emoji's own parts are not hidden text: tested without them.
   const hadInvisible = INVISIBLE_RE.test(capped.replace(IGNORABLE_GLOBAL_RE, (part, emoji?: string) => (emoji ? "" : part)));
   const text = redactSecrets(
     capped
       .replace(CONTROL_RE, " ")
-      // Before the invisible characters go: words a zero-width space keeps apart are still a phrase.
+      // Before the invisible characters go (words a zero-width space keeps apart are still a phrase),
+      // and after (one inside a word split it in two).
       .replace(MNEMONIC_RE, REDACTED)
-      .replace(IGNORABLE_GLOBAL_RE, "$1"),
+      .replace(IGNORABLE_GLOBAL_RE, "$1")
+      .replace(MNEMONIC_RE, REDACTED),
   )
     .replace(LONG_ENCODED_RE, "[long encoded data]")
     .replace(/\s+/gu, " ")

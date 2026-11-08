@@ -112,12 +112,21 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     return json.result?.[0]?.calls?.[0] ?? null;
   };
 
-  // The head comes from the endpoints in the same rotation, so no one of them takes every request.
+  // The head comes from the endpoints in the same rotation, so no one of them takes every request,
+  // and it is the higher of two endpoints' answers: one that stopped following the chain (1rpc.io's
+  // Base endpoint on 2026-11-05) can neither hold a run's scan back nor show its lag as 0.
   const head = async (): Promise<number> => {
-    const json = (await rpcWithFallback(scanOrder(), { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, timeoutMs, doFetch)) as { result?: string };
-    const n = Number.parseInt(json.result ?? "", 16);
-    if (!Number.isFinite(n)) throw new Error("bad block number");
-    return n;
+    const order = scanOrder();
+    const ask = async (urls: readonly string[]): Promise<number> => {
+      const json = (await rpcWithFallback(urls, { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, timeoutMs, doFetch)) as { result?: string };
+      const n = Number.parseInt(json.result ?? "", 16);
+      if (!Number.isFinite(n)) throw new Error("bad block number");
+      return n;
+    };
+    const answers = await Promise.allSettled([ask(order.slice(0, 1)), ask(order.slice(1))]);
+    const heads = answers.flatMap((a) => (a.status === "fulfilled" ? [a.value] : []));
+    if (heads.length) return Math.max(...heads);
+    throw (answers[order.length > 1 ? 1 : 0] as PromiseRejectedResult).reason;
   };
 
   // Every block of the batch from one endpoint, or the next one. Each batch starts at the next

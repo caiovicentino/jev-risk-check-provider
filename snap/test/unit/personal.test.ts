@@ -242,11 +242,11 @@ describe('2026-11-07 review: a note keeps what a value of control characters sig
   });
 
   it.each([
-    ['a no-break space', ' '],
-    ['a line separator', ' '],
-    ['an ideographic space', '　'],
-    ['a zero-width space', '​'],
-    ['a soft hyphen and a space', '­ '],
+    ['a no-break space', '\u{00A0}'],
+    ['a line separator', '\u{2028}'],
+    ['an ideographic space', '\u{3000}'],
+    ['a zero-width space', '\u{200B}'],
+    ['a soft hyphen and a space', '\u{00AD} '],
   ])('a phrase apart by %s is redacted', (_label, separator) => {
     const { text } = cleanText(`my seed: ${MNEMONIC.split(' ').join(separator)}`);
     expect(text).toContain(REDACTED);
@@ -267,5 +267,72 @@ describe('2026-11-07 review: a note keeps what a value of control characters sig
     expect(plainText('pay\u200Dpal')).toBe('paypal');
     expect(plainText('a\uFFF9b\uFFFAc\uFFFBd')).toBe('abcd');
     for (const hidden of [`\u{1F3F4}${tags('ignore')}\u{E007F}`, 'pay\u200Dpal', 'a\uFFF9b\uFFFAc\uFFFBd']) expect(cleanText(hidden).hadInvisible).toBe(true);
+  });
+});
+
+describe('2026-11-08 review: a phrase split inside its words, a selector inside a key, a value that is not text, and a cut inside an emoji', () => {
+  const words = MNEMONIC.split(' ');
+  const tags = (text: string) => [...text].map((c) => String.fromCodePoint(0xe0000 + (c.codePointAt(0) ?? 0))).join('');
+  const england = `\u{1F3F4}${tags('gbeng')}\u{E007F}`;
+
+  it.each([
+    // Before this fix the phrase rule ran only before the invisible characters went: one inside a word split it.
+    ['a soft hyphen inside one word', words.map((w) => (w === 'absorb' ? 'a\u{00AD}bsorb' : w)).join(' ')],
+    ['a zero-width space inside each word', words.map((w) => `${w.slice(0, 2)}\u{200B}${w.slice(2)}`).join(' ')],
+    ['four zero-width spaces and a space between words', words.join('\u{200B}\u{200B}\u{200B}\u{200B} ')],
+    ['annotation marks', words.join(' \u{FFF9}')],
+    // Ways a phrase is written down that the rule did not cover.
+    ['a numbered list', words.map((w, i) => `${i + 1}. ${w}`).join(' ')],
+    ['a numbered list, one a line', words.map((w, i) => `${i + 1}) ${w}`).join('\n')],
+    ['a capitalised first word', `A${MNEMONIC.slice(1)}`],
+    ['hyphens', words.join('-')],
+  ])('a phrase with %s is redacted', (_label, phrase) => {
+    const { text } = cleanText(`backup: ${phrase}`);
+    expect(text).toContain(REDACTED);
+    expect(text).not.toMatch(/ability|access/u);
+  });
+
+  it('a selector after a bare digit is dropped, so the key around it is still redacted', () => {
+    const key = '4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318';
+    const split = `${key.slice(0, 31)}\u{FE0F}${key.slice(31)}`;
+    // Before this fix a selector after any digit was kept as an emoji's, and the key reached the API whole.
+    expect(cleanText(`key: ${split}`).text).toBe(`key: ${REDACTED}`);
+    expect(cleanText(`key: 0x${split}`).text).toBe(`key: ${REDACTED}`);
+    expect(plainText('1\u{FE0F}2')).toBe('12');
+    // The keycap and a pictograph's selector stay.
+    for (const emoji of ['1\u{FE0F}\u{20E3}', '#\u{FE0F}\u{20E3}', '\u{2764}\u{FE0F}', '\u{00A9}\u{FE0F}']) expect(plainText(emoji)).toBe(emoji);
+  });
+
+  it('a value that is not text is named by its kind in a note, which keeps what it signs as', () => {
+    const noteFor = (value: unknown) => {
+      const typed = {
+        types: { EIP712Domain: [{ name: 'name', type: 'string' }], Vote: [{ name: 'flag', type: 'bool' }] },
+        primaryType: 'Vote',
+        domain: { name: 'Vault' },
+        message: { flag: value },
+      };
+      return decodeSignature({ from: USER, data: JSON.stringify(typed), signatureMethod: 'eth_signTypedData_v4' }, 'site.example').warnings.find((w) => w.includes('signs as'));
+    };
+    // Before this fix an array was shown whole, and the 300-character note cap cut "which signs as TRUE".
+    expect(noteFor(Array.from({ length: 150 }, () => 0))).toBe('message.flag is an array of 150, which signs as TRUE');
+    expect(noteFor([false, 'false'])).toBe('message.flag is an array of 2, which signs as TRUE');
+    // String() threw on this one, and the request got no verdict.
+    expect(noteFor({ toString: 1 })).toBe('message.flag is an object, which signs as TRUE');
+    expect(noteFor(0)).toBe('message.flag is 0, which signs as FALSE');
+  });
+
+  it('a cut inside an emoji leaves none of its parts, and no warning', () => {
+    const family = '\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}';
+    for (const emoji of [england, family]) {
+      for (let cut = 1; cut < emoji.length; cut++) {
+        // Before this fix a cut inside England's flag or a family read as hidden text.
+        const { hadInvisible, text } = cleanText(`${'a'.repeat(100 - cut)}${emoji}`, 100);
+        expect(hadInvisible).toBe(false);
+        expect(text).not.toMatch(/[\u{200D}\u{E0000}-\u{E007F}]$/u);
+        expect(capText(`${'a'.repeat(100 - cut)}${emoji}${emoji}`, 101)).not.toMatch(/[\u{200D}\u{E0000}-\u{E007F}]…$/u);
+      }
+    }
+    // Before this fix capText(England twice, 11) kept the tags "gben" after the black flag.
+    expect(capText(`${england}${england}`, 11)).toBe('\u{1F3F4}…');
   });
 });

@@ -121,8 +121,11 @@ function display(value: unknown): string {
     }
     return `"${shown}"`;
   }
-  if (typeof value === "bigint") return `${value.toString()}n`;
-  return String(value);
+  // An array or object is named by its kind: its text could be any length, and String() can throw on it.
+  if (Array.isArray(value)) return `an array of ${value.length}`;
+  if (typeof value === "object" && value !== null) return "an object";
+  const shown = typeof value === "bigint" ? `${value.toString()}n` : String(value);
+  return shown.length > 40 ? `${shown.slice(0, 40)}…` : shown;
 }
 
 /** 20-byte address from the bytes of a non-negative integer (first 20 bytes). */

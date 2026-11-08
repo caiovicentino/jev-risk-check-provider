@@ -7,6 +7,7 @@ import assert from "node:assert";
 import { privateKeyToAccount } from "viem/accounts";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
+import { SCAN_ENDPOINTS } from "../src/rpc.js";
 import { addBlocks, backfillFamilies, indexFamilies, MAX_AUTHORIZATIONS_PER_SCAN, mergeEntries, newActivity, PROBE_CANDIDATES, replacesEntry, rescanPending, sampledDelegates, scanActivity, scanBlocks, settledDelegates, settleForwarders, type DelegateVerdict, type Family, type PendingRead, type RawAuthorization, type RawBlock, type ScanDeps, type SimulateCall, type WatchEntry } from "../src/kit-watch.js";
 import { COVERAGE_V, coverageOf, DAILY_WRITE_BUDGET, kitWatchLookup, kitWatchStatus, KW, LEASE_MS, LEGACY_DROPPED_READS, PENDING_MAX, runKitWatch, type ChainStats, type KitWatchStats } from "../deploy/kit-watch.js";
 import type { KVNamespace } from "../deploy/runtime.js";
@@ -602,6 +603,32 @@ test("blocks: an endpoint that answers 429 is not asked again in the run; when a
   await assert.rejects(rpc.eachBlocks(104, 110, () => undefined), /^Error: blocks 104-110 unavailable \(mainnet\.gateway\.tenderly\.co: HTTP 429; eth-mainnet\.public\.blastapi\.io: HTTP 429 earlier in this run; ethereum-rpc\.publicnode\.com: HTTP 429\)$/);
   assert.deepEqual(asked, ["mainnet.gateway.tenderly.co", "ethereum-rpc.publicnode.com"], "nothing more for BlastAPI, and no smaller retries");
   assert.equal(rpc.blockBatchSize(), batch, "a rate limit does not shrink the batch");
+});
+
+test("head: the higher of two endpoints' answers, so one that stopped following the chain holds no run back", async () => {
+  // 2026-11-08 review: since each run's rotation starts at the minute, the head came from a different
+  // endpoint each minute, and one stuck behind the chain (1rpc.io's Base endpoint on 2026-11-05) made
+  // one run in five scan nothing while its lag read 0.
+  const heads: Record<string, number | "down"> = { "1rpc.io": 0x100 };
+  const asked: string[] = [];
+  const fetchImpl = (async (url: string) => {
+    asked.push(host(url));
+    const answer = heads[host(url)] ?? 0x180;
+    if (answer === "down") return new Response("unavailable", { status: 503 });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: `0x${answer.toString(16)}` }));
+  }) as unknown as typeof fetch;
+  const scanEndpoints = SCAN_ENDPOINTS["eip155:8453"] as readonly string[];
+  for (let turn = 0; turn < scanEndpoints.length; turn++) {
+    asked.length = 0;
+    assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl, turn }).head(), 0x180, `turn ${turn}`);
+    assert.equal(asked.length, 2, "two endpoints, one request each");
+  }
+  // One endpoint down: the second is asked through the rest of the rotation; every one down: its error.
+  heads["base.gateway.tenderly.co"] = "down";
+  assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl, turn: 0 }).head(), 0x180);
+  for (const url of scanEndpoints) heads[host(url)] = "down";
+  await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, turn: 0 }).head(), /rpc http 503/u);
+  await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, scanEndpoints: ["https://1rpc.io/base"] }).head(), /rpc http 503/u, "a single endpoint: its own error");
 });
 
 test("scan endpoints: those that serve paid evaluations come last, after every one that does not", async () => {
