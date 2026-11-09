@@ -6,6 +6,8 @@
  * can never blow the regex engine's stack (see MAX_* constants).
  */
 
+import { BIP39_ENGLISH } from "./bip39";
+
 export type Role =
   | "recipient"
   | "spender"
@@ -621,12 +623,91 @@ const B58_SECRET_RE = new RegExp(`(?<![${B58}])[${B58}]{85,90}(?![${B58}])`, "gu
 const WIF_RE = new RegExp(`(?<![${B58}])[5KL][${B58}]{50,51}(?![${B58}])`, "gu");
 const XPRV_RE = new RegExp(`(?<![${B58}])[xtyz]prv[${B58}]{100,108}(?![${B58}])`, "gu");
 const JWT_RE = /eyJ[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}/gu;
-// 12+ lowercase words of 3-8 letters (BIP39 words are 3-8 letters; the first may be capitalised),
-// apart by any space (a no-break or ideographic space, a line separator), a comma, a hyphen or an
-// invisible character such as a zero-width space, and numbered or not (1. abandon 2. ability …).
-const MNEMONIC_RE =
-  /(?<![A-Za-z])[A-Za-z][a-z]{2,7}(?:[\s,\-\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]{1,4}(?:\d{1,2}[.):][\s\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]{0,3})?[a-z]{3,8}){11,23}(?![A-Za-z])/gu;
+// A seed phrase in another wordlist (Italian, Portuguese, Czech are plain letters): 12+ lowercase words
+// of 3-9 letters (Italian's run to 9), apart by any space (a no-break or ideographic space, a line
+// separator), a comma or an invisible character such as a zero-width space. A run holding an English
+// word no wordlist has (the, and, with …) is prose and stays: redacting it would hide an instruction
+// from the injection check (2026-11-09 review). An English phrase is told by its words instead
+// (redactWordlistPhrases), however it is written.
+const MNEMONIC_RE = /(?<![A-Za-z])(?:[a-z]{3,9}[\s,\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]{1,4}){11,23}[a-z]{3,9}(?![A-Za-z])/gu;
+const PROSE_WORD_RE =
+  /(?<![a-z])(?:the|and|with|from|has|had|are|was|were|would|your|for|not|but|them|their|than|which|who|why|how|its|our|his|her|she|him|been|being|does|did|should|could|may|shall|these|those|some|each|every|here|while|after|onto|via|per)(?![a-z])/u;
+// Inside a word these are skipped (they draw nothing, or are controls); tab, CR and LF separate.
+const HIDDEN_IN_WORD_RE = /[\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}\u{0}-\u{8}\u{B}\u{C}\u{E}-\u{1F}\u{7F}-\u{9F}]/u;
+/** BIP-39 words in a row that make a phrase; at the end of a cut excerpt, fewer (the rest is past the cut). */
+const PHRASE_WORDS = 12;
+const PHRASE_WORDS_AT_CUT = 6;
+/** The most characters between two words of one phrase: numbering, punctuation, a line break and its indent. */
+const PHRASE_GAP = 16;
 const LONG_ENCODED_RE = /[A-Za-z0-9+/=_-]{120,8192}/gu;
+
+/** How many BIP-39 English words the letters are, alone or run together (0: not only such words). */
+function bip39Words(letters: string): number {
+  if (BIP39_ENGLISH.has(letters)) return 1;
+  if (letters.length < 6) return 0;
+  // Words run together (a zero-width space was the only separator): the most words they split into.
+  const most = new Array<number>(letters.length + 1).fill(-1);
+  most[0] = 0;
+  for (let end = 3; end <= letters.length; end++) {
+    for (let size = 3; size <= 8 && size <= end; size++) {
+      const before = most[end - size] as number;
+      if (before >= 0 && before + 1 > (most[end] as number) && BIP39_ENGLISH.has(letters.slice(end - size, end))) most[end] = before + 1;
+    }
+  }
+  return Math.max(0, most[letters.length] as number);
+}
+
+/**
+ * Redacts a seed phrase of the BIP-39 English wordlist however it is written: in any case, numbered
+ * or not, apart by any short run of spaces, line breaks or punctuation (a JSON array, `1 - abandon`),
+ * with invisible or control characters inside its words or as their only separator. A phrase at the
+ * end of a cut excerpt is redacted from fewer words: the cut may have taken the rest.
+ *
+ * @param text - Untrusted text (already size-capped).
+ * @param cut - Whether the text was cut at its end.
+ * @returns The text with each phrase replaced by the marker.
+ */
+function redactWordlistPhrases(text: string, cut: boolean): string {
+  // Words: runs of ASCII letters, lower-cased, skipping hidden characters inside them.
+  const words: Array<{ start: number; end: number; letters: string }> = [];
+  let word: { start: number; end: number; letters: string } | undefined;
+  for (let i = 0; i < text.length; ) {
+    const char = String.fromCodePoint(text.codePointAt(i) as number);
+    if (/[A-Za-z]/u.test(char)) {
+      word ??= { start: i, end: i, letters: "" };
+      word.letters += char.toLowerCase();
+      word.end = i + 1;
+    } else if (!word || !HIDDEN_IN_WORD_RE.test(char)) {
+      if (word) words.push(word);
+      word = undefined;
+    }
+    i += char.length;
+  }
+  if (word) words.push(word);
+  const spans: Array<[number, number]> = [];
+  let first = -1;
+  let count = 0;
+  const close = (last: number, atEnd: boolean) => {
+    if (first >= 0 && (count >= PHRASE_WORDS || (atEnd && count >= PHRASE_WORDS_AT_CUT))) spans.push([(words[first] as { start: number }).start, (words[last] as { end: number }).end]);
+  };
+  for (let j = 0; j < words.length; j++) {
+    const current = words[j] as { start: number; end: number; letters: string };
+    const n = bip39Words(current.letters);
+    // A word the cut went through belongs to the phrase before it.
+    const cutWord = cut && current.end === text.length;
+    if ((n || cutWord) && first >= 0 && current.start - (words[j - 1] as { end: number }).end <= PHRASE_GAP) {
+      count += n;
+      continue;
+    }
+    close(j - 1, false);
+    first = n ? j : -1;
+    count = n;
+  }
+  close(words.length - 1, cut && words.length > 0 && text.length - (words[words.length - 1] as { end: number }).end <= PHRASE_GAP);
+  let out = text;
+  for (const [start, end] of spans.reverse()) out = `${out.slice(0, start)}${REDACTED}${out.slice(end)}`;
+  return out;
+}
 
 /**
  * Replaces secret-looking strings with a marker. Safe to run on our own
@@ -662,14 +743,15 @@ export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText 
   const capped = wellFormed(truncated ? headOf(input, maxInput).replace(PARTIAL_EMOJI_END_RE, "") : input);
   // An emoji's own parts are not hidden text: tested without them.
   const hadInvisible = INVISIBLE_RE.test(capped.replace(IGNORABLE_GLOBAL_RE, (part, emoji?: string) => (emoji ? "" : part)));
+  const otherWordlist = (run: string) => (PROSE_WORD_RE.test(run) ? run : REDACTED);
   const text = redactSecrets(
-    capped
+    redactWordlistPhrases(capped, truncated)
       .replace(CONTROL_RE, " ")
       // Before the invisible characters go (words a zero-width space keeps apart are still a phrase),
       // and after (one inside a word split it in two).
-      .replace(MNEMONIC_RE, REDACTED)
+      .replace(MNEMONIC_RE, otherWordlist)
       .replace(IGNORABLE_GLOBAL_RE, "$1")
-      .replace(MNEMONIC_RE, REDACTED),
+      .replace(MNEMONIC_RE, otherWordlist),
   )
     .replace(LONG_ENCODED_RE, "[long encoded data]")
     .replace(/\s+/gu, " ")

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FROM = join(ROOT, "snap", "src");
 const TO = join(ROOT, "packages", "client", "src", "decode");
-export const FILES = ["util.ts", "eip712.ts", "simulation.ts", "tx.ts", "typed.ts", "personal.ts", "request.ts", "decode.ts"];
+export const FILES = ["bip39.ts", "util.ts", "eip712.ts", "simulation.ts", "tx.ts", "typed.ts", "personal.ts", "request.ts", "decode.ts"];
 
 export function vendored(file) {
   const source = readFileSync(join(FROM, file), "utf8");

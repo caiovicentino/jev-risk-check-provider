@@ -62,7 +62,7 @@ async function postBatch(doFetch: typeof fetch, url: string, requests: readonly 
   }
 }
 
-export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; scanEndpoints?: readonly string[]; timeoutMs?: number; batch?: number; blockBatch?: number | undefined; turn?: number } = {}): KitWatchRpc {
+export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch; rpc?: Record<string, string>; scan?: Record<string, string>; scanEndpoints?: readonly string[]; timeoutMs?: number; batch?: number; blockBatch?: number | undefined; turn?: number; headGraceMs?: number } = {}): KitWatchRpc {
   const doFetch = opts.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => fetch(input, init));
   const readUrls = endpointsFor(chain, READ_ENDPOINTS, opts.rpc);
   const simUrls = endpointsFor(chain, SIMULATION_ENDPOINTS, opts.rpc);
@@ -114,7 +114,14 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
 
   // The head comes from the endpoints in the same rotation, so no one of them takes every request,
   // and it is the higher of two endpoints' answers: one that stopped following the chain (1rpc.io's
-  // Base endpoint on 2026-11-05) can neither hold a run's scan back nor show its lag as 0.
+  // Base endpoint on 2026-11-05) can neither hold a run's scan back nor show its lag as 0. The two
+  // get one request each, and one more of the rotation is asked only when one of them fails; the
+  // rest, the evaluation endpoints last, only when neither answers (2026-11-09 review: the second
+  // ask went down the whole list, so every rate-limited endpoint and the last fallback got a request
+  // each run). Once one has answered, the other gets `headGraceMs` more, not the whole timeout.
+  // A head past the chain is caught where it could do harm: the cron skips ahead only to a block
+  // it fetched.
+  const headGraceMs = opts.headGraceMs ?? 3000;
   const head = async (): Promise<number> => {
     const order = scanOrder();
     const ask = async (urls: readonly string[]): Promise<number> => {
@@ -123,10 +130,25 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
       if (!Number.isFinite(n)) throw new Error("bad block number");
       return n;
     };
-    const answers = await Promise.allSettled([ask(order.slice(0, 1)), ask(order.slice(1))]);
-    const heads = answers.flatMap((a) => (a.status === "fulfilled" ? [a.value] : []));
+    const heads: number[] = [];
+    const errors: unknown[] = [];
+    const settle = async (urls: readonly string[]) => {
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      await new Promise<void>((done) => {
+        const answered = (n: number) => {
+          heads.push(n);
+          grace ??= setTimeout(done, headGraceMs);
+        };
+        void Promise.allSettled(urls.map((u) => ask([u]).then(answered, (err: unknown) => void errors.push(err)))).then(() => done());
+      });
+      clearTimeout(grace);
+    };
+    await settle(order.slice(0, 2));
+    const third = order[2];
+    if (heads.length === 1 && errors.length === 1 && third !== undefined && rotating.includes(third)) await settle([third]);
     if (heads.length) return Math.max(...heads);
-    throw (answers[order.length > 1 ? 1 : 0] as PromiseRejectedResult).reason;
+    if (order.length > 2) return ask(order.slice(2));
+    throw errors[errors.length - 1];
   };
 
   // Every block of the batch from one endpoint, or the next one. Each batch starts at the next

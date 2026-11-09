@@ -233,6 +233,18 @@ function canonUint(ctx: Context, type: string, value: unknown, path: string): bi
 }
 
 /**
+ * What BigInt() reads from an array (its String()), or undefined when that throws: an element whose
+ * toString is not a function, an array nested past the stack. MetaMask cannot sign such a value either.
+ */
+function arrayText(value: unknown[]): string | undefined {
+  try {
+    return String(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * int* values: eth-sig-util calls BigInt(value) directly (so booleans and
  * arrays coerce), checks |value| <= 2^N - 1, then encodes negatives as int256.
  */
@@ -240,7 +252,10 @@ function canonInt(ctx: Context, type: string, value: unknown, path: string): big
   const bits = bitLength(type, "int");
   let parsed: bigint | undefined;
   if (typeof value === "boolean") parsed = value ? 1n : 0n;
-  else if (Array.isArray(value)) parsed = value.length <= 16 ? parseBigIntString(String(value)) : undefined;
+  else if (Array.isArray(value)) {
+    const text = value.length <= 16 ? arrayText(value) : undefined;
+    parsed = text === undefined ? undefined : parseBigIntString(text);
+  }
   else if (value !== null && typeof value !== "object") parsed = toBigIntLike(value);
   const max = bits === undefined ? -1n : (1n << BigInt(bits)) - 1n;
   if (bits === undefined || parsed === undefined || parsed < -max || parsed > max || parsed < -(1n << 255n)) {

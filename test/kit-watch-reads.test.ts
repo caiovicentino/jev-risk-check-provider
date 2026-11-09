@@ -7,7 +7,7 @@ import assert from "node:assert";
 import { privateKeyToAccount } from "viem/accounts";
 import { codeFacts } from "../src/code-fingerprint.js";
 import { kitWatchRpc } from "../src/kit-watch-rpc.js";
-import { SCAN_ENDPOINTS } from "../src/rpc.js";
+import { RPC_ENDPOINTS, SCAN_ENDPOINTS, SIMULATION_ENDPOINTS } from "../src/rpc.js";
 import { addBlocks, backfillFamilies, indexFamilies, MAX_AUTHORIZATIONS_PER_SCAN, mergeEntries, newActivity, PROBE_CANDIDATES, replacesEntry, rescanPending, sampledDelegates, scanActivity, scanBlocks, settledDelegates, settleForwarders, type DelegateVerdict, type Family, type PendingRead, type RawAuthorization, type RawBlock, type ScanDeps, type SimulateCall, type WatchEntry } from "../src/kit-watch.js";
 import { COVERAGE_V, coverageOf, DAILY_WRITE_BUDGET, kitWatchLookup, kitWatchStatus, KW, LEASE_MS, LEGACY_DROPPED_READS, PENDING_MAX, runKitWatch, type ChainStats, type KitWatchStats } from "../deploy/kit-watch.js";
 import type { KVNamespace } from "../deploy/runtime.js";
@@ -623,12 +623,72 @@ test("head: the higher of two endpoints' answers, so one that stopped following 
     assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl, turn }).head(), 0x180, `turn ${turn}`);
     assert.equal(asked.length, 2, "two endpoints, one request each");
   }
-  // One endpoint down: the second is asked through the rest of the rotation; every one down: its error.
-  heads["base.gateway.tenderly.co"] = "down";
-  assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl, turn: 0 }).head(), 0x180);
+  // One endpoint down: one more of the rotation is asked, so the stale one is still outvoted; every one down: its error.
+  heads["base-mainnet.public.blastapi.io"] = "down";
+  asked.length = 0;
+  assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl, turn: 1 }).head(), 0x180, "down, stale, then one more");
+  assert.deepEqual(asked, ["base-mainnet.public.blastapi.io", "1rpc.io", "base.meowrpc.com"]);
   for (const url of scanEndpoints) heads[host(url)] = "down";
   await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, turn: 0 }).head(), /rpc http 503/u);
   await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, scanEndpoints: ["https://1rpc.io/base"] }).head(), /rpc http 503/u, "a single endpoint: its own error");
+});
+
+test("head: rate-limited endpoints and the last fallback are not asked while two of the rotation answer, and a hung one costs seconds, not its timeout (2026-11-09 review)", async () => {
+  const scanEndpoints = SCAN_ENDPOINTS["eip155:8453"] as readonly string[];
+  const evaluation = new Set([...(RPC_ENDPOINTS["eip155:8453"] ?? []), ...(SIMULATION_ENDPOINTS["eip155:8453"] ?? [])].map(host));
+  // Every endpoint but the first two of the turn answers 429: the head takes two requests, as before the 2026-11-08 change.
+  const asked: string[] = [];
+  const limited = (async (url: string) => {
+    asked.push(host(url));
+    if (asked.length > 2) return new Response("slow down", { status: 429 });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+  }) as unknown as typeof fetch;
+  assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: limited, turn: 0 }).head(), 0x180);
+  assert.equal(asked.length, 2);
+  // The two of the turn down: the rest in order, the evaluation endpoints last, until one answers.
+  asked.length = 0;
+  const firstTwoDown = (async (url: string) => {
+    asked.push(host(url));
+    if (asked.length <= 2) return new Response("unavailable", { status: 503 });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+  }) as unknown as typeof fetch;
+  assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: firstTwoDown, turn: 0 }).head(), 0x180);
+  assert.equal(asked.length, 3);
+  assert.ok(!evaluation.has(asked[2] as string), "a rotating endpoint before the evaluation ones");
+  // One of the two hangs: the other's answer is taken after the grace, long before the timeout.
+  const hung = host(scanEndpoints[1] as string);
+  const hanging = (async (url: string, init: RequestInit) => {
+    if (host(url) !== hung) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+    return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
+  }) as unknown as typeof fetch;
+  const started = Date.now();
+  assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: hanging, turn: 0, timeoutMs: 5000, headGraceMs: 50 }).head(), 0x180);
+  assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+});
+
+test("cron: a head past the chain moves nothing: the watch skips ahead only to a block it fetched (2026-11-09 review)", async () => {
+  // One endpoint answers a head far past Base's (another chain's, say) while the watch is behind by
+  // more than its skip-ahead bound. Before, the cursor jumped past blocks that do not exist yet and
+  // every later run scanned nothing with lag 0; now the run records an error and the next resumes.
+  const real = 300_000;
+  const kv = seeded();
+  kv.data.set(KW.cursor("eip155:8453"), String(real - 100 - 1_000));
+  const honest = chainStub({ head: real, missing: (n) => n > real });
+  const first = (await runKitWatch({ RATE: kv }, { fetchImpl: honest, now: T })) as KitWatchStats;
+  const cursor = (first.chains["eip155:8453"] as ChainStats).cursor;
+  assert.equal(cursor, real - 100 - 100);
+  const bad = (await runKitWatch({ RATE: kv }, { fetchImpl: chainStub({ head: 400_000_000, missing: (n) => n > real }), now: T + 60_000 })) as KitWatchStats;
+  const before = bad.chains["eip155:8453"] as ChainStats;
+  assert.match(before.error ?? "", /not skipping ahead to an unconfirmed head/u);
+  assert.deepEqual([before.cursor, before.gaps_total ?? 0], [cursor, 0], "the cursor did not move, and no hole");
+  const next = (await runKitWatch({ RATE: kv }, { fetchImpl: honest, now: T + 120_000 })) as KitWatchStats;
+  const after = next.chains["eip155:8453"] as ChainStats;
+  assert.deepEqual([after.error, after.cursor, after.gaps_total ?? 0], [undefined, real - 100, 0]);
+  // A head that does exist still skips ahead, with its hole counted.
+  const far = seeded();
+  far.data.set(KW.cursor("eip155:8453"), String(real - 100 - 108_500));
+  const skipped = (await runKitWatch({ RATE: far }, { fetchImpl: chainStub({ head: real, missing: (n) => n > real }), now: T })) as KitWatchStats;
+  assert.deepEqual([skipped.chains["eip155:8453"]?.error, skipped.chains["eip155:8453"]?.gaps_total], [undefined, 1]);
 });
 
 test("scan endpoints: those that serve paid evaluations come last, after every one that does not", async () => {
