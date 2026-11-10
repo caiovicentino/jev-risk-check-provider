@@ -180,12 +180,13 @@ async function scanChain(env: WorkerEnv, chain: WatchChain, families: FamilyInde
     unbrokenSince = Math.max(unbrokenSince, block + 1);
   };
   let gaps = prev.gaps;
-  // Too far behind (an outage): skip ahead and record the gap, but only to a head whose block was
-  // fetched. One endpoint answering a head past the chain (another chain's, say) would otherwise move
-  // the cursor past blocks that do not exist yet, and every later run would scan nothing while its
-  // lag read 0 (2026-11-09 review). A missing block throws: the run records the error, moves nothing.
+  // Too far behind (an outage): skip ahead and record the gap, but only to a head whose block an
+  // endpoint other than the head's serves. One endpoint answering a head past the chain would
+  // otherwise move the cursor past blocks that do not exist yet, and every later run would scan
+  // nothing while its lag read 0 (2026-11-09 review); one serving another chain answers its blocks
+  // too (2026-11-10 review). An unconfirmed head throws: the run records the error, moves nothing.
   if (head - from > plan.maxLag) {
-    await rpc.blocks(head, head).catch((err: unknown) => {
+    await rpc.confirm(head).catch((err: unknown) => {
       throw new Error(`not skipping ahead to an unconfirmed head: ${err instanceof Error ? err.message : String(err)}`);
     });
     gaps = [...gaps, { from, to: head - plan.maxLag, at: new Date(opts.now).toISOString() }].slice(-10);

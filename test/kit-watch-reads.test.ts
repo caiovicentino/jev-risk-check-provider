@@ -664,6 +664,17 @@ test("head: rate-limited endpoints and the last fallback are not asked while two
   const started = Date.now();
   assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: hanging, turn: 0, timeoutMs: 5000, headGraceMs: 50 }).head(), 0x180);
   assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+  // One answers and the other fails at once: the third, asked with a head in hand, gets the grace
+  // too (2026-11-10 review: it got its whole timeout).
+  const rotating = scanEndpoints.filter((u) => !evaluation.has(host(u)));
+  const thirdHangs = (async (url: string, init: RequestInit) => {
+    if (url === rotating[1]) return new Response("unavailable", { status: 503 });
+    if (url === rotating[2]) return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+  }) as unknown as typeof fetch;
+  const begun = Date.now();
+  assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: thirdHangs, turn: 0, timeoutMs: 5000, headGraceMs: 50 }).head(), 0x180);
+  assert.ok(Date.now() - begun < 2000, `took ${Date.now() - begun} ms`);
 });
 
 test("cron: a head past the chain moves nothing: the watch skips ahead only to a block it fetched (2026-11-09 review)", async () => {
@@ -689,6 +700,30 @@ test("cron: a head past the chain moves nothing: the watch skips ahead only to a
   far.data.set(KW.cursor("eip155:8453"), String(real - 100 - 108_500));
   const skipped = (await runKitWatch({ RATE: far }, { fetchImpl: chainStub({ head: real, missing: (n) => n > real }), now: T })) as KitWatchStats;
   assert.deepEqual([skipped.chains["eip155:8453"]?.error, skipped.chains["eip155:8453"]?.gaps_total], [undefined, 1]);
+});
+
+test("cron: an endpoint serving another chain moves nothing either: only another endpoint's block confirms a head (2026-11-10 review)", async () => {
+  // The 2026-11-09 guard took the head's block from any endpoint, so one routed to another chain (its
+  // head, 400,000,000, and its blocks) still moved Base's cursor past the chain, from up to date.
+  const real = 300_000;
+  const evaluation = new Set([...(RPC_ENDPOINTS["eip155:8453"] ?? []), ...(SIMULATION_ENDPOINTS["eip155:8453"] ?? [])]);
+  const rotating = (SCAN_ENDPOINTS["eip155:8453"] as readonly string[]).filter((u) => !evaluation.has(u));
+  const honest = chainStub({ head: real, missing: (n) => n > real });
+  const foreign = chainStub({ head: 400_000_000 });
+  const kv = seeded();
+  kv.data.set(KW.cursor("eip155:8453"), String(real - 100 - 1_000));
+  const first = (await runKitWatch({ RATE: kv }, { fetchImpl: honest, now: T })) as KitWatchStats;
+  const cursor = (first.chains["eip155:8453"] as ChainStats).cursor;
+  // The next run's head goes first to the endpoint of its minute: that one serves the other chain.
+  const now = T + 60_000;
+  const misrouted = rotating[Math.floor(now / 60_000) % rotating.length] as string;
+  const fetchImpl = ((url: string, init: RequestInit) => (url === misrouted ? foreign : honest)(url, init)) as unknown as typeof fetch;
+  const bad = ((await runKitWatch({ RATE: kv }, { fetchImpl, now })) as KitWatchStats).chains["eip155:8453"] as ChainStats;
+  assert.match(bad.error ?? "", /not skipping ahead to an unconfirmed head: block 399999900 not served by an endpoint other than the head's/u);
+  assert.ok(!(bad.error ?? "").includes(new URL(misrouted).hostname), "the head's endpoint is not asked to confirm it");
+  assert.deepEqual([bad.cursor, bad.gaps_total ?? 0], [cursor, 0], "the cursor did not move, and no hole");
+  const next = ((await runKitWatch({ RATE: kv }, { fetchImpl: honest, now: now + 60_000 })) as KitWatchStats).chains["eip155:8453"] as ChainStats;
+  assert.deepEqual([next.error, next.cursor, next.gaps_total ?? 0], [undefined, real - 100, 0]);
 });
 
 test("scan endpoints: those that serve paid evaluations come last, after every one that does not", async () => {

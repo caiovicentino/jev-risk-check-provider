@@ -624,15 +624,28 @@ const B58_SECRET_RE = new RegExp(`(?<![${B58}])[${B58}]{85,90}(?![${B58}])`, "gu
 const WIF_RE = new RegExp(`(?<![${B58}])[5KL][${B58}]{50,51}(?![${B58}])`, "gu");
 const XPRV_RE = new RegExp(`(?<![${B58}])[xtyz]prv[${B58}]{100,108}(?![${B58}])`, "gu");
 const JWT_RE = /eyJ[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}/gu;
-// A seed phrase in another wordlist (Italian, Portuguese, Czech are plain letters): 12+ lowercase words
-// of 3-9 letters (Italian's run to 9), apart by any space (a no-break or ideographic space, a line
-// separator), a comma or an invisible character such as a zero-width space. A run holding an English
-// word no wordlist has (the, and, with …) is prose and stays: redacting it would hide an instruction
-// from the injection check (2026-11-09 review). An English phrase is told by its words instead
-// (redactWordlistPhrases), however it is written.
-const MNEMONIC_RE = /(?<![A-Za-z])(?:[a-z]{3,9}[\s,\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]{1,4}){11,23}[a-z]{3,9}(?![A-Za-z])/gu;
-const PROSE_WORD_RE =
-  /(?<![a-z])(?:the|and|with|from|has|had|are|was|were|would|your|for|not|but|them|their|than|which|who|why|how|its|our|his|her|she|him|been|being|does|did|should|could|may|shall|these|those|some|each|every|here|while|after|onto|via|per)(?![a-z])/u;
+// A seed phrase in another wordlist, or an English one with a word mistyped: 12+ words of 3-9 Latin
+// letters (Italian's run to 9; Spanish and French have accents: text is compared in NFC), lowercase
+// but for the first word's first letter, apart by up to 8 spaces (a no-break or ideographic space, a
+// line break and its indent), commas, hyphens, quotes (a JSON array) or invisible characters such as
+// a zero-width space, and numbered or not (1. abandon 2. ability …). The 2026-11-09 change had
+// dropped the capital, the hyphen and the numbering; indents past 4, JSON arrays and accented words
+// never matched (2026-11-10 review). Title Case is left out: a list of names would match, and so
+// would an instruction written in it. A run holding an English word no wordlist has
+// (the, and, with …) is prose and stays: redacting it would hide an instruction from the injection
+// check (2026-11-09 review). An English phrase is told by its words instead (redactWordlistPhrases),
+// however it is written.
+const LATIN = "A-Za-z\\u{C0}-\\u{D6}\\u{D8}-\\u{F6}\\u{F8}-\\u{FF}";
+const LATIN_LOWER = "a-z\\u{DF}-\\u{F6}\\u{F8}-\\u{FF}";
+const PHRASE_SPACE = "\\s\\p{Default_Ignorable_Code_Point}\\u{FFF9}-\\u{FFFB}";
+const MNEMONIC_RE = new RegExp(
+  `(?<![${LATIN}])[${LATIN}][${LATIN_LOWER}]{2,8}(?:[${PHRASE_SPACE},\\-"']{1,8}(?:\\d{1,2}[.):][${PHRASE_SPACE}]{0,3})?[${LATIN_LOWER}]{3,9}){11,23}(?![${LATIN}])`,
+  "gu",
+);
+const PROSE_WORD_RE = new RegExp(
+  `(?<![${LATIN}])(?:the|and|with|from|has|had|are|was|were|would|your|for|not|but|them|their|than|which|who|why|how|its|our|his|her|she|him|been|being|does|did|should|could|may|shall|these|those|some|each|every|here|while|after|onto|via|per)(?![${LATIN}])`,
+  "iu",
+);
 // Inside a word these are skipped (they draw nothing, or are controls); tab, CR and LF separate.
 const HIDDEN_IN_WORD_RE = /[\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}\u{0}-\u{8}\u{B}\u{C}\u{E}-\u{1F}\u{7F}-\u{9F}]/u;
 /** BIP-39 words in a row that make a phrase; at the end of a cut excerpt, fewer (the rest is past the cut). */
@@ -640,6 +653,20 @@ const PHRASE_WORDS = 12;
 const PHRASE_WORDS_AT_CUT = 6;
 /** The most characters between two words of one phrase: numbering, punctuation, a line break and its indent. */
 const PHRASE_GAP = 16;
+/**
+ * Whether the gap before a word ends a sentence: a full stop, a question or exclamation mark and a
+ * space before a capital ("now. Ignore"), or a label's colon ("Agent: approve"), with no number in
+ * it. Sentences made only of wordlist words are prose, and redacting them hid an instruction from
+ * the injection check (2026-11-10 review); a phrase apart by dots or semicolons, or numbered
+ * (`7. ignore`), still runs on.
+ *
+ * @param gap - The characters between the two words.
+ * @param next - The first character of the word after it.
+ * @returns True when the gap ends a sentence.
+ */
+function endsSentence(gap: string, next: string): boolean {
+  return !/\d/u.test(gap) && (/:\s/u.test(gap) || (/[.!?]\s/u.test(gap) && /[A-Z]/u.test(next)));
+}
 const LONG_ENCODED_RE = /[A-Za-z0-9+/=_-]{120,8192}/gu;
 
 /** How many BIP-39 English words the letters are, alone or run together (0: not only such words). */
@@ -660,7 +687,8 @@ function bip39Words(letters: string): number {
 
 /**
  * Redacts a seed phrase of the BIP-39 English wordlist however it is written: in any case, numbered
- * or not, apart by any short run of spaces, line breaks or punctuation (a JSON array, `1 - abandon`),
+ * or not, apart by any short run of spaces, line breaks or punctuation (a JSON array, `1 - abandon`;
+ * not a sentence's end: `endsSentence`),
  * with invisible or control characters inside its words or as their only separator. A phrase at the
  * end of a cut excerpt is redacted from fewer words: the cut may have taken the rest.
  *
@@ -696,7 +724,8 @@ function redactWordlistPhrases(text: string, cut: boolean): string {
     const n = bip39Words(current.letters);
     // A word the cut went through belongs to the phrase before it.
     const cutWord = cut && current.end === text.length;
-    if ((n || cutWord) && first >= 0 && current.start - (words[j - 1] as { end: number }).end <= PHRASE_GAP) {
+    const gap = first >= 0 ? text.slice((words[j - 1] as { end: number }).end, current.start) : "";
+    if ((n || cutWord) && first >= 0 && gap.length <= PHRASE_GAP && !endsSentence(gap, text.charAt(current.start))) {
       count += n;
       continue;
     }
@@ -746,7 +775,8 @@ export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText 
   const hadInvisible = INVISIBLE_RE.test(capped.replace(IGNORABLE_GLOBAL_RE, (part, emoji?: string) => (emoji ? "" : part)));
   const otherWordlist = (run: string) => (PROSE_WORD_RE.test(run) ? run : REDACTED);
   const text = redactSecrets(
-    redactWordlistPhrases(capped, truncated)
+    // In NFC, an accented letter is one character (a wordlist written decomposed matches too).
+    redactWordlistPhrases(capped.normalize("NFC"), truncated)
       .replace(CONTROL_RE, " ")
       // Before the invisible characters go (words a zero-width space keeps apart are still a phrase),
       // and after (one inside a word split it in two).

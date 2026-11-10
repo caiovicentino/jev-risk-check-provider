@@ -12,6 +12,8 @@ export type KitWatchRpc = {
   call: BatchCall;
   simulate: SimulateCall;
   head: () => Promise<number>;
+  /** Throws unless an endpoint other than the ones that named the last head serves this block. */
+  confirm: (block: number) => Promise<void>;
   /** Full blocks (transactions included), in order; a missing block throws (the cursor must not skip it). */
   blocks: (from: number, to: number) => Promise<RawBlock[]>;
   /** The same, handed over batch by batch, so that each batch's bodies can be dropped once it is processed. */
@@ -118,37 +120,83 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   // get one request each, and one more of the rotation is asked only when one of them fails; the
   // rest, the evaluation endpoints last, only when neither answers (2026-11-09 review: the second
   // ask went down the whole list, so every rate-limited endpoint and the last fallback got a request
-  // each run). Once one has answered, the other gets `headGraceMs` more, not the whole timeout.
-  // A head past the chain is caught where it could do harm: the cron skips ahead only to a block
-  // it fetched.
+  // each run). Once a head is in hand, an endpoint still asked gets `headGraceMs` more, not the
+  // whole timeout (the third one too: 2026-11-10 review). A stale endpoint that answers at once
+  // therefore wins over a current one slower than the grace: that run scans nothing, and the next
+  // asks two others. A head past the chain is caught where it could do harm: the cron skips ahead
+  // only to a block that an endpoint other than the head's serves (`confirm`).
   const headGraceMs = opts.headGraceMs ?? 3000;
+  // The endpoints whose answer was the last head (the highest).
+  let headFrom: string[] = [];
   const head = async (): Promise<number> => {
     const order = scanOrder();
-    const ask = async (urls: readonly string[]): Promise<number> => {
-      const json = (await rpcWithFallback(urls, { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, timeoutMs, doFetch)) as { result?: string };
+    const ask = async (url: string, budgetMs = timeoutMs): Promise<number> => {
+      const json = (await rpcWithFallback([url], { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, budgetMs, doFetch)) as { result?: string };
       const n = Number.parseInt(json.result ?? "", 16);
       if (!Number.isFinite(n)) throw new Error("bad block number");
       return n;
     };
-    const heads: number[] = [];
+    const answers: Array<{ url: string; n: number }> = [];
     const errors: unknown[] = [];
     const settle = async (urls: readonly string[]) => {
       let grace: ReturnType<typeof setTimeout> | undefined;
       await new Promise<void>((done) => {
-        const answered = (n: number) => {
-          heads.push(n);
-          grace ??= setTimeout(done, headGraceMs);
-        };
-        void Promise.allSettled(urls.map((u) => ask([u]).then(answered, (err: unknown) => void errors.push(err)))).then(() => done());
+        const wait = () => void (grace ??= setTimeout(done, headGraceMs));
+        if (answers.length) wait();
+        const asked = urls.map((url) =>
+          ask(url).then(
+            (n) => {
+              answers.push({ url, n });
+              wait();
+            },
+            (err: unknown) => void errors.push(err),
+          ),
+        );
+        void Promise.allSettled(asked).then(() => done());
       });
       clearTimeout(grace);
     };
     await settle(order.slice(0, 2));
     const third = order[2];
-    if (heads.length === 1 && errors.length === 1 && third !== undefined && rotating.includes(third)) await settle([third]);
-    if (heads.length) return Math.max(...heads);
-    if (order.length > 2) return ask(order.slice(2));
-    throw errors[errors.length - 1];
+    if (answers.length === 1 && errors.length === 1 && third !== undefined && rotating.includes(third)) await settle([third]);
+    // Neither answered: the rest in order, the evaluation endpoints last, in one shared budget.
+    const deadline = Date.now() + timeoutMs;
+    for (const url of answers.length ? [] : order.slice(2)) {
+      if (deadline - Date.now() < 150) break;
+      const n = await ask(url, timeLeft(deadline)).catch((err: unknown) => void errors.push(err));
+      if (n === undefined) continue;
+      answers.push({ url, n });
+      break;
+    }
+    if (!answers.length) throw errors[errors.length - 1];
+    const max = Math.max(...answers.map((a) => a.n));
+    headFrom = answers.filter((a) => a.n === max).map((a) => a.url);
+    return max;
+  };
+
+  // An endpoint that serves another chain answers a head past this one, and that chain's blocks
+  // too (2026-11-10 review): only another endpoint serving the block confirms the head.
+  const confirm = async (n: number): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    const why: string[] = [];
+    for (const url of [...rotating, ...lastResort].filter((u) => !headFrom.includes(u))) {
+      const host = new URL(url).hostname;
+      if (limited.has(url)) {
+        why.push(`${host}: HTTP 429 earlier in this run`);
+        continue;
+      }
+      if (deadline - Date.now() < 150) {
+        why.push(`${host}: no time left`);
+        break;
+      }
+      const answer = await postBatch(doFetch, url, [{ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] }], timeLeft(deadline), (reason) => {
+        why.push(`${host}: ${reason}`);
+        if (reason === "HTTP 429") limited.add(url);
+      });
+      if (Number.parseInt((answer?.results[0] as { number?: string } | undefined)?.number ?? "", 16) === n) return;
+      if (answer) why.push(`${host}: no block ${n}`);
+    }
+    throw new Error(`block ${n} not served by an endpoint other than the head's (${why.join("; ") || "no other endpoint"})`);
   };
 
   // Every block of the batch from one endpoint, or the next one. Each batch starts at the next
@@ -225,5 +273,5 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     return out;
   };
 
-  return { call, simulate, head, blocks, eachBlocks, blockBatchSize: () => blockBatch };
+  return { call, simulate, head, confirm, blocks, eachBlocks, blockBatchSize: () => blockBatch };
 }
