@@ -54,6 +54,19 @@ const forwarding: SimulateCall = async (c) => ({
 
 type Req = { id: number; method: string; params: unknown[] };
 const host = (url: string) => new URL(url).hostname;
+/**
+ * The chain check an endpoint gets once a run before its first blocks (2026-11-11 review), answered
+ * here so that a stub counting requests counts the ones it is about; undefined for any other request.
+ */
+const chainCheck = (init: RequestInit, chainId: number): Response | undefined => {
+  const req = JSON.parse(String(init.body)) as Req | Req[];
+  return Array.isArray(req) && req.length === 1 && req[0]?.method === "eth_chainId" ? new Response(JSON.stringify([{ jsonrpc: "2.0", id: req[0].id, result: `0x${chainId.toString(16)}` }])) : undefined;
+};
+/** The answer to the head's request: the chain id (Base's unless given), then the head. */
+const headReply = (init: RequestInit, head: number, chainId = 8453): Response => {
+  const req = JSON.parse(String(init.body)) as Req[];
+  return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: `0x${(r.method === "eth_chainId" ? chainId : head).toString(16)}` }))));
+};
 
 test("code reads: what one endpoint leaves unanswered goes to the next, healthiest first, in bounded requests", async () => {
   const sent: Array<[string, number]> = [];
@@ -91,6 +104,8 @@ test("blocks: batches follow the blocks' JSON size, and each batch is handed ove
   let pad = "ab".repeat(400_000); // ~800 KB of calldata per block
   let missingOnce = true;
   const fetchImpl = (async (url: string, init: RequestInit) => {
+    const checked = chainCheck(init, 1);
+    if (checked) return checked;
     const req = JSON.parse(String(init.body)) as Req[];
     events.push(`fetch ${req.length}${url.includes("blastapi") ? "" : ` ${host(url)}`}`);
     // The first endpoint once leaves a block out: the batch goes to the next one, whole.
@@ -123,6 +138,8 @@ test("blocks: a batch no endpoint serves is split, and stays that small for the 
   const sizes: number[] = [];
   // Every endpoint refuses a request for more than 2 blocks (too large, or cut off by the timeout).
   const fetchImpl = (async (_url: string, init: RequestInit) => {
+    const checked = chainCheck(init, 1);
+    if (checked) return checked;
     const req = JSON.parse(String(init.body)) as Req[];
     sizes.push(req.length);
     if (req.length > 2) return new Response("too large", { status: 413 });
@@ -220,12 +237,13 @@ function memoryKv(): KVNamespace & { data: Map<string, string>; puts: string[]; 
 }
 
 /** One JSON-RPC stub for every endpoint of both chains; `code` answers eth_getCode (undefined: rate-limited). */
-function chainStub(opts: { head?: number; blocks?: Record<number, RawBlock["transactions"]>; code?: (address: string) => string | undefined; log?: string[]; missing?: (block: number) => boolean }): typeof fetch {
+function chainStub(opts: { head?: number; blocks?: Record<number, RawBlock["transactions"]>; code?: (address: string) => string | undefined; log?: string[]; missing?: (block: number) => boolean; chainId?: number }): typeof fetch {
   return (async (_url: string, init: RequestInit) => {
     const req = JSON.parse(String(init.body)) as Req | Req[];
     const answer = (r: Req) => {
       opts.log?.push(r.method === "eth_getCode" ? `code ${String(r.params[0])}` : r.method);
       if (r.method === "eth_blockNumber") return { jsonrpc: "2.0", id: r.id, result: `0x${(opts.head ?? 0x200).toString(16)}` };
+      if (r.method === "eth_chainId" && opts.chainId !== undefined) return { jsonrpc: "2.0", id: r.id, result: `0x${opts.chainId.toString(16)}` };
       if (r.method === "eth_getBlockByNumber") {
         const n = Number.parseInt(r.params[0] as string, 16);
         if (opts.missing?.(n)) return { jsonrpc: "2.0", id: r.id, result: null };
@@ -588,6 +606,8 @@ test("blocks: an endpoint that answers 429 is not asked again in the run; when a
   const asked: string[] = [];
   const limiting = new Set(["blastapi"]);
   const fetchImpl = (async (url: string, init: RequestInit) => {
+    const checked = chainCheck(init, 1);
+    if (checked) return checked;
     const req = JSON.parse(String(init.body)) as Req[];
     asked.push(host(url));
     if ([...limiting].some((name) => url.includes(name))) return new Response("slow down", { status: 429 });
@@ -611,11 +631,11 @@ test("head: the higher of two endpoints' answers, so one that stopped following 
   // one run in five scan nothing while its lag read 0.
   const heads: Record<string, number | "down"> = { "1rpc.io": 0x100 };
   const asked: string[] = [];
-  const fetchImpl = (async (url: string) => {
+  const fetchImpl = (async (url: string, init: RequestInit) => {
     asked.push(host(url));
     const answer = heads[host(url)] ?? 0x180;
     if (answer === "down") return new Response("unavailable", { status: 503 });
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: `0x${answer.toString(16)}` }));
+    return headReply(init, answer);
   }) as unknown as typeof fetch;
   const scanEndpoints = SCAN_ENDPOINTS["eip155:8453"] as readonly string[];
   for (let turn = 0; turn < scanEndpoints.length; turn++) {
@@ -629,8 +649,8 @@ test("head: the higher of two endpoints' answers, so one that stopped following 
   assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl, turn: 1 }).head(), 0x180, "down, stale, then one more");
   assert.deepEqual(asked, ["base-mainnet.public.blastapi.io", "1rpc.io", "base.meowrpc.com"]);
   for (const url of scanEndpoints) heads[host(url)] = "down";
-  await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, turn: 0 }).head(), /rpc http 503/u);
-  await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, scanEndpoints: ["https://1rpc.io/base"] }).head(), /rpc http 503/u, "a single endpoint: its own error");
+  await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, turn: 0 }).head(), /: HTTP 503$/u);
+  await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, scanEndpoints: ["https://1rpc.io/base"] }).head(), /^Error: 1rpc\.io: HTTP 503$/u, "a single endpoint: its own error");
 });
 
 test("head: rate-limited endpoints and the last fallback are not asked while two of the rotation answer, and a hung one costs seconds, not its timeout (2026-11-09 review)", async () => {
@@ -638,19 +658,19 @@ test("head: rate-limited endpoints and the last fallback are not asked while two
   const evaluation = new Set([...(RPC_ENDPOINTS["eip155:8453"] ?? []), ...(SIMULATION_ENDPOINTS["eip155:8453"] ?? [])].map(host));
   // Every endpoint but the first two of the turn answers 429: the head takes two requests, as before the 2026-11-08 change.
   const asked: string[] = [];
-  const limited = (async (url: string) => {
+  const limited = (async (url: string, init: RequestInit) => {
     asked.push(host(url));
     if (asked.length > 2) return new Response("slow down", { status: 429 });
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+    return headReply(init, 0x180);
   }) as unknown as typeof fetch;
   assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: limited, turn: 0 }).head(), 0x180);
   assert.equal(asked.length, 2);
   // The two of the turn down: the rest in order, the evaluation endpoints last, until one answers.
   asked.length = 0;
-  const firstTwoDown = (async (url: string) => {
+  const firstTwoDown = (async (url: string, init: RequestInit) => {
     asked.push(host(url));
     if (asked.length <= 2) return new Response("unavailable", { status: 503 });
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+    return headReply(init, 0x180);
   }) as unknown as typeof fetch;
   assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: firstTwoDown, turn: 0 }).head(), 0x180);
   assert.equal(asked.length, 3);
@@ -658,7 +678,7 @@ test("head: rate-limited endpoints and the last fallback are not asked while two
   // One of the two hangs: the other's answer is taken after the grace, long before the timeout.
   const hung = host(scanEndpoints[1] as string);
   const hanging = (async (url: string, init: RequestInit) => {
-    if (host(url) !== hung) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+    if (host(url) !== hung) return headReply(init, 0x180);
     return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
   }) as unknown as typeof fetch;
   const started = Date.now();
@@ -670,7 +690,7 @@ test("head: rate-limited endpoints and the last fallback are not asked while two
   const thirdHangs = (async (url: string, init: RequestInit) => {
     if (url === rotating[1]) return new Response("unavailable", { status: 503 });
     if (url === rotating[2]) return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x180" }));
+    return headReply(init, 0x180);
   }) as unknown as typeof fetch;
   const begun = Date.now();
   assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: thirdHangs, turn: 0, timeoutMs: 5000, headGraceMs: 50 }).head(), 0x180);
@@ -724,6 +744,71 @@ test("cron: an endpoint serving another chain moves nothing either: only another
   assert.deepEqual([bad.cursor, bad.gaps_total ?? 0], [cursor, 0], "the cursor did not move, and no hole");
   const next = ((await runKitWatch({ RATE: kv }, { fetchImpl: honest, now: now + 60_000 })) as KitWatchStats).chains["eip155:8453"] as ChainStats;
   assert.deepEqual([next.error, next.cursor, next.gaps_total ?? 0], [undefined, real - 100, 0]);
+});
+
+test("blocks: an endpoint routed to another chain serves none of this chain's blocks, and is asked nothing more in the run (2026-11-11 review)", async () => {
+  // Before this fix the scan checked only each block's number: Arbitrum's blocks, numbered past Base's,
+  // were scanned as Base's (a third of a run's blocks), and a kit deployed in one of them went unseen.
+  const misrouted = "https://base.gateway.tenderly.co";
+  const asked: string[] = [];
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    asked.push(host(url));
+    const req = JSON.parse(String(init.body)) as Req[];
+    const foreign = url === misrouted;
+    return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: r.method === "eth_chainId" ? (foreign ? "0xa4b1" : "0x2105") : { number: r.params[0], timestamp: "0x1", transactions: [foreign ? "0xf0" : "0xba"] } }))));
+  }) as unknown as typeof fetch;
+  const rpc = kitWatchRpc("eip155:8453", { fetchImpl, blockBatch: 3, batch: 3, turn: 0 });
+  const blocks = await rpc.blocks(1000, 1029);
+  assert.deepEqual(blocks.map((b) => Number.parseInt(b.number, 16)), Array.from({ length: 30 }, (_, i) => 1000 + i));
+  assert.ok(blocks.every((b) => b.transactions[0] === "0xba"), "every block from an endpoint of this chain");
+  assert.equal(asked.filter((h) => h === host(misrouted)).length, 1, "the chain check, then nothing");
+  // Its head is no answer either: the head is the others'.
+  const heads = (async (url: string, init: RequestInit) => headReply(init, url === misrouted ? 400_000_000 : 0x180, url === misrouted ? 42161 : 8453)) as unknown as typeof fetch;
+  for (let turn = 0; turn < 7; turn++) assert.equal(await kitWatchRpc("eip155:8453", { fetchImpl: heads, turn }).head(), 0x180, `turn ${turn}`);
+});
+
+test("cron: a chain's first run takes its cursor from this chain's head, not from an endpoint routed to another (2026-11-11 review)", async () => {
+  // With no cursor stored the run starts from the head and confirms nothing: before this fix an
+  // endpoint routed to another chain set Base's cursor to 399,999,900, and every later run scanned nothing.
+  const real = 300_000;
+  const evaluation = new Set([...(RPC_ENDPOINTS["eip155:8453"] ?? []), ...(SIMULATION_ENDPOINTS["eip155:8453"] ?? [])]);
+  const rotating = (SCAN_ENDPOINTS["eip155:8453"] as readonly string[]).filter((u) => !evaluation.has(u));
+  const misrouted = rotating[Math.floor(T / 60_000) % rotating.length] as string;
+  const honest = chainStub({ head: real, missing: (n) => n > real });
+  const foreign = chainStub({ head: 400_000_000, chainId: 42161 });
+  const fetchImpl = ((url: string, init: RequestInit) => (url === misrouted ? foreign : honest)(url, init)) as unknown as typeof fetch;
+  const kv = memoryKv();
+  kv.data.set(KW.registry, JSON.stringify({ updated_at: "2026-10-02", families: [KIT] }));
+  const base = ((await runKitWatch({ RATE: kv }, { fetchImpl, now: T })) as KitWatchStats).chains["eip155:8453"] as ChainStats;
+  assert.equal(base.error, undefined);
+  assert.ok(base.cursor > 0 && base.cursor <= real - 100, `cursor ${base.cursor}`);
+  assert.equal(base.head, real - 100);
+});
+
+test("blocks: an endpoint that hangs leaves the run after two timeouts, and its turn goes to the next endpoint (2026-11-11 review)", async () => {
+  // Before this fix each batch a hanging endpoint led waited out its share of the budget, about 9 s in
+  // the cron: some 30 batches a Base run, as long as the lease.
+  const hung = "https://base.gateway.tenderly.co";
+  let hangs = 0;
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    if (url === hung) {
+      hangs++;
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
+    }
+    const req = JSON.parse(String(init.body)) as Req[];
+    return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: r.method === "eth_chainId" ? "0x2105" : { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
+  }) as unknown as typeof fetch;
+  // AbortSignal.timeout's timer does not hold the event loop open: this one does, while requests hang.
+  const alive = setInterval(() => undefined, 100);
+  try {
+    const rpc = kitWatchRpc("eip155:8453", { fetchImpl, batch: 1, turn: 0, timeoutMs: 1000 });
+    const blocks = await rpc.blocks(1000, 1029);
+    assert.equal(blocks.length, 30, "every block, from the others");
+    assert.equal(hangs, 2);
+    await assert.rejects(kitWatchRpc("eip155:8453", { fetchImpl, batch: 1, timeoutMs: 1000, scanEndpoints: [hung] }).blocks(1, 1), /base\.gateway\.tenderly\.co: timeout after/u);
+  } finally {
+    clearInterval(alive);
+  }
 });
 
 test("scan endpoints: those that serve paid evaluations come last, after every one that does not", async () => {
@@ -999,6 +1084,8 @@ test("cron: Base's scans keep their time bounds at 200 ms blocks: at most 6 prob
 test("blocks: a batch rotates over the endpoints that accept its size, in even turns (2026-11-06 review)", async () => {
   const served = new Map<string, number>();
   const fetchImpl = (async (url: string, init: RequestInit) => {
+    const checked = chainCheck(init, 8453);
+    if (checked) return checked;
     const req = JSON.parse(String(init.body)) as Req[];
     served.set(host(url), (served.get(host(url)) ?? 0) + 1);
     return new Response(JSON.stringify(req.map((r) => ({ jsonrpc: "2.0", id: r.id, result: { number: r.params[0], timestamp: "0x1", transactions: [] } }))));
@@ -1012,6 +1099,8 @@ test("blocks: a batch rotates over the endpoints that accept its size, in even t
 test("blocks: an endpoint limited by HTTP 429 leaves the rotation, so the others share its turns evenly (2026-11-07 review)", async () => {
   const served = new Map<string, number>();
   const fetchImpl = (async (url: string, init: RequestInit) => {
+    const checked = chainCheck(init, 8453);
+    if (checked) return checked;
     const req = JSON.parse(String(init.body)) as Req[];
     if (host(url) === "base.gateway.tenderly.co") return new Response("slow down", { status: 429 });
     served.set(host(url), (served.get(host(url)) ?? 0) + 1);

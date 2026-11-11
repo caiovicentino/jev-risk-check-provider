@@ -123,16 +123,24 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   // each run). Once a head is in hand, an endpoint still asked gets `headGraceMs` more, not the
   // whole timeout (the third one too: 2026-11-10 review). A stale endpoint that answers at once
   // therefore wins over a current one slower than the grace: that run scans nothing, and the next
-  // asks two others. A head past the chain is caught where it could do harm: the cron skips ahead
-  // only to a block that an endpoint other than the head's serves (`confirm`).
+  // asks two others. An endpoint that names another chain is no answer (the chain id rides with the
+  // head), and a head past the chain is caught where it could do harm: the cron skips ahead only to
+  // a block that an endpoint other than the head's serves (`confirm`).
   const headGraceMs = opts.headGraceMs ?? 3000;
   // The endpoints whose answer was the last head (the highest).
   let headFrom: string[] = [];
   const head = async (): Promise<number> => {
     const order = scanOrder();
+    // The chain id rides in the same request: a head from another chain is no answer.
     const ask = async (url: string, budgetMs = timeoutMs): Promise<number> => {
-      const json = (await rpcWithFallback([url], { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }, budgetMs, doFetch)) as { result?: string };
-      const n = Number.parseInt(json.result ?? "", 16);
+      let failure = "no answer";
+      const answer = await postBatch(doFetch, url, [{ method: "eth_chainId", params: [] }, { method: "eth_blockNumber", params: [] }], budgetMs, (reason) => void (failure = reason));
+      if (!answer) throw new Error(`${new URL(url).hostname}: ${failure}`);
+      chainAnswered.add(url);
+      learnChain(url, answer.results[0]);
+      const other = offChain(url);
+      if (other) throw new Error(other);
+      const n = Number.parseInt(String(answer.results[1] ?? ""), 16);
       if (!Number.isFinite(n)) throw new Error("bad block number");
       return n;
     };
@@ -181,18 +189,18 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     const why: string[] = [];
     for (const url of [...rotating, ...lastResort].filter((u) => !headFrom.includes(u))) {
       const host = new URL(url).hostname;
-      if (limited.has(url)) {
-        why.push(`${host}: HTTP 429 earlier in this run`);
+      const held = limited.get(url) ?? offChain(url);
+      if (held) {
+        why.push(held);
         continue;
       }
       if (deadline - Date.now() < 150) {
         why.push(`${host}: no time left`);
         break;
       }
-      const answer = await postBatch(doFetch, url, [{ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] }], timeLeft(deadline), (reason) => {
-        why.push(`${host}: ${reason}`);
-        if (reason === "HTTP 429") limited.add(url);
-      });
+      if (!(await checkChain(url, timeLeft(deadline), why)) || deadline - Date.now() < 150) continue;
+      const budget = timeLeft(deadline);
+      const answer = await postBatch(doFetch, url, [{ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] }], budget, (reason) => failed(url, reason, budget, why));
       if (Number.parseInt((answer?.results[0] as { number?: string } | undefined)?.number ?? "", 16) === n) return;
       if (answer) why.push(`${host}: no block ${n}`);
     }
@@ -207,15 +215,55 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   const rotating = scanUrls.filter((u) => !evaluation.has(u));
   const lastResort = scanUrls.filter((u) => evaluation.has(u));
   // An endpoint that answered 429 is not asked for blocks again in this run: more requests would
-  // only prolong its limit. When every endpoint is limited the scan stops, and the next run resumes.
-  const limited = new Set<string>();
+  // only prolong its limit. Nor is one that timed out twice with seconds to answer: one that hangs
+  // cost each batch it led its whole share of the budget, and a run could last as long as the lease
+  // (2026-11-11 review). When every endpoint is limited the scan stops, and the next run resumes.
+  const limited = new Map<string, string>();
+  const timeouts = new Map<string, number>();
+  const failed = (url: string, reason: string, budgetMs: number, why: string[]) => {
+    const host = new URL(url).hostname;
+    why.push(`${host}: ${reason}`);
+    if (reason === "HTTP 429") limited.set(url, `${host}: HTTP 429 earlier in this run`);
+    // Given a fifth of the timeout or more (3 s in the cron), a timeout is the endpoint's, not a cut budget's.
+    if (reason.startsWith("timeout") && budgetMs >= timeoutMs / 5) {
+      timeouts.set(url, (timeouts.get(url) ?? 0) + 1);
+      if ((timeouts.get(url) as number) >= 2) limited.set(url, `${host}: timed out twice in this run`);
+    }
+  };
+  // What each endpoint says its chain is, asked once a run (with the head, or before its first
+  // blocks). One routed to another chain answers that chain's head and blocks alike: its blocks were
+  // scanned as this chain's, and on a chain's first run its head set the cursor (2026-11-11 review).
+  // One that names another chain is not asked again in the run; one that names none is not held back.
+  // One that does not answer is asked again at its next turn, and that turn goes to the next endpoint.
+  const chainNumber = Number(chain.slice(chain.indexOf(":") + 1));
+  const chainOf = new Map<string, number>();
+  const learnChain = (url: string, result: unknown) => {
+    const id = typeof result === "string" ? Number.parseInt(result, 16) : Number.NaN;
+    if (Number.isSafeInteger(id)) chainOf.set(url, id);
+  };
+  const offChain = (url: string): string | undefined => {
+    const id = chainOf.get(url);
+    return id !== undefined && id !== chainNumber ? `${new URL(url).hostname}: serves chain ${id}` : undefined;
+  };
+  const chainAnswered = new Set<string>();
+  const checkChain = async (url: string, budgetMs: number, why: string[]): Promise<boolean> => {
+    if (!chainAnswered.has(url)) {
+      const answer = await postBatch(doFetch, url, [{ method: "eth_chainId", params: [] }], budgetMs, (reason) => failed(url, reason, budgetMs, why));
+      if (!answer) return false;
+      chainAnswered.add(url);
+      learnChain(url, answer.results[0]);
+    }
+    const other = offChain(url);
+    if (other) why.push(other);
+    return !other;
+  };
   // A batch rotates over the endpoints that accept its size (BATCH_LIMITS) and are not limited, so
   // turns stay even: one that cannot take it would hand its turn to the next, which then takes two.
   // The first turn is the caller's (the cron passes the minute): a run makes few requests, and
   // starting each at the same endpoint would give it every Ethereum batch.
   let turn = Math.max(0, Math.trunc(opts.turn ?? 0));
   const scanOrder = (size = 1): string[] => {
-    const able = rotating.filter((u) => !limited.has(u) && size <= (BATCH_LIMITS[u] ?? Number.POSITIVE_INFINITY));
+    const able = rotating.filter((u) => !limited.has(u) && !offChain(u) && size <= (BATCH_LIMITS[u] ?? Number.POSITIVE_INFINITY));
     const k = able.length ? turn++ % able.length : 0;
     return [...able.slice(k), ...able.slice(0, k), ...rotating.filter((u) => !able.includes(u)), ...lastResort];
   };
@@ -224,8 +272,9 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
     const why: string[] = [];
     for (const url of scanOrder(numbers.length)) {
       const host = new URL(url).hostname;
-      if (limited.has(url)) {
-        why.push(`${host}: HTTP 429 earlier in this run`);
+      const held = limited.get(url) ?? offChain(url);
+      if (held) {
+        why.push(held);
         continue;
       }
       if (timeLeft(deadline) < 150) {
@@ -233,10 +282,9 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
         break;
       }
       if (numbers.length > (BATCH_LIMITS[url] ?? Number.POSITIVE_INFINITY)) continue;
-      const answer = await postBatch(doFetch, url, numbers.map((b) => ({ method: "eth_getBlockByNumber", params: [`0x${b.toString(16)}`, true] })), timeLeft(deadline), (reason) => {
-        why.push(`${host}: ${reason}`);
-        if (reason === "HTTP 429") limited.add(url);
-      });
+      if (!(await checkChain(url, timeLeft(deadline), why)) || timeLeft(deadline) < 150) continue;
+      const budget = timeLeft(deadline);
+      const answer = await postBatch(doFetch, url, numbers.map((b) => ({ method: "eth_getBlockByNumber", params: [`0x${b.toString(16)}`, true] })), budget, (reason) => failed(url, reason, budget, why));
       const blocks = (answer?.results ?? []) as Array<RawBlock | undefined>;
       if (answer && numbers.every((b, i) => Array.isArray(blocks[i]?.transactions) && Number.parseInt(blocks[i]?.number ?? "", 16) === b)) return { blocks: blocks as RawBlock[], bytes: answer.bytes };
       if (answer) why.push(`${host}: incomplete`);
@@ -256,7 +304,7 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
         fetched = await fetchBlocks(numbers);
       } catch (err) {
         // A single block, or every endpoint rate-limited: a smaller request would fare no better.
-        if (numbers.length === 1 || scanUrls.every((u) => limited.has(u))) throw err;
+        if (numbers.length === 1 || scanUrls.every((u) => limited.has(u) || offChain(u))) throw err;
         ceiling = Math.max(1, Math.floor(numbers.length / 2));
         blockBatch = ceiling;
         continue;

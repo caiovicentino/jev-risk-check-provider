@@ -623,28 +623,25 @@ const B58_SECRET_RE = new RegExp(`(?<![${B58}])[${B58}]{85,90}(?![${B58}])`, "gu
 const WIF_RE = new RegExp(`(?<![${B58}])[5KL][${B58}]{50,51}(?![${B58}])`, "gu");
 const XPRV_RE = new RegExp(`(?<![${B58}])[xtyz]prv[${B58}]{100,108}(?![${B58}])`, "gu");
 const JWT_RE = /eyJ[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}/gu;
-// A seed phrase in another wordlist, or an English one with a word mistyped: 12+ words of 3-9 Latin
-// letters (Italian's run to 9; Spanish and French have accents: text is compared in NFC), lowercase
-// but for the first word's first letter, apart by up to 8 spaces (a no-break or ideographic space, a
-// line break and its indent), commas, hyphens, quotes (a JSON array) or invisible characters such as
-// a zero-width space, and numbered or not (1. abandon 2. ability …). The 2026-11-09 change had
-// dropped the capital, the hyphen and the numbering; indents past 4, JSON arrays and accented words
-// never matched (2026-11-10 review). Title Case is left out: a list of names would match, and so
-// would an instruction written in it. A run holding an English word no wordlist has
-// (the, and, with …) is prose and stays: redacting it would hide an instruction from the injection
-// check (2026-11-09 review). An English phrase is told by its words instead (redactWordlistPhrases),
-// however it is written.
+// A seed phrase in another wordlist, or an English one with a word mistyped, is told by its shape
+// (`redactShapedPhrases`): 12 or more words of 3-9 Latin letters (Italian's run to 9; Spanish and
+// French have accents: text is compared in NFC), in any case, numbered or not, apart by up to 16
+// characters. A gap with no space in it links two words only by commas, hyphens and quotes (a JSON
+// array, `1-abaco`), so the parts of a URL or a file name are no phrase. An English word no wordlist
+// has (the, and, with …) ends a run, and what is before or after it is still redacted when it holds
+// a phrase: a run holding one was kept whole, phrase included (2026-11-11 review). That review also
+// found the 2026-11-10 shape (lowercase but for the first letter, a few separators, numbered `1.`)
+// let a phrase through in capitals, numbered `(1)` or `#1`, apart by `;`, `/`, `|` or bullets, in
+// columns, or cut by the input cap. Redacting more costs little: a list of 12 names, or an
+// instruction made only of such words, is redacted with it, as the English rule's own limit is.
 const LATIN = "A-Za-z\\u{C0}-\\u{D6}\\u{D8}-\\u{F6}\\u{F8}-\\u{FF}";
-const LATIN_LOWER = "a-z\\u{DF}-\\u{F6}\\u{F8}-\\u{FF}";
-const PHRASE_SPACE = "\\s\\p{Default_Ignorable_Code_Point}\\u{FFF9}-\\u{FFFB}";
-const MNEMONIC_RE = new RegExp(
-  `(?<![${LATIN}])[${LATIN}][${LATIN_LOWER}]{2,8}(?:[${PHRASE_SPACE},\\-"']{1,8}(?:\\d{1,2}[.):][${PHRASE_SPACE}]{0,3})?[${LATIN_LOWER}]{3,9}){11,23}(?![${LATIN}])`,
-  "gu",
+const SHAPED_WORD_RE = new RegExp(`^[${LATIN}]{3,9}$`, "u");
+const PROSE_WORDS: ReadonlySet<string> = new Set(
+  "the and with from has had are was were would your for not but them their than which who why how its our his her she him been being does did should could may shall these those some each every here while after onto via per".split(" "),
 );
-const PROSE_WORD_RE = new RegExp(
-  `(?<![${LATIN}])(?:the|and|with|from|has|had|are|was|were|would|your|for|not|but|them|their|than|which|who|why|how|its|our|his|her|she|him|been|being|does|did|should|could|may|shall|these|those|some|each|every|here|while|after|onto|via|per)(?![${LATIN}])`,
-  "iu",
-);
+// Spaces, and what draws nothing, between two words of a phrase.
+const SPACE_LIKE_RE = /[\s\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]/u;
+const TIGHT_GAP_RE = /^[,\-"']+$/u;
 // Inside a word these are skipped (they draw nothing, or are controls); tab, CR and LF separate.
 const HIDDEN_IN_WORD_RE = /[\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}\u{0}-\u{8}\u{B}\u{C}\u{E}-\u{1F}\u{7F}-\u{9F}]/u;
 /** BIP-39 words in a row that make a phrase; at the end of a cut excerpt, fewer (the rest is past the cut). */
@@ -652,20 +649,6 @@ const PHRASE_WORDS = 12;
 const PHRASE_WORDS_AT_CUT = 6;
 /** The most characters between two words of one phrase: numbering, punctuation, a line break and its indent. */
 const PHRASE_GAP = 16;
-/**
- * Whether the gap before a word ends a sentence: a full stop, a question or exclamation mark and a
- * space before a capital ("now. Ignore"), or a label's colon ("Agent: approve"), with no number in
- * it. Sentences made only of wordlist words are prose, and redacting them hid an instruction from
- * the injection check (2026-11-10 review); a phrase apart by dots or semicolons, or numbered
- * (`7. ignore`), still runs on.
- *
- * @param gap - The characters between the two words.
- * @param next - The first character of the word after it.
- * @returns True when the gap ends a sentence.
- */
-function endsSentence(gap: string, next: string): boolean {
-  return !/\d/u.test(gap) && (/:\s/u.test(gap) || (/[.!?]\s/u.test(gap) && /[A-Z]/u.test(next)));
-}
 const LONG_ENCODED_RE = /[A-Za-z0-9+/=_-]{120,8192}/gu;
 
 /** How many BIP-39 English words the letters are, alone or run together (0: not only such words). */
@@ -684,28 +667,78 @@ function bip39Words(letters: string): number {
   return Math.max(0, most[letters.length] as number);
 }
 
+/** How a kind of phrase is told: its words, what each counts for, and what may stand between two. */
+type PhraseRule = {
+  /** A letter of a word. */
+  letter: RegExp;
+  /** Whether a hidden character inside a word is skipped; otherwise it separates two words. */
+  hiddenInWord: boolean;
+  /** How many words of a phrase the word (lower-cased) is; 0 ends the run. */
+  count: (letters: string) => number;
+  /** Whether the characters between two words keep them in one run. */
+  links: (gap: string) => boolean;
+  /** Whether the words after the first must all be written in one case: lower, capitals, or capitalised. */
+  oneCase?: boolean;
+};
+
+/** How a word is written: "lower", "upper", "title" (a capital, then lower case) or "mixed". */
+function caseOf(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (raw === lower) return "lower";
+  if (raw === raw.toUpperCase()) return "upper";
+  const [head = "", ...rest] = [...raw];
+  return head !== head.toLowerCase() && rest.join("") === lower.slice(lower.length - rest.join("").length) ? "title" : "mixed";
+}
+
 /**
- * Redacts a seed phrase of the BIP-39 English wordlist however it is written: in any case, numbered
- * or not, apart by any short run of spaces, line breaks or punctuation (a JSON array, `1 - abandon`;
- * not a sentence's end: `endsSentence`),
- * with invisible or control characters inside its words or as their only separator. A phrase at the
- * end of a cut excerpt is redacted from fewer words: the cut may have taken the rest.
+ * A seed phrase of the BIP-39 English wordlist, however it is written: in any case, numbered or not,
+ * apart by any short run of spaces, line breaks or punctuation (a JSON array, `1 - abandon`, a
+ * sentence's full stop: the 2026-11-10 exception for sentences let a phrase typed with iOS's double
+ * space through, 2026-11-11 review), with invisible or control characters inside its words or as
+ * their only separator.
+ */
+const ENGLISH_PHRASE: PhraseRule = {
+  letter: /[A-Za-z]/u,
+  hiddenInWord: true,
+  count: bip39Words,
+  links: (gap) => gap.length <= PHRASE_GAP,
+};
+
+/**
+ * A phrase of another wordlist, or an English one with a word mistyped, told by its shape (see
+ * SHAPED_WORD_RE). Its words share one case after the first: prose mixes them (a sentence's
+ * capital, a name, an acronym), and 47 of 3,843 Markdown paragraphs lost text without this rule.
+ */
+const SHAPED_PHRASE: PhraseRule = {
+  letter: /[\p{L}\p{M}]/u,
+  hiddenInWord: false,
+  count: (letters) => (SHAPED_WORD_RE.test(letters) && !PROSE_WORDS.has(letters) ? 1 : 0),
+  links: (gap) => gap.length <= PHRASE_GAP && (SPACE_LIKE_RE.test(gap) || TIGHT_GAP_RE.test(gap)),
+  oneCase: true,
+};
+
+/**
+ * Redacts each run of words that makes a phrase by `rule`. A phrase at the end of a cut excerpt is
+ * redacted from fewer words: the cut may have taken the rest.
  *
  * @param text - Untrusted text (already size-capped).
  * @param cut - Whether the text was cut at its end.
+ * @param rule - How the phrase is told.
  * @returns The text with each phrase replaced by the marker.
  */
-function redactWordlistPhrases(text: string, cut: boolean): string {
-  // Words: runs of ASCII letters, lower-cased, skipping hidden characters inside them.
-  const words: Array<{ start: number; end: number; letters: string }> = [];
-  let word: { start: number; end: number; letters: string } | undefined;
+function redactPhrases(text: string, cut: boolean, rule: PhraseRule): string {
+  // Words: runs of letters, lower-cased, skipping hidden characters inside them if the rule says so.
+  type Word = { start: number; end: number; letters: string; raw: string };
+  const words: Word[] = [];
+  let word: Word | undefined;
   for (let i = 0; i < text.length; ) {
     const char = String.fromCodePoint(text.codePointAt(i) as number);
-    if (/[A-Za-z]/u.test(char)) {
-      word ??= { start: i, end: i, letters: "" };
+    if (rule.letter.test(char)) {
+      word ??= { start: i, end: i, letters: "", raw: "" };
       word.letters += char.toLowerCase();
-      word.end = i + 1;
-    } else if (!word || !HIDDEN_IN_WORD_RE.test(char)) {
+      word.raw += char;
+      word.end = i + char.length;
+    } else if (!word || !rule.hiddenInWord || !HIDDEN_IN_WORD_RE.test(char)) {
       if (word) words.push(word);
       word = undefined;
     }
@@ -715,22 +748,43 @@ function redactWordlistPhrases(text: string, cut: boolean): string {
   const spans: Array<[number, number]> = [];
   let first = -1;
   let count = 0;
+  // The case of the run's words after its first (oneCase).
+  let runCase: string | undefined;
   const close = (last: number, atEnd: boolean) => {
     if (first >= 0 && (count >= PHRASE_WORDS || (atEnd && count >= PHRASE_WORDS_AT_CUT))) spans.push([(words[first] as { start: number }).start, (words[last] as { end: number }).end]);
   };
   for (let j = 0; j < words.length; j++) {
-    const current = words[j] as { start: number; end: number; letters: string };
-    const n = bip39Words(current.letters);
-    // A word the cut went through belongs to the phrase before it.
+    const current = words[j] as Word;
+    const style = caseOf(current.raw);
+    const n = rule.oneCase && style === "mixed" ? 0 : rule.count(current.letters);
+    // A word the cut went through belongs to the phrase before it, whatever its case.
     const cutWord = cut && current.end === text.length;
-    const gap = first >= 0 ? text.slice((words[j - 1] as { end: number }).end, current.start) : "";
-    if ((n || cutWord) && first >= 0 && gap.length <= PHRASE_GAP && !endsSentence(gap, text.charAt(current.start))) {
+    const gap = first >= 0 ? text.slice((words[j - 1] as Word).end, current.start) : "";
+    // A capital after a full stop or a colon starts a sentence: a phrase written as sentences, or
+    // capitalised after its label, is one run. The case is set by the first word after the run's
+    // first that does not start a sentence.
+    const sentenceStart = style === "title" && /[.!?:]/u.test(gap);
+    const sameCase = !rule.oneCase || cutWord || runCase === undefined || style === runCase || (sentenceStart && runCase === "lower");
+    if ((n || cutWord) && first >= 0 && rule.links(gap) && sameCase) {
+      if (runCase === undefined && !cutWord && !sentenceStart) runCase = style;
       count += n;
       continue;
     }
+    // Only the case changed: the phrase may start at the word before, capitalised after a label
+    // (`backup Abaco armonía …`), unless that word ends a phrase already redacted.
+    const previous = words[j - 1] as Word;
+    const restart = n > 0 && first >= 0 && j > first && rule.links(gap) && rule.count(previous.letters) > 0 && caseOf(previous.raw) !== "mixed";
+    const redacted = spans.length;
     close(j - 1, false);
+    if (restart && spans.length === redacted) {
+      first = j - 1;
+      count = rule.count(previous.letters) + n;
+      runCase = sentenceStart ? undefined : style;
+      continue;
+    }
     first = n ? j : -1;
     count = n;
+    runCase = undefined;
   }
   close(words.length - 1, cut && words.length > 0 && text.length - (words[words.length - 1] as { end: number }).end <= PHRASE_GAP);
   let out = text;
@@ -771,17 +825,15 @@ export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText 
   const truncated = input.length > maxInput;
   const capped = wellFormed(truncated ? headOf(input, maxInput).replace(PARTIAL_EMOJI_END_RE, "") : input);
   // An emoji's own parts are not hidden text: tested without them.
+  const redactShaped = (text: string) => redactPhrases(text, truncated, SHAPED_PHRASE);
   const hadInvisible = INVISIBLE_RE.test(capped.replace(IGNORABLE_GLOBAL_RE, (part, emoji?: string) => (emoji ? "" : part)));
-  const otherWordlist = (run: string) => (PROSE_WORD_RE.test(run) ? run : REDACTED);
   const text = redactSecrets(
     // In NFC, an accented letter is one character (a wordlist written decomposed matches too).
-    redactWordlistPhrases(capped.normalize("NFC"), truncated)
-      .replace(CONTROL_RE, " ")
+    redactShaped(
       // Before the invisible characters go (words a zero-width space keeps apart are still a phrase),
       // and after (one inside a word split it in two).
-      .replace(MNEMONIC_RE, otherWordlist)
-      .replace(IGNORABLE_GLOBAL_RE, "$1")
-      .replace(MNEMONIC_RE, otherWordlist),
+      redactShaped(redactPhrases(capped.normalize("NFC"), truncated, ENGLISH_PHRASE).replace(CONTROL_RE, " ")).replace(IGNORABLE_GLOBAL_RE, "$1"),
+    ),
   )
     .replace(LONG_ENCODED_RE, "[long encoded data]")
     .replace(/\s+/gu, " ")
