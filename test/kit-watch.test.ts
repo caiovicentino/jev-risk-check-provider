@@ -12,6 +12,7 @@ import { validateRequest } from "../src/validate.js";
 import type { JevLike } from "../src/jev.js";
 import type { Answer, RiskCheckRequest } from "../src/types.js";
 import { KW, kitWatchLookup, runKitWatch } from "../deploy/kit-watch.js";
+import { SCAN_ENDPOINTS } from "../src/rpc.js";
 import type { KVNamespace, WorkerEnv } from "../deploy/runtime.js";
 
 const hex20 = (n: number) => n.toString(16).padStart(40, "0");
@@ -274,9 +275,12 @@ test("cron: scans from the cursor, writes watch entries, cursor and stats; a lea
   kv.data.set(KW.cursor("eip155:8453"), "499");
   const a = await auth(signer, dPoison, 0);
   const block = (n: number): RawBlock => ({ number: `0x${n.toString(16)}`, timestamp: "0x10", transactions: n === 100 ? [{ hash: "0xa1", from: signer.address, to: dPoison, nonce: "0x0", type: "0x4", authorizationList: [a] }] : [] });
-  const fetchImpl = (async (_url: string, init: RequestInit) => {
+  const fetchImpl = (async (url: string, init: RequestInit) => {
     const req = JSON.parse(String(init.body));
+    // Each endpoint names its own chain (v0.6.29: one that names none serves no block).
+    const chainId = (SCAN_ENDPOINTS["eip155:8453"] ?? []).includes(url) ? "0x2105" : "0x1";
     const answer = (r: { id: number; method: string; params: unknown[] }) => {
+      if (r.method === "eth_chainId") return { id: r.id, result: chainId };
       if (r.method === "eth_blockNumber") return { id: r.id, result: "0x200" };
       if (r.method === "eth_getBlockByNumber") return { id: r.id, result: block(Number.parseInt(r.params[0] as string, 16)) };
       if (r.method === "eth_getCode") return { id: r.id, result: r.params[0] === dPoison ? POISONER : String(r.params[0]).toLowerCase() === signer.address.toLowerCase() ? `0xef0100${dPoison.slice(2)}` : "0x" };

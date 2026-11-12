@@ -123,21 +123,20 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   // each run). Once a head is in hand, an endpoint still asked gets `headGraceMs` more, not the
   // whole timeout (the third one too: 2026-11-10 review). A stale endpoint that answers at once
   // therefore wins over a current one slower than the grace: that run scans nothing, and the next
-  // asks two others. An endpoint that names another chain is no answer (the chain id rides with the
-  // head), and a head past the chain is caught where it could do harm: the cron skips ahead only to
-  // a block that an endpoint other than the head's serves (`confirm`).
+  // asks two others. An endpoint that names another chain, or none, is no answer (the chain id rides
+  // with the head), and a head past the chain is caught where it could do harm: the cron skips ahead
+  // only to a block that an endpoint other than the head's serves (`confirm`).
   const headGraceMs = opts.headGraceMs ?? 3000;
   // The endpoints whose answer was the last head (the highest).
   let headFrom: string[] = [];
   const head = async (): Promise<number> => {
     const order = scanOrder();
-    // The chain id rides in the same request: a head from another chain is no answer.
+    // The chain id rides in the same request: a head from another chain, or from one that names none, is no answer.
     const ask = async (url: string, budgetMs = timeoutMs): Promise<number> => {
       let failure = "no answer";
       const answer = await postBatch(doFetch, url, [{ method: "eth_chainId", params: [] }, { method: "eth_blockNumber", params: [] }], budgetMs, (reason) => void (failure = reason));
       if (!answer) throw new Error(`${new URL(url).hostname}: ${failure}`);
-      chainAnswered.add(url);
-      learnChain(url, answer.results[0]);
+      if (!learnChain(url, answer.results[0])) throw new Error(`${new URL(url).hostname}: names no chain`);
       const other = offChain(url);
       if (other) throw new Error(other);
       const n = Number.parseInt(String(answer.results[1] ?? ""), 16);
@@ -233,25 +232,30 @@ export function kitWatchRpc(chain: WatchChain, opts: { fetchImpl?: typeof fetch;
   // What each endpoint says its chain is, asked once a run (with the head, or before its first
   // blocks). One routed to another chain answers that chain's head and blocks alike: its blocks were
   // scanned as this chain's, and on a chain's first run its head set the cursor (2026-11-11 review).
-  // One that names another chain is not asked again in the run; one that names none is not held back.
-  // One that does not answer is asked again at its next turn, and that turn goes to the next endpoint.
+  // One that names another chain is not asked again in the run. One that does not answer, or names
+  // no chain (an error, null, not a number), is asked again at its next turn, and that turn goes to
+  // the next endpoint: one on another chain that answered the chain id with an error was taken as
+  // checked for the whole run, and its blocks scanned as this chain's (2026-11-12 review).
   const chainNumber = Number(chain.slice(chain.indexOf(":") + 1));
   const chainOf = new Map<string, number>();
-  const learnChain = (url: string, result: unknown) => {
-    const id = typeof result === "string" ? Number.parseInt(result, 16) : Number.NaN;
-    if (Number.isSafeInteger(id)) chainOf.set(url, id);
+  const learnChain = (url: string, result: unknown): boolean => {
+    const id = typeof result === "string" && /^0x[0-9a-f]{1,16}$/iu.test(result) ? Number.parseInt(result, 16) : Number.NaN;
+    if (!Number.isSafeInteger(id)) return false;
+    chainOf.set(url, id);
+    return true;
   };
   const offChain = (url: string): string | undefined => {
     const id = chainOf.get(url);
     return id !== undefined && id !== chainNumber ? `${new URL(url).hostname}: serves chain ${id}` : undefined;
   };
-  const chainAnswered = new Set<string>();
   const checkChain = async (url: string, budgetMs: number, why: string[]): Promise<boolean> => {
-    if (!chainAnswered.has(url)) {
+    if (!chainOf.has(url)) {
       const answer = await postBatch(doFetch, url, [{ method: "eth_chainId", params: [] }], budgetMs, (reason) => failed(url, reason, budgetMs, why));
       if (!answer) return false;
-      chainAnswered.add(url);
-      learnChain(url, answer.results[0]);
+      if (!learnChain(url, answer.results[0])) {
+        why.push(`${new URL(url).hostname}: names no chain`);
+        return false;
+      }
     }
     const other = offChain(url);
     if (other) why.push(other);

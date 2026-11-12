@@ -160,7 +160,11 @@ export function decodePersonalSign(data: unknown, signerAddress?: unknown, origi
     if (siweHost && !hosts.includes(siweHost)) hosts.unshift(siweHost);
   }
   const addresses = extractAddresses(text, [signer, siwe?.address]);
-  const excerpt = capText(scalarJson(text) ?? clean.text, MAX_EXCERPT);
+  const json = scalarJson(text);
+  const excerpt = capText(json?.text ?? clean.text, MAX_EXCERPT);
+  // What a redacted phrase held is hidden from the injection check: its presence is told instead.
+  // A message to sign never needs a seed phrase (2026-11-12 review).
+  if (clean.hadPhrase || json?.hadPhrase) warnings.push("the message holds what looks like a seed phrase (redacted here): no message to sign needs one");
   const kind = siwe ? "Sign-In with Ethereum message" : "personal_sign message";
   const length = Array.from(text.length > MAX_TEXT_BYTES ? text.slice(0, MAX_TEXT_BYTES) : text).length;
   const hostNote = hosts.length > 0 ? ` Message references: ${hosts.slice(0, 3).join(", ")}.` : "";

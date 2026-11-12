@@ -626,8 +626,10 @@ const JWT_RE = /eyJ[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2,4096}\.[A-Za-z0-9_-]{2
 // A seed phrase in another wordlist, or an English one with a word mistyped, is told by its shape
 // (`redactShapedPhrases`): 12 or more words of 3-9 Latin letters (Italian's run to 9; Spanish and
 // French have accents: text is compared in NFC), in any case, numbered or not, apart by up to 16
-// characters. A gap with no space in it links two words only by commas, hyphens and quotes (a JSON
-// array, `1-abaco`), so the parts of a URL or a file name are no phrase. An English word no wordlist
+// characters (a line's indent not counted). A gap with no space in it links two words only by list
+// separators, quotes, dashes, bullets and arrows (a JSON array, `1-abaco`, a European CSV,
+// `abaco|abete`), so the parts of a URL, a path or a name (`build:release`, `API_KEY`) are no
+// phrase. Markers of one or two letters (1st, a), <li>) are part of the gap. An English word no wordlist
 // has (the, and, with …) ends a run, and what is before or after it is still redacted when it holds
 // a phrase: a run holding one was kept whole, phrase included (2026-11-11 review). That review also
 // found the 2026-11-10 shape (lowercase but for the first letter, a few separators, numbered `1.`)
@@ -641,7 +643,11 @@ const PROSE_WORDS: ReadonlySet<string> = new Set(
 );
 // Spaces, and what draws nothing, between two words of a phrase.
 const SPACE_LIKE_RE = /[\s\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}]/u;
-const TIGHT_GAP_RE = /^[,\-"']+$/u;
+// What links two words with no space between them: list separators, quotes (typographic ones too),
+// dashes, bullets and arrows. Not what joins the parts of a URL, a path, a name (`build:release`) or code.
+const TIGHT_GAP_RE = /^[,;|+\-"'\u{2018}\u{2019}\u{201A}\u{201C}\u{201D}\u{201E}\u{AB}\u{BB}\u{2013}\u{2014}\u{B7}\u{2022}\u{2192}]+$/u;
+/** A gap's length, a line's indent not counted: JSON pretty-printed four deep put a phrase's words 20 apart (2026-11-12 review). */
+const gapLength = (gap: string): number => gap.replace(/(?<=[\n\r\u{2028}\u{2029}])[ \t]+/gu, "").length;
 // Inside a word these are skipped (they draw nothing, or are controls); tab, CR and LF separate.
 const HIDDEN_IN_WORD_RE = /[\p{Default_Ignorable_Code_Point}\u{FFF9}-\u{FFFB}\u{0}-\u{8}\u{B}\u{C}\u{E}-\u{1F}\u{7F}-\u{9F}]/u;
 /** BIP-39 words in a row that make a phrase; at the end of a cut excerpt, fewer (the rest is past the cut). */
@@ -701,7 +707,7 @@ const ENGLISH_PHRASE: PhraseRule = {
   letter: /[A-Za-z]/u,
   hiddenInWord: true,
   count: bip39Words,
-  links: (gap) => gap.length <= PHRASE_GAP,
+  links: (gap) => gapLength(gap) <= PHRASE_GAP,
 };
 
 /**
@@ -710,26 +716,27 @@ const ENGLISH_PHRASE: PhraseRule = {
  * capital, a name, an acronym), and 47 of 3,843 Markdown paragraphs lost text without this rule.
  */
 const SHAPED_PHRASE: PhraseRule = {
-  letter: /[\p{L}\p{M}]/u,
+  // Not the ordinal indicators (1º, 1ª): each was a word of one letter that ended the run (2026-11-12 review).
+  letter: /(?![\u{AA}\u{BA}])[\p{L}\p{M}]/u,
   hiddenInWord: false,
   count: (letters) => (SHAPED_WORD_RE.test(letters) && !PROSE_WORDS.has(letters) ? 1 : 0),
-  links: (gap) => gap.length <= PHRASE_GAP && (SPACE_LIKE_RE.test(gap) || TIGHT_GAP_RE.test(gap)),
+  links: (gap) => gapLength(gap) <= PHRASE_GAP && (SPACE_LIKE_RE.test(gap) || TIGHT_GAP_RE.test(gap)),
   oneCase: true,
 };
 
 /**
- * Redacts each run of words that makes a phrase by `rule`. A phrase at the end of a cut excerpt is
- * redacted from fewer words: the cut may have taken the rest.
+ * Where the runs of words that make a phrase by `rule` are. A phrase at the end of a cut excerpt is
+ * told from fewer words: the cut may have taken the rest.
  *
  * @param text - Untrusted text (already size-capped).
  * @param cut - Whether the text was cut at its end.
  * @param rule - How the phrase is told.
- * @returns The text with each phrase replaced by the marker.
+ * @returns Each phrase's start and end, in order.
  */
-function redactPhrases(text: string, cut: boolean, rule: PhraseRule): string {
+function phraseSpans(text: string, cut: boolean, rule: PhraseRule): Array<[number, number]> {
   // Words: runs of letters, lower-cased, skipping hidden characters inside them if the rule says so.
   type Word = { start: number; end: number; letters: string; raw: string };
-  const words: Word[] = [];
+  const found: Word[] = [];
   let word: Word | undefined;
   for (let i = 0; i < text.length; ) {
     const char = String.fromCodePoint(text.codePointAt(i) as number);
@@ -739,12 +746,20 @@ function redactPhrases(text: string, cut: boolean, rule: PhraseRule): string {
       word.raw += char;
       word.end = i + char.length;
     } else if (!word || !rule.hiddenInWord || !HIDDEN_IN_WORD_RE.test(char)) {
-      if (word) words.push(word);
+      if (word) found.push(word);
       word = undefined;
     }
     i += char.length;
   }
-  if (word) words.push(word);
+  if (word) found.push(word);
+  // A marker of one or two letters is part of the gap, not a word that ends the run: an ordinal's
+  // suffix (1st, 2nd), a list's letter (a) b) c.), an HTML tag (<li>, </li>) (2026-11-12 review).
+  const marker = (w: Word) =>
+    w.raw.length <= 2 &&
+    (/[0-9]/u.test(text[w.start - 1] ?? "") ||
+      (/[)\].]/u.test(text[w.end] ?? "") && /^$|[\s([]/u.test(text[w.start - 1] ?? "")) ||
+      ((text[w.start - 1] === "<" || text.slice(w.start - 2, w.start) === "</") && text[w.end] === ">"));
+  const words = found.filter((w) => !marker(w));
   const spans: Array<[number, number]> = [];
   let first = -1;
   let count = 0;
@@ -760,10 +775,11 @@ function redactPhrases(text: string, cut: boolean, rule: PhraseRule): string {
     // A word the cut went through belongs to the phrase before it, whatever its case.
     const cutWord = cut && current.end === text.length;
     const gap = first >= 0 ? text.slice((words[j - 1] as Word).end, current.start) : "";
-    // A capital after a full stop or a colon starts a sentence: a phrase written as sentences, or
-    // capitalised after its label, is one run. The case is set by the first word after the run's
-    // first that does not start a sentence.
-    const sentenceStart = style === "title" && /[.!?:]/u.test(gap);
+    // A capital after a full stop, a colon or a line break starts a sentence: a phrase written as
+    // sentences, capitalised after its label, or one line at a time on a phone that capitalises each
+    // (2026-11-12 review), is one run. The case is set by the first word after the run's first that
+    // does not start a sentence.
+    const sentenceStart = style === "title" && /[.!?:\n\r\u{2028}\u{2029}]/u.test(gap);
     const sameCase = !rule.oneCase || cutWord || runCase === undefined || style === runCase || (sentenceStart && runCase === "lower");
     if ((n || cutWord) && first >= 0 && rule.links(gap) && sameCase) {
       if (runCase === undefined && !cutWord && !sentenceStart) runCase = style;
@@ -787,8 +803,20 @@ function redactPhrases(text: string, cut: boolean, rule: PhraseRule): string {
     runCase = undefined;
   }
   close(words.length - 1, cut && words.length > 0 && text.length - (words[words.length - 1] as { end: number }).end <= PHRASE_GAP);
+  return spans;
+}
+
+/**
+ * Redacts each run of words that makes a phrase by `rule` (see `phraseSpans`).
+ *
+ * @param text - Untrusted text (already size-capped).
+ * @param cut - Whether the text was cut at its end.
+ * @param rule - How the phrase is told.
+ * @returns The text with each phrase replaced by the marker.
+ */
+function redactPhrases(text: string, cut: boolean, rule: PhraseRule): string {
   let out = text;
-  for (const [start, end] of spans.reverse()) out = `${out.slice(0, start)}${REDACTED}${out.slice(end)}`;
+  for (const [start, end] of phraseSpans(text, cut, rule).reverse()) out = `${out.slice(0, start)}${REDACTED}${out.slice(end)}`;
   return out;
 }
 
@@ -809,7 +837,11 @@ export function redactSecrets(text: string): string {
     .replace(WIF_RE, REDACTED);
 }
 
-export type CleanText = { text: string; hadInvisible: boolean; truncated: boolean };
+/** `hadPhrase`: a run of words was redacted as a seed phrase (what it hid never reaches the injection check). */
+export type CleanText = { text: string; hadInvisible: boolean; hadPhrase: boolean; truncated: boolean };
+
+/** How many redaction markers the text holds. */
+const markers = (text: string): number => text.split(REDACTED).length - 1;
 
 /**
  * Makes untrusted text safe and compact for a one-line summary: caps its size
@@ -827,18 +859,18 @@ export function cleanText(input: string, maxInput = MAX_CLEAN_INPUT): CleanText 
   // An emoji's own parts are not hidden text: tested without them.
   const redactShaped = (text: string) => redactPhrases(text, truncated, SHAPED_PHRASE);
   const hadInvisible = INVISIBLE_RE.test(capped.replace(IGNORABLE_GLOBAL_RE, (part, emoji?: string) => (emoji ? "" : part)));
-  const text = redactSecrets(
-    // In NFC, an accented letter is one character (a wordlist written decomposed matches too).
-    redactShaped(
-      // Before the invisible characters go (words a zero-width space keeps apart are still a phrase),
-      // and after (one inside a word split it in two).
-      redactShaped(redactPhrases(capped.normalize("NFC"), truncated, ENGLISH_PHRASE).replace(CONTROL_RE, " ")).replace(IGNORABLE_GLOBAL_RE, "$1"),
-    ),
-  )
+  // In NFC, an accented letter is one character (a wordlist written decomposed matches too).
+  const nfc = capped.normalize("NFC");
+  const phrases = redactShaped(
+    // Before the invisible characters go (words a zero-width space keeps apart are still a phrase),
+    // and after (one inside a word split it in two).
+    redactShaped(redactPhrases(nfc, truncated, ENGLISH_PHRASE).replace(CONTROL_RE, " ")).replace(IGNORABLE_GLOBAL_RE, "$1"),
+  );
+  const text = redactSecrets(phrases)
     .replace(LONG_ENCODED_RE, "[long encoded data]")
     .replace(/\s+/gu, " ")
     .trim();
-  return { text, hadInvisible, truncated };
+  return { text, hadInvisible, hadPhrase: markers(phrases) > markers(nfc), truncated };
 }
 
 export function quote(text: string, max: number): string {
@@ -849,9 +881,9 @@ export function quote(text: string, max: number): string {
  * Flattens a JSON message into "path=value" pairs for a readable excerpt.
  *
  * @param text - Untrusted text.
- * @returns The flattened excerpt, or undefined when the text is not JSON.
+ * @returns The flattened excerpt, and whether it redacted a seed phrase; undefined when the text is not JSON.
  */
-export function scalarJson(text: string): string | undefined {
+export function scalarJson(text: string): { text: string; hadPhrase: boolean } | undefined {
   const trimmed = text.trim();
   if (trimmed.length > MAX_TEXT_BYTES || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return undefined;
   let parsed: unknown;
@@ -860,21 +892,46 @@ export function scalarJson(text: string): string | undefined {
   } catch {
     return undefined;
   }
-  const pairs: string[] = [];
+  // Each field's path (its keys), value, and whether the value is a string.
+  const fields: Array<{ path: string; value: string; text: boolean }> = [];
+  let hadPhrase = false;
   const walk = (value: unknown, path: string, depth: number) => {
-    if (pairs.length >= 12 || depth > 4) return;
+    if (fields.length >= 12 || depth > 4) return;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      pairs.push(`${path}=${capText(cleanText(String(value), 256).text, 48)}`);
+      const clean = cleanText(String(value), 256);
+      hadPhrase ||= clean.hadPhrase;
+      fields.push({ path, value: capText(clean.text, 48), text: typeof value === "string" });
     } else if (Array.isArray(value)) {
-      pairs.push(`${path}=[${value.length} items]`);
+      fields.push({ path, value: `[${value.length} items]`, text: false });
     } else if (isRecord(value)) {
       for (const [key, child] of Object.entries(value).slice(0, 24)) {
-        walk(child, path ? `${path}.${capText(key, 24)}` : capText(key, 24), depth + 1);
+        // Keys are untrusted text too: one could be a private key, or hide characters (2026-11-12 review).
+        const clean = cleanText(key, 256);
+        hadPhrase ||= clean.hadPhrase;
+        const name = capText(clean.text, 24);
+        walk(child, path ? `${path}.${name}` : name, depth + 1);
       }
     }
   };
   walk(parsed, "", 0);
-  return pairs.length > 0 ? `JSON message: ${pairs.join("; ")}` : "JSON message with no readable fields";
+  if (fields.length === 0) return { text: "JSON message with no readable fields", hadPhrase: false };
+  // Each value is cleaned alone, so a phrase spread over fields one word each is told only in the
+  // fields together (2026-11-12 review): in the pairs as written (`{"1":"abandon","2":"ability",
+  // …}`, or the words as keys), and an English one in the values read in a row (nested under keys
+  // that are words themselves), strings only (`true` is a word). Not another wordlist's there: a
+  // manifest's values have its shape.
+  const strings = fields.map((f) => (f.text ? f.value : ""));
+  const spans = phraseSpans(strings.join("; "), false, ENGLISH_PHRASE);
+  let at = 0;
+  const pairs = fields.map((f, i) => {
+    const [start, end] = [at, at + (strings[i] as string).length];
+    at = end + 2;
+    // A NUL (no cleaned text holds one) until the end: the marker's own words would be a phrase.
+    return `${f.path}=${f.text && spans.some(([from, to]) => from < end && to > start) ? "\u{0}" : f.value}`;
+  });
+  const joined = pairs.join("; ");
+  const told = redactPhrases(redactPhrases(joined, false, ENGLISH_PHRASE), false, SHAPED_PHRASE);
+  return { text: `JSON message: ${told.replace(/\u{0}/gu, REDACTED)}`, hadPhrase: hadPhrase || told !== joined || spans.length > 0 };
 }
 
 // ---------------------------------------------------------------------------
