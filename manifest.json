@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "generated_at": "2026-11-21T13:28:11.693Z",
+  "metamask": {
+    "as_of": "2026-11-21",
+    "commit": "d967d0342fb12721189bfd6e345c4146e813bcd8",
+    "entries": 119495,
+    "bin_sha256": "7c30ef74523d95216468cf4c2d54e9ddd8c89a4b3d97db6e6bd130ad78adec89",
+    "json_sha256": "756607dda6ecb1cdad6308226ab74debf38d3d0898d2873f8caa31bd902ba3c9"
+  },
+  "ofac": {
+    "publish_date": "2026-11-20",
+    "addresses": 1078,
+    "json_sha256": "0413cdd38194619564fa05dac12b7a3cfb39c57c1c7e00a5939710db371cb0b5",
+    "xml_sha256": "8a8e2c8b2fd2d56dcb8be01a3f82ef795f00887124fe15ed4acd6abe410135c5"
+  }
+}
